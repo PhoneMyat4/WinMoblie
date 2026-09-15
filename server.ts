@@ -32,7 +32,7 @@ import { archiveSalesData, listArchivedFiles } from './server/archiveService';
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // JSON payload parser for base64 image data (hardened 5MB limit to prevent DoS attacks)
   app.use(express.json({ limit: '5mb' }));
