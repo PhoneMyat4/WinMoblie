@@ -1,0 +1,225 @@
+{
+  "entities": {
+    "staffUser": {
+      "title": "Staff User",
+      "description": "Staff user credentials and role access configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["Owner", "Manager", "Cashier", "Inventory_Staff"] },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "active": { "type": "boolean" },
+        "avatarColor": { "type": "string" },
+        "restrictWorkingHours": { "type": "boolean" },
+        "workStartTime": { "type": "string" },
+        "workEndTime": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "username", "name", "role", "active"]
+    },
+    "product": {
+      "title": "Product",
+      "description": "Inventory product item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "brand": { "type": "string" },
+        "model": { "type": "string" },
+        "buyPrice": { "type": "number" },
+        "salePrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "minStockAlert": { "type": "number" },
+        "imeiList": { "type": "array", "items": { "type": "string" } },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "category", "salePrice", "stock"]
+    },
+    "sale": {
+      "title": "Sale Transaction",
+      "description": "Point-of-sale completed transaction invoice",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "items": { "type": "array" },
+        "totalAmount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "cashierId": { "type": "string" },
+        "cashierName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "invoiceNumber", "totalAmount", "createdAt"]
+    },
+    "purchase": {
+      "title": "Purchase Record",
+      "description": "Inventory stock purchase from supplier",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "totalCost": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "totalCost", "createdAt"]
+    },
+    "settings": {
+      "title": "Shop Settings",
+      "description": "Global store and terminal configuration",
+      "type": "object",
+      "properties": {
+        "shopName": { "type": "string" },
+        "currency": { "type": "string" },
+        "taxRate": { "type": "number" },
+        "logoUrl": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "customer": {
+      "title": "Customer",
+      "description": "Customer profiles, credit balances, and contacts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "totalSpent": { "type": "number" },
+        "outstandingCreditBalance": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "phone"]
+    },
+    "expense": {
+      "title": "Expense Record",
+      "description": "Operational and store expenses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "voucherNumber": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "voucherNumber", "amount"]
+    },
+    "auditLog": {
+      "title": "User Activity & Audit Log",
+      "description": "Chronological audit trail recording all staff logins, sales, refunds, stock adjustments, and administrative security actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "staffId": { "type": "string" },
+        "staffName": { "type": "string" },
+        "staffRole": { "type": "string" },
+        "actionType": { "type": "string" },
+        "category": { "type": "string" },
+        "severity": { "type": "string" },
+        "summary": { "type": "string" },
+        "details": { "type": "object" },
+        "clientDevice": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "staffId", "staffName", "staffRole", "actionType", "category", "severity", "summary"]
+    }
+  },
+  "firestore": {
+    "/staffUsers/{userId}": {
+      "entity": "staffUser",
+      "description": "Staff account records and role permissions"
+    },
+    "/products/{productId}": {
+      "entity": "product",
+      "description": "Store inventory items and stock details"
+    },
+    "/sales/{saleId}": {
+      "entity": "sale",
+      "description": "POS sales invoices and order transactions"
+    },
+    "/purchases/{purchaseId}": {
+      "entity": "purchase",
+      "description": "Supplier restock purchases"
+    },
+    "/customers/{customerId}": {
+      "schema": "customer",
+      "description": "Customer contact and credit balances"
+    },
+    "/suppliers/{supplierId}": {
+      "description": "Wholesale device and parts suppliers"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "expense",
+      "description": "Operational expenses"
+    },
+    "/settings/global": {
+      "entity": "settings",
+      "description": "Global shop configuration document"
+    },
+    "/announcements/{announcementId}": {
+      "description": "Store notice board announcements"
+    },
+    "/creditSales/{creditSaleId}": {
+      "description": "Customer credit accounts, installment payments, and outstanding balances"
+    },
+    "/preOrders/{preOrderId}": {
+      "description": "Customer device advance pre-orders and deposits"
+    },
+    "/stockAdjustments/{adjustmentId}": {
+      "description": "Manual inventory stock adjustments and corrections"
+    },
+    "/priceChanges/{priceChangeId}": {
+      "description": "Audit history of product price adjustments"
+    },
+    "/stockAudits/{auditId}": {
+      "description": "Physical inventory stock audit reconciliation sessions"
+    },
+    "/expenseCategories/global": {
+      "description": "Customizable expense classification categories"
+    },
+    "/rolePermissions/global": {
+      "description": "Role-based access control permission matrices"
+    },
+    "/cashDrawer/current": {
+      "description": "Cash register balance and shift cash log records"
+    },
+    "/chatChannels/{channelId}": {
+      "description": "Internal team communication channels"
+    },
+    "/chatMessages/{messageId}": {
+      "description": "Team chat internal messaging"
+    },
+    "/personalWallets/{walletId}": {
+      "description": "Store owner personal finance wallets"
+    },
+    "/personalTransactions/{txId}": {
+      "description": "Personal income, expense, and transfer records"
+    },
+    "/personalBudgets/{budgetId}": {
+      "description": "Personal spending budgets by category"
+    },
+    "/personalGoals/{goalId}": {
+      "description": "Personal savings goals and target tracking"
+    },
+    "/personalDebts/{debtId}": {
+      "description": "Personal IOU and debt tracker records"
+    },
+    "/facebookPosts/{postId}": {
+      "description": "Meta Facebook Page published promotional post records"
+    },
+    "/damageLogs/{logId}": {
+      "description": "Quarantine and RMA damage logs"
+    },
+    "/auditLogs/{logId}": {
+      "entity": "auditLog",
+      "description": "Live staff user activity and tamper-evident audit history records"
+    },
+    "/activityLogs/{logId}": {
+      "entity": "auditLog",
+      "description": "Append-only activity log records for security and compliance auditing"
+    }
+  }
+}

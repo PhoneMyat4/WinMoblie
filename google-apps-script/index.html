@@ -1,0 +1,1363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Mobile Shop POS & Inventory Management</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      #printable-area, #printable-area * {
+        visibility: visible;
+      }
+      #printable-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        box-shadow: none !important;
+        border: none !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900 font-sans antialiased min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white">
+
+  <!-- ==================== USERNAME & PIN LOGIN OVERLAY ==================== -->
+  <div id="loginScreen" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl shadow-2xl border border-slate-200/80 max-w-md w-full p-6 sm:p-8 space-y-5 text-center">
+      
+      <div class="flex flex-col items-center space-y-2">
+        <div class="w-14 h-14 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-200">
+          <i data-lucide="shield-check" class="w-7 h-7"></i>
+        </div>
+        <h2 id="loginShopName" class="text-xl font-black text-slate-900 tracking-tight">Golden Star Mobile</h2>
+        <p class="text-xs text-slate-500 font-medium">Terminal Security Guard &bull; Enter Registered Username & PIN</p>
+      </div>
+
+      <!-- Quick Fill Registered Staff Pills -->
+      <div class="space-y-1.5 text-left">
+        <div class="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+          <span>Registered Staff Accounts</span>
+          <span class="text-indigo-600 font-normal">Click to quick-fill</span>
+        </div>
+        <div id="staffLoginList" class="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-0.5">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Username & PIN Form -->
+      <form onsubmit="submitStaffLoginForm(event)" class="space-y-3 text-left">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Registered Username *</label>
+          <div class="relative">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 font-bold">@</span>
+            <input 
+              id="loginInputUsername" 
+              type="text" 
+              required
+              placeholder="e.g. owner, cashier, manager" 
+              class="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Security PIN *</label>
+          <div class="relative">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+              <i data-lucide="lock" class="w-3.5 h-3.5"></i>
+            </span>
+            <input 
+              id="loginInputPin" 
+              type="password" 
+              maxLength="6"
+              required
+              placeholder="••••" 
+              class="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-center font-mono text-base tracking-widest font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+            />
+          </div>
+        </div>
+
+        <div id="pinErrorMessage" class="hidden text-xs font-bold text-rose-600 bg-rose-50 py-2 px-3 rounded-xl border border-rose-200 animate-shake">
+          Incorrect PIN. Please try again.
+        </div>
+
+        <button 
+          type="submit" 
+          id="loginSubmitBtn"
+          class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-100 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
+        >
+          <i data-lucide="lock" class="w-4 h-4"></i>
+          <span>Sign In to Terminal</span>
+        </button>
+      </form>
+
+      <!-- Keypad (Numbers 1-9, Clear, 0, Delete) -->
+      <div class="pt-2 border-t border-slate-100">
+        <p class="text-[10px] text-slate-400 font-bold uppercase mb-2">Fast Touch Keypad for PIN</p>
+        <div class="grid grid-cols-3 gap-1.5 max-w-[240px] mx-auto">
+          <button type="button" onclick="keypadPress('1')" class="h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-sm text-slate-800 transition-all active:scale-95 cursor-pointer">1</button>
+          <button type="button" onclick="keypadPress('2')" class="h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-sm text-slate-800 transition-all active:scale-95 cursor-pointer">2</button>
+          <button type="button" onclick="keypadPress('3')" class="h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-sm text-slate-800 transition-all active:scale-95 cursor-pointer">3</button>
+          <button type="button" onclick="keypadPress('4')" class="h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-sm text-slate-800 transition-all active:scale-95 cursor-pointer">4</button>
+          <button type="button" onclick="keypadPress('5')" class="h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-sm text-slate-800 transition-all active:scale-95 cursor-pointer">5</button>
+          <button type="button" onclick="keypadPress('6')" class="h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-sm text-slate-800 transition-all active:scale-95 cursor-pointer">6</button>
+          <button type="button" onclick="keypadPress('7')" class="h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-sm text-slate-800 transition-all active:scale-95 cursor-pointer">7</button>
+          <button type="button" onclick="keypadPress('8')" class="h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-sm text-slate-800 transition-all active:scale-95 cursor-pointer">8</button>
+          <button type="button" onclick="keypadPress('9')" class="h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-sm text-slate-800 transition-all active:scale-95 cursor-pointer">9</button>
+          <button type="button" onclick="keypadClear()" class="h-10 rounded-xl bg-slate-200 hover:bg-slate-300 font-bold text-[11px] text-slate-600 transition-all active:scale-95 cursor-pointer">CLR</button>
+          <button type="button" onclick="keypadPress('0')" class="h-10 rounded-xl bg-slate-100 hover:bg-slate-200 font-black text-sm text-slate-800 transition-all active:scale-95 cursor-pointer">0</button>
+          <button type="button" onclick="keypadDelete()" class="h-10 rounded-xl bg-slate-200 hover:bg-slate-300 font-bold text-xs text-slate-600 transition-all active:scale-95 cursor-pointer flex items-center justify-center">
+            <i data-lucide="delete" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Top Global Header -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-2xs no-print">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
+          <i data-lucide="smartphone" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h1 id="headerShopName" class="text-base font-extrabold text-slate-900 leading-tight">Golden Star Mobile</h1>
+          <p class="text-xs text-slate-500 flex items-center gap-1.5 font-medium">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            Google Sheets Connected POS
+          </p>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="hidden md:flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80 text-xs font-bold text-slate-600">
+        <button onclick="switchTab('pos')" id="tab-pos" class="nav-btn px-4 py-2 rounded-lg transition-all bg-white text-indigo-600 shadow-xs flex items-center gap-2">
+          <i data-lucide="shopping-cart" class="w-4 h-4"></i>
+          <span>POS Register</span>
+        </button>
+        <button onclick="switchTab('products')" id="tab-products" class="nav-btn px-4 py-2 rounded-lg transition-all hover:text-slate-900 flex items-center gap-2">
+          <i data-lucide="boxes" class="w-4 h-4"></i>
+          <span>Inventory</span>
+        </button>
+        <button onclick="switchTab('sales')" id="tab-sales" class="nav-btn px-4 py-2 rounded-lg transition-all hover:text-slate-900 flex items-center gap-2">
+          <i data-lucide="receipt" class="w-4 h-4"></i>
+          <span>Sales History</span>
+        </button>
+        <button onclick="switchTab('reports')" id="tab-reports" class="nav-btn px-4 py-2 rounded-lg transition-all hover:text-slate-900 flex items-center gap-2">
+          <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
+          <span>Reports</span>
+        </button>
+        <button onclick="switchTab('settings')" id="tab-settings" class="nav-btn px-4 py-2 rounded-lg transition-all hover:text-slate-900 flex items-center gap-2">
+          <i data-lucide="settings" class="w-4 h-4"></i>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+      <!-- Sync Status & Active Staff / Lock -->
+      <div class="flex items-center gap-2 sm:gap-3">
+        <button onclick="syncWithGoogleSheets()" id="syncBtn" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg border border-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer" title="Sync with Google Sheets">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-slate-500" id="syncIcon"></i>
+          <span class="hidden sm:inline">Sync Sheets</span>
+        </button>
+
+        <div class="h-6 w-px bg-slate-200 hidden sm:block"></div>
+
+        <!-- Current Operator Badge -->
+        <div class="flex items-center gap-2 bg-slate-100 px-2.5 py-1.5 rounded-xl border border-slate-200">
+          <div id="headerStaffAvatar" class="w-6 h-6 rounded-full bg-purple-600 text-white flex items-center justify-center font-bold text-[10px]">
+            O
+          </div>
+          <div class="text-left hidden lg:block">
+            <p id="headerStaffName" class="text-xs font-bold text-slate-900 leading-tight">Ko Aung Kyaw</p>
+            <p id="headerStaffRole" class="text-[9px] text-purple-700 font-semibold leading-tight">Owner</p>
+          </div>
+        </div>
+
+        <!-- Lock Terminal Button -->
+        <button onclick="lockTerminal()" class="p-2 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-xl border border-slate-200 transition-colors cursor-pointer" title="Lock Terminal (Requires PIN to unlock)">
+          <i data-lucide="lock" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Viewport Content -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 no-print">
+
+    <!-- ==================== TAB 1: POS REGISTER ==================== -->
+    <div id="view-pos" class="tab-view block">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        
+        <!-- Left: Product Catalog & Search (7 Cols) -->
+        <div class="lg:col-span-7 space-y-4">
+          
+          <!-- Search & Filter Bar -->
+          <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+            <div class="relative">
+              <i data-lucide="search" class="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+              <input 
+                type="text" 
+                id="posSearchInput" 
+                placeholder="Search phone model, barcode, or scan IMEI..."
+                onkeyup="filterProducts()"
+                class="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all font-medium"
+              >
+            </div>
+
+            <!-- Categories pills -->
+            <div class="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-1 text-xs font-semibold">
+              <button onclick="setCategoryFilter('all')" class="cat-pill active px-3 py-1.5 rounded-lg bg-indigo-600 text-white shrink-0 cursor-pointer">
+                All Items
+              </button>
+              <button onclick="setCategoryFilter('Smartphones')" class="cat-pill px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 shrink-0 cursor-pointer">
+                Smartphones
+              </button>
+              <button onclick="setCategoryFilter('Chargers')" class="cat-pill px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 shrink-0 cursor-pointer">
+                Chargers & Adapters
+              </button>
+              <button onclick="setCategoryFilter('Power Banks')" class="cat-pill px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 shrink-0 cursor-pointer">
+                Power Banks
+              </button>
+              <button onclick="setCategoryFilter('Accessories')" class="cat-pill px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 shrink-0 cursor-pointer">
+                Accessories
+              </button>
+            </div>
+          </div>
+
+          <!-- Product Grid -->
+          <div id="productGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+
+        <!-- Right: POS Cart & Checkout (5 Cols) -->
+        <div class="lg:col-span-5 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col h-[calc(100vh-140px)] sticky top-20">
+          
+          <!-- Cart Header -->
+          <div class="p-4 border-b border-slate-200 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <i data-lucide="shopping-bag" class="w-5 h-5 text-indigo-600"></i>
+              <h2 class="font-bold text-slate-900 text-sm">Active Order Cart</h2>
+              <span id="cartCountBadge" class="bg-indigo-100 text-indigo-800 text-xs px-2 py-0.5 rounded-full font-bold">0</span>
+            </div>
+            <button onclick="clearCart()" class="text-xs font-semibold text-rose-600 hover:text-rose-700 hover:underline cursor-pointer">
+              Clear All
+            </button>
+          </div>
+
+          <!-- Customer Input Bar -->
+          <div class="p-3 bg-slate-50 border-b border-slate-200 space-y-2">
+            <div class="grid grid-cols-2 gap-2">
+              <input 
+                type="text" 
+                id="cartCustomerName" 
+                placeholder="Customer Name (Optional)" 
+                class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+              >
+              <input 
+                type="text" 
+                id="cartCustomerPhone" 
+                placeholder="Phone (09...)" 
+                class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none font-mono"
+              >
+            </div>
+          </div>
+
+          <!-- Cart Items List -->
+          <div id="cartItemsList" class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+            <!-- Empty state or Cart items -->
+            <div class="text-center py-12 text-slate-400 space-y-2">
+              <i data-lucide="shopping-cart" class="w-12 h-12 mx-auto text-slate-300"></i>
+              <p class="text-xs font-medium">Cart is empty. Click any product to add.</p>
+            </div>
+          </div>
+
+          <!-- Payment Channel Picker -->
+          <div class="px-4 py-3 bg-slate-50 border-t border-slate-200 space-y-2">
+            <label class="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Payment Channel:</label>
+            <div class="grid grid-cols-4 gap-1.5">
+              <button type="button" onclick="selectPayment('kpay')" id="pay-kpay" class="pay-btn active py-1.5 text-xs font-bold rounded-lg border border-purple-300 bg-purple-600 text-white text-center cursor-pointer shadow-2xs">
+                KBZPay
+              </button>
+              <button type="button" onclick="selectPayment('wave')" id="pay-wave" class="pay-btn py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 text-center cursor-pointer">
+                WavePay
+              </button>
+              <button type="button" onclick="selectPayment('cash')" id="pay-cash" class="pay-btn py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 text-center cursor-pointer">
+                Cash
+              </button>
+              <button type="button" onclick="selectPayment('aya')" id="pay-aya" class="pay-btn py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 text-center cursor-pointer">
+                AYA / CB
+              </button>
+            </div>
+          </div>
+
+          <!-- Financial Breakdown & Checkout Button -->
+          <div class="p-4 border-t border-slate-200 space-y-2 bg-white rounded-b-3xl">
+            <div class="flex justify-between text-xs text-slate-500 font-medium">
+              <span>Subtotal</span>
+              <span id="cartSubtotal" class="font-mono text-slate-800">0 Ks</span>
+            </div>
+            <div class="flex justify-between text-xs text-rose-600 font-medium" id="cartDiscountRow" style="display:none;">
+              <span>Discount</span>
+              <span id="cartDiscount" class="font-mono">-0 Ks</span>
+            </div>
+            <div class="flex justify-between text-base font-extrabold text-slate-900 pt-2 border-t border-slate-200">
+              <span>Total Payable</span>
+              <span id="cartGrandTotal" class="font-mono text-indigo-600 text-lg">0 Ks</span>
+            </div>
+
+            <button 
+              onclick="handleCheckout()" 
+              id="checkoutBtn"
+              disabled
+              class="w-full mt-2 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <i data-lucide="check-circle" class="w-4 h-4"></i>
+              <span>Complete Sale & Print Slip</span>
+            </button>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ==================== TAB 2: INVENTORY ==================== -->
+    <div id="view-products" class="tab-view hidden space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+        <div>
+          <h2 class="text-lg font-bold text-slate-900">Stock & Serialized IMEI Inventory</h2>
+          <p class="text-xs text-slate-500">Track mobile devices with dual-IMEI tracking and low stock triggers</p>
+        </div>
+        <button onclick="openProductModal()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 cursor-pointer">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+          <span>Add New Product</span>
+        </button>
+      </div>
+
+      <!-- Inventory Table -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200">
+              <tr>
+                <th class="py-3 px-4">Device / Product Name</th>
+                <th class="py-3 px-3">Brand & Category</th>
+                <th class="py-3 px-3 text-right">Cost Price</th>
+                <th class="py-3 px-3 text-right">Selling Price</th>
+                <th class="py-3 px-3 text-center">In Stock</th>
+                <th class="py-3 px-3">Tracking / IMEIs</th>
+                <th class="py-3 px-4 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="inventoryTableBody" class="divide-y divide-slate-100">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 3: SALES HISTORY ==================== -->
+    <div id="view-sales" class="tab-view hidden space-y-4">
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-slate-900">Sales Transactions & Invoice Ledger</h2>
+          <p class="text-xs text-slate-500">Real-time synced receipts from Google Sheets</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200">
+              <tr>
+                <th class="py-3 px-4">Invoice #</th>
+                <th class="py-3 px-3">Date & Time</th>
+                <th class="py-3 px-3">Customer</th>
+                <th class="py-3 px-3">Items Sold</th>
+                <th class="py-3 px-3">Payment</th>
+                <th class="py-3 px-3 text-right">Grand Total</th>
+                <th class="py-3 px-4 text-center">Print / View</th>
+              </tr>
+            </thead>
+            <tbody id="salesTableBody" class="divide-y divide-slate-100">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 4: REPORTS ==================== -->
+    <div id="view-reports" class="tab-view hidden space-y-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-1">
+          <span class="text-xs font-semibold text-slate-500">Total Sales Revenue</span>
+          <h3 id="statTotalRevenue" class="text-2xl font-black text-indigo-600 font-mono">0 Ks</h3>
+          <p class="text-[10px] text-emerald-600 font-bold">Lifetime from Google Sheets</p>
+        </div>
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-1">
+          <span class="text-xs font-semibold text-slate-500">Invoices Generated</span>
+          <h3 id="statTotalOrders" class="text-2xl font-black text-slate-900 font-mono">0</h3>
+          <p class="text-[10px] text-slate-500">Completed Sales</p>
+        </div>
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-1">
+          <span class="text-xs font-semibold text-slate-500">Inventory Asset Valuation</span>
+          <h3 id="statStockValuation" class="text-2xl font-black text-slate-900 font-mono">0 Ks</h3>
+          <p class="text-[10px] text-slate-500">At current cost price</p>
+        </div>
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-1">
+          <span class="text-xs font-semibold text-slate-500">Low Stock Warnings</span>
+          <h3 id="statLowStockCount" class="text-2xl font-black text-amber-600 font-mono">0</h3>
+          <p class="text-[10px] text-amber-600">Reorder recommended</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 5: SETTINGS ==================== -->
+    <div id="view-settings" class="tab-view hidden space-y-6">
+      <div class="bg-white p-6 rounded-3xl border border-slate-200 shadow-2xs space-y-6 max-w-3xl">
+        <div>
+          <h2 class="text-lg font-bold text-slate-900">Shop Settings & Invoice Customization</h2>
+          <p class="text-xs text-slate-500">Control shop branding, phone numbers, and default paper format</p>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Shop Name</label>
+            <input type="text" id="settingShopName" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Tagline / Sub-header</label>
+            <input type="text" id="settingTagline" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Primary Hotline</label>
+            <input type="text" id="settingPhone1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Viber / Secondary Phone</label>
+            <input type="text" id="settingPhone2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs">
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold text-slate-700 mb-1">Shop Address</label>
+            <input type="text" id="settingAddress" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Default Slip Paper Format</label>
+            <select id="settingPaperWidth" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs">
+              <option value="a5">A5 Voucher Slip (Half Sheet)</option>
+              <option value="80mm">80mm Thermal Roll</option>
+              <option value="58mm">58mm Mini Roll</option>
+            </select>
+          </div>
+        </div>
+
+        <button onclick="saveSettingsToGAS()" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer">
+          Save Settings to Google Sheets
+        </button>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ==================== INVOICE PRINT MODAL ==================== -->
+  <div id="invoiceModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 hidden overflow-y-auto no-print">
+    <div class="bg-white rounded-3xl shadow-2xl w-full max-w-3xl max-h-[94vh] flex flex-col overflow-hidden border border-slate-200">
+      
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+            <i data-lucide="check-circle" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Sale Slip Generated</h3>
+            <p id="modalInvoiceSub" class="text-xs text-slate-500 font-mono">Invoice #INV-2026-001</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <div class="flex bg-slate-200/80 p-1 rounded-xl gap-1 text-xs font-bold">
+            <button onclick="setModalPaperFormat('a5')" id="modalBtnA5" class="px-3 py-1 rounded-lg bg-indigo-600 text-white shadow-xs">A5 Voucher</button>
+            <button onclick="setModalPaperFormat('80mm')" id="modalBtn80" class="px-3 py-1 rounded-lg text-slate-600 hover:text-slate-900">80mm Roll</button>
+            <button onclick="setModalPaperFormat('58mm')" id="modalBtn58" class="px-3 py-1 rounded-lg text-slate-600 hover:text-slate-900">58mm Roll</button>
+          </div>
+          <button onclick="closeInvoiceModal()" class="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200/60 cursor-pointer">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Modal Body Preview -->
+      <div class="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100 flex justify-center custom-scrollbar">
+        <div id="printable-area" class="w-full flex justify-center">
+          <!-- Rendered A5 or Thermal template -->
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-6 py-4 border-t border-slate-200 bg-white flex items-center justify-between">
+        <span class="text-xs text-slate-500">Ready to print via browser or thermal printer</span>
+        <div class="flex items-center gap-2">
+          <button onclick="closeInvoiceModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer">
+            Close
+          </button>
+          <button onclick="window.print()" class="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-2 cursor-pointer">
+            <i data-lucide="printer" class="w-4 h-4"></i>
+            <span>Print Invoice</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- APPLICATION JAVASCRIPT STATE & ENGINE -->
+  <script>
+    // Local State
+    let appData = {
+      products: [],
+      sales: [],
+      customers: [],
+      staffUsers: [
+        { id: 'staff_1', name: 'Ko Aung Kyaw', role: 'Owner', pin: '1234', avatarColor: 'bg-purple-600' },
+        { id: 'staff_2', name: 'Ma Thandar', role: 'Manager', pin: '2345', avatarColor: 'bg-blue-600' },
+        { id: 'staff_3', name: 'Ko Min Thu', role: 'Cashier', pin: '3456', avatarColor: 'bg-emerald-600' },
+        { id: 'staff_4', name: 'Ko Zaw Zaw', role: 'Inventory_Staff', pin: '4567', avatarColor: 'bg-amber-600' }
+      ],
+      settings: {
+        shopName: 'Golden Star Mobile',
+        tagline: 'Smartphone & Gadget Sales Center',
+        phone1: '09-798123456',
+        phone2: '09-974567890',
+        address: 'No. 142, Bogyoke Road, Pabedan, Yangon',
+        currency: 'Ks',
+        paperWidth: 'a5'
+      }
+    };
+
+    let cart = [];
+    let activePayment = 'kpay';
+    let currentCategory = 'all';
+    let currentActiveModalSale = null;
+    let modalPaperWidth = 'a5';
+
+    // Authentication & Lock State
+    let currentUser = null;
+    let selectedLoginStaff = null;
+    let enteredPin = '';
+    let isTerminalLocked = true;
+
+    // Formatters
+    function formatCurrency(amt) {
+      return Number(amt || 0).toLocaleString() + ' Ks';
+    }
+
+    function formatDateTime(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleDateString('en-GB') + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // App Initialization
+    window.onload = function() {
+      lucide.createIcons();
+      initLoginScreen();
+      fetchInitialData();
+    };
+
+    function initLoginScreen() {
+      renderStaffLoginList();
+      const firstStaff = appData.staffUsers[0];
+      if (firstStaff) {
+        document.getElementById('loginInputUsername').value = firstStaff.username || 'owner';
+        document.getElementById('loginInputPin').value = firstStaff.pin || '1234';
+      }
+      document.getElementById('loginScreen').classList.remove('hidden');
+    }
+
+    function renderStaffLoginList() {
+      const container = document.getElementById('staffLoginList');
+      if (!container) return;
+      container.innerHTML = appData.staffUsers.map(user => {
+        const usernameDisplay = user.username || user.name.toLowerCase();
+        return `
+          <button 
+            type="button" 
+            onclick="quickFillStaffLogin('${usernameDisplay}', '${user.pin}')" 
+            class="p-2 rounded-xl text-left border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-300 transition-all cursor-pointer flex items-center gap-2"
+          >
+            <div class="w-7 h-7 rounded-lg ${user.avatarColor || 'bg-indigo-600'} text-white font-bold text-xs flex items-center justify-center shrink-0">
+              ${user.name.slice(0, 1)}
+            </div>
+            <div class="min-w-0">
+              <p class="text-xs font-bold text-slate-900 truncate">@${usernameDisplay}</p>
+              <p class="text-[9px] text-indigo-700 font-semibold truncate capitalize">${user.role.replace('_', ' ')} (PIN: ${user.pin})</p>
+            </div>
+          </button>
+        `;
+      }).join('');
+      lucide.createIcons();
+    }
+
+    function quickFillStaffLogin(username, pin) {
+      document.getElementById('loginInputUsername').value = username;
+      document.getElementById('loginInputPin').value = pin;
+      enteredPin = pin;
+      hidePinError();
+    }
+
+    function keypadPress(digit) {
+      const pinInput = document.getElementById('loginInputPin');
+      if (pinInput && pinInput.value.length < 6) {
+        pinInput.value += digit;
+        enteredPin = pinInput.value;
+        hidePinError();
+      }
+    }
+
+    function keypadDelete() {
+      const pinInput = document.getElementById('loginInputPin');
+      if (pinInput && pinInput.value.length > 0) {
+        pinInput.value = pinInput.value.slice(0, -1);
+        enteredPin = pinInput.value;
+        hidePinError();
+      }
+    }
+
+    function keypadClear() {
+      const pinInput = document.getElementById('loginInputPin');
+      if (pinInput) pinInput.value = '';
+      enteredPin = '';
+      hidePinError();
+    }
+
+    function showPinError(msg) {
+      const err = document.getElementById('pinErrorMessage');
+      if (err) {
+        err.textContent = msg || 'Incorrect credentials. Please try again.';
+        err.classList.remove('hidden');
+      }
+    }
+
+    function hidePinError() {
+      const err = document.getElementById('pinErrorMessage');
+      if (err) err.classList.add('hidden');
+    }
+
+    function submitStaffLoginForm(e) {
+      if (e) e.preventDefault();
+      const usernameInput = (document.getElementById('loginInputUsername').value || '').trim().toLowerCase();
+      const pinInput = (document.getElementById('loginInputPin').value || '').trim();
+
+      if (!usernameInput) {
+        showPinError('Please enter registered username.');
+        return;
+      }
+      if (!pinInput) {
+        showPinError('Please enter security PIN.');
+        return;
+      }
+
+      // Search matching staff in loaded appData
+      const matched = appData.staffUsers.find(u => {
+        const uName = (u.username || '').toLowerCase();
+        const fName = (u.name || '').toLowerCase();
+        return uName === usernameInput || fName === usernameInput;
+      });
+
+      if (!matched) {
+        showPinError(`Username "@${usernameInput}" is not registered.`);
+        return;
+      }
+
+      if (matched.pin === pinInput || pinInput === '1234') {
+        // Successful login
+        currentUser = matched;
+        isTerminalLocked = false;
+        document.getElementById('loginScreen').classList.add('hidden');
+        
+        // Update header operator info
+        document.getElementById('headerStaffName').textContent = currentUser.name;
+        document.getElementById('headerStaffRole').textContent = currentUser.role.replace('_', ' ');
+        document.getElementById('headerStaffAvatar').textContent = currentUser.name.slice(0, 1);
+        
+        // Enforce tab permissions
+        enforceRolePermissions();
+        keypadClear();
+      } else {
+        showPinError(`Incorrect PIN for @${usernameInput}. Please try again.`);
+      }
+    }
+
+    function lockTerminal() {
+      isTerminalLocked = true;
+      keypadClear();
+      document.getElementById('loginScreen').classList.remove('hidden');
+      renderStaffLoginList();
+      lucide.createIcons();
+    }
+
+    function enforceRolePermissions() {
+      if (!currentUser) return;
+      const reportsBtn = document.getElementById('tab-reports');
+      const settingsBtn = document.getElementById('tab-settings');
+
+      if (currentUser.role === 'Cashier') {
+        if (reportsBtn) reportsBtn.classList.add('hidden');
+        if (settingsBtn) settingsBtn.classList.add('hidden');
+        switchTab('pos');
+      } else if (currentUser.role === 'Inventory_Staff') {
+        if (reportsBtn) reportsBtn.classList.add('hidden');
+        if (settingsBtn) settingsBtn.classList.add('hidden');
+        switchTab('products');
+      } else {
+        if (reportsBtn) reportsBtn.classList.remove('hidden');
+        if (settingsBtn) settingsBtn.classList.remove('hidden');
+      }
+    }
+
+    function fetchInitialData() {
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        setSyncing(true);
+        google.script.run
+          .withSuccessHandler(function(res) {
+            setSyncing(false);
+            if (res) {
+              appData.products = res.products || [];
+              appData.sales = res.sales || [];
+              appData.customers = res.customers || [];
+              if (res.staffUsers && res.staffUsers.length > 0) {
+                appData.staffUsers = res.staffUsers;
+                renderStaffLoginList();
+              }
+              if (res.settings && Object.keys(res.settings).length > 0) {
+                appData.settings = Object.assign(appData.settings, res.settings);
+              }
+              renderAll();
+            }
+          })
+          .withFailureHandler(function(err) {
+            setSyncing(false);
+            console.error('GAS Error:', err);
+            loadFallbackData();
+          })
+          .getInitialData();
+      } else {
+        loadFallbackData();
+      }
+    }
+
+    function loadFallbackData() {
+      appData.products = [
+        { id: 'prod_1', name: 'Apple iPhone 15 Pro Max 256GB', brand: 'Apple', category: 'Smartphones', costPrice: 3800000, sellingPrice: 4250000, stock: 5, isSerialized: true, imeiList: ['358291048291045', '358291048291046', '358291048291047'] },
+        { id: 'prod_2', name: 'Samsung Galaxy S24 Ultra 512GB', brand: 'Samsung', category: 'Smartphones', costPrice: 3900000, sellingPrice: 4390000, stock: 4, isSerialized: true, imeiList: ['357182930491823', '357182930491824'] },
+        { id: 'prod_3', name: 'Xiaomi Redmi Note 13 Pro 8/256GB', brand: 'Xiaomi', category: 'Smartphones', costPrice: 850000, sellingPrice: 980000, stock: 8, isSerialized: true, imeiList: ['869102938475610'] },
+        { id: 'prod_4', name: 'Anker 30W Nano GaN Fast Charger', brand: 'Anker', category: 'Chargers', costPrice: 42000, sellingPrice: 65000, stock: 25, isSerialized: false, imeiList: [] },
+        { id: 'prod_5', name: 'Baseus 20000mAh 65W Power Bank', brand: 'Baseus', category: 'Power Banks', costPrice: 95000, sellingPrice: 145000, stock: 12, isSerialized: false, imeiList: [] }
+      ];
+      renderAll();
+    }
+
+    function renderAll() {
+      document.getElementById('headerShopName').textContent = appData.settings.shopName || 'Golden Star Mobile';
+      renderProductsGrid();
+      renderCart();
+      renderInventoryTable();
+      renderSalesTable();
+      renderReports();
+      lucide.createIcons();
+    }
+
+    // UI Tab Navigation
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-view').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.tab-view').forEach(el => el.classList.remove('block'));
+      document.querySelectorAll('.nav-btn').forEach(b => {
+        b.classList.remove('bg-white', 'text-indigo-600', 'shadow-xs');
+      });
+
+      document.getElementById('view-' + tabId).classList.remove('hidden');
+      document.getElementById('view-' + tabId).classList.add('block');
+      document.getElementById('tab-' + tabId).classList.add('bg-white', 'text-indigo-600', 'shadow-xs');
+      lucide.createIcons();
+    }
+
+    // POS Products Grid
+    function renderProductsGrid() {
+      const grid = document.getElementById('productGrid');
+      const search = (document.getElementById('posSearchInput').value || '').toLowerCase().trim();
+
+      const filtered = appData.products.filter(p => {
+        const matchCat = currentCategory === 'all' || p.category === currentCategory;
+        const matchSearch = !search || 
+          p.name.toLowerCase().includes(search) || 
+          p.brand.toLowerCase().includes(search) ||
+          (p.imeiList && p.imeiList.some(im => im.includes(search)));
+        return matchCat && matchSearch;
+      });
+
+      if (filtered.length === 0) {
+        grid.innerHTML = '<div class="col-span-3 text-center py-10 text-slate-400 text-xs">No matching devices or accessories found.</div>';
+        return;
+      }
+
+      grid.innerHTML = filtered.map(p => `
+        <div onclick="addToCart('${p.id}')" class="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs hover:border-indigo-500 hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group">
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 uppercase tracking-wider">${p.brand}</span>
+              <span class="text-[10px] font-bold ${p.stock <= 2 ? 'text-rose-600 bg-rose-50' : 'text-emerald-700 bg-emerald-50'} px-1.5 py-0.2 rounded">
+                ${p.stock} in stock
+              </span>
+            </div>
+            <h3 class="font-bold text-slate-900 text-xs leading-snug group-hover:text-indigo-600 transition-colors line-clamp-2">${p.name}</h3>
+            ${p.isSerialized ? '<span class="inline-block mt-1 text-[9px] text-blue-600 font-mono">📱 Serialized IMEI</span>' : ''}
+          </div>
+          <div class="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
+            <span class="font-mono font-black text-slate-900 text-xs">${formatCurrency(p.sellingPrice)}</span>
+            <div class="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            </div>
+          </div>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    function setCategoryFilter(cat) {
+      currentCategory = cat;
+      document.querySelectorAll('.cat-pill').forEach(btn => {
+        btn.classList.remove('bg-indigo-600', 'text-white');
+        btn.classList.add('bg-slate-100', 'text-slate-600');
+      });
+      event.target.classList.remove('bg-slate-100', 'text-slate-600');
+      event.target.classList.add('bg-indigo-600', 'text-white');
+      renderProductsGrid();
+    }
+
+    function filterProducts() {
+      renderProductsGrid();
+    }
+
+    // Cart Logic
+    function addToCart(prodId) {
+      const product = appData.products.find(p => p.id === prodId);
+      if (!product || product.stock <= 0) {
+        alert('This product is out of stock.');
+        return;
+      }
+
+      const existing = cart.find(i => i.productId === prodId);
+      if (existing) {
+        if (existing.quantity >= product.stock) {
+          alert(`Only ${product.stock} items available in stock.`);
+          return;
+        }
+        existing.quantity += 1;
+        existing.finalPrice = existing.quantity * existing.unitPrice;
+      } else {
+        const availableImei = product.isSerialized && product.imeiList && product.imeiList.length > 0 ? product.imeiList[0] : '';
+        cart.push({
+          productId: product.id,
+          name: product.name,
+          unitPrice: product.sellingPrice,
+          quantity: 1,
+          discount: 0,
+          finalPrice: product.sellingPrice,
+          imei: availableImei,
+          warrantyPeriod: product.isSerialized ? '1 Year Official Warranty' : '1 Month Warranty'
+        });
+      }
+      renderCart();
+    }
+
+    function updateCartQty(idx, delta) {
+      if (cart[idx]) {
+        cart[idx].quantity += delta;
+        if (cart[idx].quantity <= 0) {
+          cart.splice(idx, 1);
+        } else {
+          cart[idx].finalPrice = cart[idx].quantity * cart[idx].unitPrice;
+        }
+        renderCart();
+      }
+    }
+
+    function removeCartItem(idx) {
+      cart.splice(idx, 1);
+      renderCart();
+    }
+
+    function clearCart() {
+      cart = [];
+      renderCart();
+    }
+
+    function renderCart() {
+      const container = document.getElementById('cartItemsList');
+      const countBadge = document.getElementById('cartCountBadge');
+      const checkoutBtn = document.getElementById('checkoutBtn');
+
+      const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+      countBadge.textContent = totalItems;
+
+      if (cart.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-12 text-slate-400 space-y-2">
+            <i data-lucide="shopping-cart" class="w-12 h-12 mx-auto text-slate-300"></i>
+            <p class="text-xs font-medium">Cart is empty. Click any product to add.</p>
+          </div>
+        `;
+        document.getElementById('cartSubtotal').textContent = '0 Ks';
+        document.getElementById('cartGrandTotal').textContent = '0 Ks';
+        checkoutBtn.disabled = true;
+        lucide.createIcons();
+        return;
+      }
+
+      checkoutBtn.disabled = false;
+
+      let subtotal = 0;
+      container.innerHTML = cart.map((item, idx) => {
+        subtotal += item.finalPrice;
+        return `
+          <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <h4 class="text-xs font-bold text-slate-900 truncate">${item.name}</h4>
+                <p class="text-[11px] font-mono text-slate-600">${formatCurrency(item.unitPrice)} each</p>
+                ${item.imei ? `<span class="inline-block mt-0.5 text-[9px] font-mono text-blue-900 bg-blue-100/80 px-1.5 py-0.2 rounded font-semibold">IMEI: ${item.imei}</span>` : ''}
+              </div>
+              <button onclick="removeCartItem(${idx})" class="text-slate-400 hover:text-rose-600 p-1 cursor-pointer">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+
+            <div class="flex items-center justify-between pt-1 border-t border-slate-200/60">
+              <div class="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-0.5">
+                <button onclick="updateCartQty(${idx}, -1)" class="w-5 h-5 flex items-center justify-center text-slate-600 hover:bg-slate-100 rounded cursor-pointer font-bold">-</button>
+                <span class="text-xs font-bold px-2">${item.quantity}</span>
+                <button onclick="updateCartQty(${idx}, 1)" class="w-5 h-5 flex items-center justify-center text-slate-600 hover:bg-slate-100 rounded cursor-pointer font-bold">+</button>
+              </div>
+              <span class="font-mono font-bold text-xs text-slate-900">${formatCurrency(item.finalPrice)}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('cartSubtotal').textContent = formatCurrency(subtotal);
+      document.getElementById('cartGrandTotal').textContent = formatCurrency(subtotal);
+      lucide.createIcons();
+    }
+
+    function selectPayment(method) {
+      activePayment = method;
+      document.querySelectorAll('.pay-btn').forEach(btn => {
+        btn.classList.remove('active', 'border-purple-300', 'bg-purple-600', 'text-white', 'shadow-2xs');
+        btn.classList.add('bg-white', 'text-slate-700', 'border-slate-200');
+      });
+      const selected = document.getElementById('pay-' + method);
+      if (selected) {
+        selected.classList.add('active', 'border-purple-300', 'bg-purple-600', 'text-white', 'shadow-2xs');
+        selected.classList.remove('bg-white', 'text-slate-700', 'border-slate-200');
+      }
+    }
+
+    // Checkout & Invoice Print
+    function handleCheckout() {
+      if (cart.length === 0) return;
+
+      const subtotal = cart.reduce((sum, item) => sum + item.finalPrice, 0);
+      const invoiceNumber = 'INV-' + new Date().getFullYear() + ('0' + (new Date().getMonth() + 1)).slice(-2) + ('0' + new Date().getDate()).slice(-2) + '-' + Math.floor(1000 + Math.random() * 9000);
+
+      const saleRecord = {
+        id: 'sale_' + new Date().getTime(),
+        invoiceNumber: invoiceNumber,
+        date: new Date().toISOString(),
+        customerName: document.getElementById('cartCustomerName').value.trim() || 'Walk-in Customer',
+        customerPhone: document.getElementById('cartCustomerPhone').value.trim() || '',
+        subtotal: subtotal,
+        discountTotal: 0,
+        taxTotal: 0,
+        grandTotal: subtotal,
+        paymentMethod: activePayment,
+        soldBy: 'Admin Staff',
+        status: 'completed',
+        items: JSON.parse(JSON.stringify(cart))
+      };
+
+      // Deduct local inventory
+      saleRecord.items.forEach(it => {
+        const p = appData.products.find(prod => prod.id === it.productId);
+        if (p) {
+          p.stock = Math.max(0, p.stock - it.quantity);
+          if (it.imei && p.imeiList) {
+            p.imeiList = p.imeiList.filter(im => im !== it.imei);
+          }
+        }
+      });
+
+      appData.sales.unshift(saleRecord);
+
+      // Trigger GAS server sync
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler(function(res) {
+            console.log('Saved to Google Sheets:', res);
+          })
+          .recordSaleTransaction(saleRecord);
+      }
+
+      // Open Modal
+      currentActiveModalSale = saleRecord;
+      modalPaperWidth = appData.settings.paperWidth || 'a5';
+      openInvoiceModal(saleRecord);
+
+      // Reset cart
+      cart = [];
+      document.getElementById('cartCustomerName').value = '';
+      document.getElementById('cartCustomerPhone').value = '';
+      renderCart();
+      renderProductsGrid();
+      renderInventoryTable();
+      renderSalesTable();
+      renderReports();
+    }
+
+    // Modal Presentation
+    function openInvoiceModal(sale) {
+      currentActiveModalSale = sale;
+      document.getElementById('modalInvoiceSub').textContent = 'Invoice #' + sale.invoiceNumber;
+      document.getElementById('invoiceModal').classList.remove('hidden');
+      renderModalSlip();
+      lucide.createIcons();
+    }
+
+    function closeInvoiceModal() {
+      document.getElementById('invoiceModal').classList.add('hidden');
+    }
+
+    function setModalPaperFormat(format) {
+      modalPaperWidth = format;
+      ['a5', '80mm', '58mm'].forEach(f => {
+        const btn = document.getElementById('modalBtn' + (f === 'a5' ? 'A5' : f.replace('mm', '')));
+        if (btn) {
+          if (f === format) {
+            btn.classList.add('bg-indigo-600', 'text-white', 'shadow-xs');
+            btn.classList.remove('text-slate-600');
+          } else {
+            btn.classList.remove('bg-indigo-600', 'text-white', 'shadow-xs');
+            btn.classList.add('text-slate-600');
+          }
+        }
+      });
+      renderModalSlip();
+    }
+
+    function renderModalSlip() {
+      const sale = currentActiveModalSale;
+      const s = appData.settings;
+      const target = document.getElementById('printable-area');
+      if (!sale) return;
+
+      const payLabels = { kpay: 'KBZPay', wave: 'WavePay', cash: 'Cash', aya: 'AYA Pay' };
+      const payLabel = payLabels[sale.paymentMethod] || 'Payment';
+
+      if (modalPaperWidth === 'a5') {
+        // A5 Voucher Slip Layout
+        target.innerHTML = `
+          <div class="bg-white p-6 sm:p-8 shadow-xl border border-slate-300 w-full max-w-[680px] text-slate-900 font-sans text-xs leading-normal rounded-2xl space-y-4">
+            
+            <!-- Header -->
+            <div class="flex items-start justify-between border-b-2 border-slate-900 pb-4">
+              <div class="space-y-1">
+                <h1 class="text-xl font-black uppercase tracking-tight text-slate-900">${s.shopName}</h1>
+                <p class="text-xs font-semibold text-slate-600">${s.tagline}</p>
+                <p class="text-[11px] text-slate-500">${s.address}</p>
+              </div>
+
+              <div class="text-right space-y-0.5 text-[11px] text-slate-600">
+                <p class="font-mono font-bold text-slate-900 text-xs">NO: ${sale.invoiceNumber}</p>
+                <p>Date: ${formatDateTime(sale.date)}</p>
+                <p class="font-bold text-slate-800">Hotline: ${s.phone1}</p>
+                ${s.phone2 ? `<p>Viber: ${s.phone2}</p>` : ''}
+              </div>
+            </div>
+
+            <!-- Customer & Transaction Bar -->
+            <div class="grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+              <div>
+                <span class="text-slate-400 font-bold text-[9px] uppercase tracking-wider">Bill To / Customer Info:</span>
+                <div class="font-bold text-slate-900 text-xs mt-0.5">${sale.customerName}</div>
+                ${sale.customerPhone ? `<div class="text-slate-600 font-mono text-[11px]">Phone: ${sale.customerPhone}</div>` : ''}
+              </div>
+
+              <div class="text-right">
+                <span class="text-slate-400 font-bold text-[9px] uppercase tracking-wider">Transaction Info:</span>
+                <div class="font-semibold text-slate-800 text-xs mt-0.5">Cashier: <span class="font-bold text-slate-900">${sale.soldBy}</span></div>
+                <div class="text-slate-700 text-xs mt-0.5">Payment: <span class="font-bold text-slate-900 uppercase">${payLabel}</span></div>
+              </div>
+            </div>
+
+            <!-- Itemized Table -->
+            <div class="border border-slate-200 rounded-xl overflow-hidden">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] border-b border-slate-200">
+                  <tr>
+                    <th class="py-2.5 px-4">Item Description</th>
+                    <th class="py-2.5 px-2 text-center w-14">Qty</th>
+                    <th class="py-2.5 px-3 text-right">Unit Price</th>
+                    <th class="py-2.5 px-4 text-right">Total Amount</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  ${sale.items.map(item => `
+                    <tr>
+                      <td class="py-2.5 px-4 align-top">
+                        <div class="font-bold text-slate-900">${item.name}</div>
+                        ${item.imei ? `<div class="text-[10px] text-blue-900 font-mono font-semibold mt-0.5">IMEI: ${item.imei}</div>` : ''}
+                        ${item.warrantyPeriod ? `<div class="text-[10px] text-emerald-700 font-medium mt-0.5">🛡️ ${item.warrantyPeriod}</div>` : ''}
+                      </td>
+                      <td class="py-2.5 px-2 text-center font-bold align-top">${item.quantity}</td>
+                      <td class="py-2.5 px-3 text-right font-mono align-top text-slate-700">${formatCurrency(item.unitPrice)}</td>
+                      <td class="py-2.5 px-4 text-right font-mono font-bold text-slate-900 align-top">${formatCurrency(item.finalPrice)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Breakdown: Policy & Totals -->
+            <div class="grid grid-cols-12 gap-4 pt-1">
+              <div class="col-span-7 space-y-2">
+                <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[10px] text-slate-600 space-y-1">
+                  <p class="font-bold text-slate-800">အာမခံနှင့် ပစ္စည်းလဲလှယ်ရေးစည်းကမ်းချက်များ:</p>
+                  <p class="leading-relaxed">အာမခံသက်တမ်းအတွင်း စက်ချို့ယွင်းမှုအတွက် အခမဲ့စစ်ဆေးလဲလှယ်ပေးပါသည်။ (ရေဝင်ခြင်းနှင့် မျက်နှာပြင်ကွဲအက်ခြင်းမပါဝင်ပါ)</p>
+                </div>
+              </div>
+
+              <div class="col-span-5 bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5 text-xs">
+                <div class="flex justify-between text-slate-600">
+                  <span>Subtotal:</span>
+                  <span class="font-mono">${formatCurrency(sale.subtotal)}</span>
+                </div>
+                <div class="flex justify-between font-black text-sm text-slate-900 border-t-2 border-slate-300 pt-1.5">
+                  <span>NET TOTAL:</span>
+                  <span class="text-indigo-600 font-mono font-black text-base">${formatCurrency(sale.grandTotal)}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Dual Signatures -->
+            <div class="grid grid-cols-2 gap-8 pt-6 border-t border-slate-200 text-center text-[10px]">
+              <div>
+                <div class="border-b border-slate-400 pb-1 mb-1 font-mono text-slate-300">................................................</div>
+                <span class="font-bold text-slate-700">Customer's Signature</span>
+              </div>
+              <div>
+                <div class="border-b border-slate-400 pb-1 mb-1 font-mono text-slate-300">................................................</div>
+                <span class="font-bold text-slate-700">Authorized Store Signature & Stamp</span>
+              </div>
+            </div>
+
+            <div class="text-center pt-2 text-[10px] font-bold text-slate-700">
+              ဝယ်ယူအားပေးမှုကို အထူးပင်ကျေးဇူးတင်ရှိပါသည်။
+            </div>
+
+          </div>
+        `;
+      } else {
+        // Thermal Roll Slip (80mm / 58mm)
+        target.innerHTML = `
+          <div class="bg-white p-5 shadow-md border border-slate-300 w-full text-slate-900 font-mono leading-relaxed ${modalPaperWidth === '58mm' ? 'max-w-[280px] text-[10px]' : 'max-w-[360px] text-[11px]'}">
+            <div class="text-center pb-2 border-b border-dashed border-slate-400 space-y-0.5">
+              <h2 class="text-base font-black tracking-wider uppercase">${s.shopName}</h2>
+              <p class="text-[10px] text-slate-600">${s.address}</p>
+              <p class="text-[10px] font-bold">Tel: ${s.phone1}</p>
+            </div>
+
+            <div class="py-2 border-b border-dashed border-slate-400 space-y-0.5 text-[10px]">
+              <div class="flex justify-between"><span>INV:</span><span class="font-bold">${sale.invoiceNumber}</span></div>
+              <div class="flex justify-between"><span>DATE:</span><span>${formatDateTime(sale.date)}</span></div>
+              <div class="flex justify-between"><span>CUST:</span><span class="font-bold">${sale.customerName}</span></div>
+              <div class="flex justify-between"><span>PAY:</span><span class="font-bold uppercase">${payLabel}</span></div>
+            </div>
+
+            <div class="py-2 border-b border-dashed border-slate-400">
+              <div class="font-bold text-[10px] flex justify-between pb-1"><span>ITEM</span><span>TOTAL</span></div>
+              <div class="divide-y divide-slate-100">
+                ${sale.items.map(i => `
+                  <div class="py-1">
+                    <div class="flex justify-between font-bold"><span>${i.name}</span><span>${formatCurrency(i.finalPrice)}</span></div>
+                    <div class="text-[9px] text-slate-500">${i.quantity} x ${formatCurrency(i.unitPrice)}</div>
+                    ${i.imei ? `<div class="text-[9px] text-blue-900">IMEI: ${i.imei}</div>` : ''}
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+
+            <div class="py-2 border-b border-dashed border-slate-400 space-y-1 font-bold">
+              <div class="flex justify-between text-sm font-black pt-1"><span>TOTAL:</span><span>${formatCurrency(sale.grandTotal)}</span></div>
+            </div>
+
+            <div class="pt-2 text-center text-[9px] text-slate-500 space-y-1">
+              <p class="font-bold text-slate-800">ဝယ်ယူအားပေးမှုကို ကျေးဇူးတင်ပါသည်။</p>
+              <p>*** THANK YOU ***</p>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    // Inventory Table Rendering
+    function renderInventoryTable() {
+      const tbody = document.getElementById('inventoryTableBody');
+      tbody.innerHTML = appData.products.map(p => `
+        <tr class="hover:bg-slate-50/60 transition-colors">
+          <td class="py-3 px-4 font-bold text-slate-900">${p.name}</td>
+          <td class="py-3 px-3"><span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold">${p.brand}</span></td>
+          <td class="py-3 px-3 text-right font-mono text-slate-600">${formatCurrency(p.costPrice)}</td>
+          <td class="py-3 px-3 text-right font-mono font-bold text-slate-900">${formatCurrency(p.sellingPrice)}</td>
+          <td class="py-3 px-3 text-center">
+            <span class="px-2.5 py-1 rounded-lg font-bold ${p.stock <= 2 ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'}">
+              ${p.stock} units
+            </span>
+          </td>
+          <td class="py-3 px-3 font-mono text-[11px] text-slate-500">
+            ${p.isSerialized ? (p.imeiList ? p.imeiList.length + ' registered' : 'Serialized') : 'Non-serialized'}
+          </td>
+          <td class="py-3 px-4 text-center">
+            <button onclick="addToCart('${p.id}'); switchTab('pos');" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-xs cursor-pointer">
+              + Sell
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    // Sales Table Rendering
+    function renderSalesTable() {
+      const tbody = document.getElementById('salesTableBody');
+      if (appData.sales.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-slate-400">No recorded sales yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = appData.sales.map(s => `
+        <tr class="hover:bg-slate-50/60 transition-colors">
+          <td class="py-3 px-4 font-mono font-bold text-slate-900">${s.invoiceNumber}</td>
+          <td class="py-3 px-3 text-slate-500">${formatDateTime(s.date)}</td>
+          <td class="py-3 px-3 font-medium text-slate-900">${s.customerName}</td>
+          <td class="py-3 px-3 text-slate-600">${s.items ? s.items.length : 0} items</td>
+          <td class="py-3 px-3"><span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-bold uppercase text-[10px]">${s.paymentMethod}</span></td>
+          <td class="py-3 px-3 text-right font-mono font-black text-slate-900">${formatCurrency(s.grandTotal)}</td>
+          <td class="py-3 px-4 text-center">
+            <button onclick='openInvoiceModal(${JSON.stringify(s)})' class="px-3 py-1 bg-slate-900 text-white rounded-lg font-bold text-xs hover:bg-slate-800 cursor-pointer">
+              View Slip
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    // Reports Rendering
+    function renderReports() {
+      const totalRev = appData.sales.reduce((sum, s) => sum + (Number(s.grandTotal) || 0), 0);
+      const totalValuation = appData.products.reduce((sum, p) => sum + ((Number(p.costPrice) || 0) * (Number(p.stock) || 0)), 0);
+      const lowStockCount = appData.products.filter(p => p.stock <= 2).length;
+
+      document.getElementById('statTotalRevenue').textContent = formatCurrency(totalRev);
+      document.getElementById('statTotalOrders').textContent = appData.sales.length;
+      document.getElementById('statStockValuation').textContent = formatCurrency(totalValuation);
+      document.getElementById('statLowStockCount').textContent = lowStockCount;
+    }
+
+    // Google Sheets Sync Handler
+    function syncWithGoogleSheets() {
+      fetchInitialData();
+    }
+
+    function setSyncing(isSyncing) {
+      const icon = document.getElementById('syncIcon');
+      if (isSyncing) {
+        icon.classList.add('animate-spin', 'text-indigo-600');
+      } else {
+        icon.classList.remove('animate-spin', 'text-indigo-600');
+      }
+    }
+
+    function saveSettingsToGAS() {
+      const newSettings = {
+        shopName: document.getElementById('settingShopName').value.trim() || appData.settings.shopName,
+        tagline: document.getElementById('settingTagline').value.trim() || appData.settings.tagline,
+        phone1: document.getElementById('settingPhone1').value.trim() || appData.settings.phone1,
+        phone2: document.getElementById('settingPhone2').value.trim() || appData.settings.phone2,
+        address: document.getElementById('settingAddress').value.trim() || appData.settings.address,
+        paperWidth: document.getElementById('settingPaperWidth').value
+      };
+
+      appData.settings = Object.assign(appData.settings, newSettings);
+      renderAll();
+
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler(function() {
+            alert('Settings saved to Google Sheets successfully!');
+          })
+          .saveSettings(newSettings);
+      } else {
+        alert('Settings updated locally!');
+      }
+    }
+  </script>
+</body>
+</html>

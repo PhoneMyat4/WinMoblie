@@ -1,0 +1,34 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // 1. Data Immutability: Activity Logs & Audit Logs are strictly append-only.
+    // Creates are permitted for authenticated staff; updates and deletions are strictly forbidden.
+    match /activityLogs/{logId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // 2. Standard POS & Inventory management collections
+    match /{collection}/{docId} {
+      allow read, write: if isAuthenticated() && collection != 'activityLogs' && collection != 'auditLogs';
+    }
+
+    // Sub-collections catch-all
+    match /{collection}/{docId}/{subCollection}/{subDocId} {
+      allow read, write: if isAuthenticated() && collection != 'activityLogs' && collection != 'auditLogs';
+    }
+  }
+}
+

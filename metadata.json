@@ -1,0 +1,11 @@
+{
+  "name": "Mobile Shop POS & Inventory Management",
+  "description": "Complete Point of Sale with comprehensive User Activity & Audit Log History tracking, automated Facebook Page AI social media ad publishing, Personal Finance & Wealth Management, real-time daily and annual profit & P&L financial analysis, fiscal multi-year performance reporting, product activities audit trail, 3-phase damage quarantine and RMA disposition hub, live team chat and pinned shift announcements hub, bulk CSV spreadsheet inventory importer with IMEI batch ingestion, executive sales KPI & performance analytics, physical stock check & barcode audit reconciliation system, comprehensive product movement history timeline, granular item-level refunds with restock handling, customer details & transaction history ledger, multi-timeframe report system, supplier purchases, serialized IMEI inventory, expense management, user roles, Myanmar payment channels, and customizable thermal receipt vouchers.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

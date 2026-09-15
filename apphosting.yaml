@@ -1,0 +1,24 @@
+# Settings for Cloud Run backend managed by Firebase App Hosting
+runConfig:
+  minInstances: 0
+  maxInstances: 5
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+
+# Environment variables and secrets
+env:
+  - variable: NODE_ENV
+    value: production
+  - variable: VITE_API_TOKEN
+    value: pos_sec_token_9938148
+
+  # Optional AI & Integrations API Keys:
+  # In production, grant App Hosting service account access to Secret Manager
+  # and uncomment the secrets you wish to inject into Cloud Run:
+  # - variable: GEMINI_API_KEY
+  #   secret: GEMINI_API_KEY
+  # - variable: OPENAI_API_KEY
+  #   secret: OPENAI_API_KEY
+  # - variable: TELEGRAM_BOT_TOKEN
+  #   secret: TELEGRAM_BOT_TOKEN
