@@ -1604,31 +1604,66 @@ Output a JSON response with:
     try {
       const { botToken, chatId } = req.body;
       const targetToken = botToken || process.env.TELEGRAM_BOT_TOKEN;
-      const targetChat = chatId || process.env.TELEGRAM_CHAT_ID;
+      const rawTargetChat = chatId || process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_ALLOWED_CHAT_IDS;
 
-      if (!targetToken || !targetChat) {
+      if (!targetToken || !rawTargetChat) {
         return res.status(400).json({
           success: false,
-          error: 'Both Telegram Bot Token and Chat ID are required to send a test alert.',
+          error: 'Both Telegram Bot Token and at least one Chat ID are required to send a test alert.',
+        });
+      }
+
+      // Support multiple comma-separated chat IDs
+      const targetChats = String(rawTargetChat)
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+
+      if (targetChats.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Please provide at least one valid Telegram Chat ID.',
         });
       }
 
       const telegramUrl = `https://api.telegram.org/bot${targetToken}/sendMessage`;
-      const response = await fetch(telegramUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: targetChat,
-          text: `📱 *Mobile Shop POS & Inventory Management*\n\n✅ *Secrets Vault Test Alert*\nYour Telegram notification bot has been successfully configured and verified!\n\n_Sent at: ${new Date().toLocaleString()}_`,
-          parse_mode: 'Markdown',
-        }),
-      });
+      const results: { chatId: string; ok: boolean; error?: string }[] = [];
 
-      const data = await response.json();
-      if (data.ok) {
-        return res.json({ success: true, message: 'Test message dispatched to Telegram chat successfully!' });
+      for (const singleChatId of targetChats) {
+        try {
+          const response = await fetch(telegramUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: singleChatId,
+              text: `📱 *Mobile Shop POS & Inventory Management*\n\n✅ *Secrets Vault Test Alert*\nYour Telegram notification bot has been successfully configured and verified!\n\n_Sent at: ${new Date().toLocaleString()}_`,
+              parse_mode: 'Markdown',
+            }),
+          });
+          const data = (await response.json()) as any;
+          if (data.ok) {
+            results.push({ chatId: singleChatId, ok: true });
+          } else {
+            results.push({ chatId: singleChatId, ok: false, error: data.description || 'API Error' });
+          }
+        } catch (e: any) {
+          results.push({ chatId: singleChatId, ok: false, error: e?.message || 'Network error' });
+        }
+      }
+
+      const successfulCount = results.filter((r) => r.ok).length;
+      if (successfulCount > 0) {
+        return res.json({
+          success: true,
+          message: `Test message dispatched successfully to ${successfulCount} of ${targetChats.length} Telegram chat(s)!`,
+          results,
+        });
       } else {
-        return res.status(400).json({ success: false, error: data.description || 'Telegram API rejected the request.' });
+        return res.status(400).json({
+          success: false,
+          error: `Failed to deliver to any chat. Reason: ${results[0]?.error || 'Unknown error'}`,
+          results,
+        });
       }
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message || 'Network error communicating with Telegram.' });

@@ -753,7 +753,7 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
 
                 <input
                   type="text"
-                  placeholder="@goldenstar_alerts or -100123456789 (Chat / Channel ID)"
+                  placeholder="e.g. 123456789, 987654321, -100123456789 (comma-separated for multiple)"
                   value={secrets.telegramChatId || ''}
                   onChange={(e) => updateSecrets({ telegramChatId: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white font-mono text-xs text-slate-900"
@@ -770,7 +770,7 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
               )}
 
               <div className="flex items-center justify-between pt-1">
-                <span className="text-[10px] text-slate-500">Sends daily sales closure & low-stock alerts</span>
+                <span className="text-[10px] text-slate-500">Sends alerts to all listed Chat IDs (separate with commas)</span>
                 <button
                   type="button"
                   onClick={testTelegramKey}
