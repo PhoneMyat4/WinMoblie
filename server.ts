@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import OpenAI from 'openai';
@@ -1754,9 +1755,45 @@ Output a JSON response with:
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    // Robust resolution of distPath whether executed from workspace root or inside dist/
+    const distPath = fs.existsSync(path.join(__dirname, 'index.html'))
+      ? __dirname
+      : fs.existsSync(path.join(process.cwd(), 'dist', 'index.html'))
+      ? path.join(process.cwd(), 'dist')
+      : process.cwd();
+
+    // Serve hashed assets under /assets with immutable caching
+    // fallthrough: false ensures missing assets respond with 404 rather than falling through to index.html (which causes MIME type errors)
+    const assetsPath = path.join(distPath, 'assets');
+    if (fs.existsSync(assetsPath)) {
+      app.use('/assets', express.static(assetsPath, {
+        maxAge: '1y',
+        immutable: true,
+        fallthrough: false,
+      }));
+    }
+
+    // Serve other root static assets (favicon, manifest, robots, etc.)
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        // Never cache index.html so users always receive references to the latest bundle hashes
+        if (filePath.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        }
+      },
+    }));
+
+    // SPA fallback: ONLY route HTML navigation requests to index.html
     app.get('*', (req, res) => {
+      // If request has a file extension (.js, .css, .json, .png, etc.), it's a missing asset, NOT an HTML page!
+      if (path.extname(req.path)) {
+        return res.status(404).type('text/plain').send(`Asset not found: ${req.path}`);
+      }
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
