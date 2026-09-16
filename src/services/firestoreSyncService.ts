@@ -69,6 +69,7 @@ export class FirestoreSyncService {
   private statusListeners: Set<(status: FirestoreSyncStatus) => void> = new Set();
   private unsubscribers: Unsubscribe[] = [];
   private isProcessingRemoteSnapshot: boolean = false;
+  private isSyncPaused: boolean = false;
   private status: FirestoreSyncStatus = {
     isConnected: false,
     isSyncing: false,
@@ -120,7 +121,7 @@ export class FirestoreSyncService {
    */
   private registerDataUpdatedEventListener() {
     window.addEventListener('mobileshop_data_updated', (e: any) => {
-      if (this.isProcessingRemoteSnapshot) return;
+      if (this.isSyncPaused || this.isProcessingRemoteSnapshot) return;
       if (!FirebaseAuthService.isAuthenticated()) return;
 
       const key = e.detail?.key;
@@ -222,52 +223,52 @@ export class FirestoreSyncService {
   private registerStorageHooks() {
     StorageService.setSyncHandler({
       onSaleUpsert: (sale) => {
-        if (!this.isProcessingRemoteSnapshot) this.syncSale(sale);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncSale(sale);
       },
       onSalesBatch: (sales) => {
-        if (!this.isProcessingRemoteSnapshot) this.syncSales(sales);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncSales(sales);
       },
       onSaleDelete: (id) => {
-        if (!this.isProcessingRemoteSnapshot) this.deleteSale(id);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deleteSale(id);
       },
       onPurchaseUpsert: (purchase) => {
-        if (!this.isProcessingRemoteSnapshot) this.syncPurchase(purchase);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncPurchase(purchase);
       },
       onPurchasesBatch: (purchases) => {
-        if (!this.isProcessingRemoteSnapshot) this.syncPurchases(purchases);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncPurchases(purchases);
       },
       onPurchaseDelete: (id) => {
-        if (!this.isProcessingRemoteSnapshot) this.deletePurchase(id);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deletePurchase(id);
       },
       onCustomerUpsert: (customer) => {
-        if (!this.isProcessingRemoteSnapshot) this.syncCustomer(customer);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncCustomer(customer);
       },
       onExpenseUpsert: (expense) => {
-        if (!this.isProcessingRemoteSnapshot) this.syncExpense(expense);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncExpense(expense);
       },
       onExpenseDelete: (id) => {
-        if (!this.isProcessingRemoteSnapshot) this.deleteExpense(id);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deleteExpense(id);
       },
       onProductUpsert: (product) => {
-        if (!this.isProcessingRemoteSnapshot) this.syncProduct(product);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncProduct(product);
       },
       onProductDelete: (id) => {
-        if (!this.isProcessingRemoteSnapshot) this.deleteProduct(id);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deleteProduct(id);
       },
       onSettingsUpsert: (settings) => {
-        if (!this.isProcessingRemoteSnapshot) this.syncSettings(settings);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncSettings(settings);
       },
       onSupplierUpsert: (supplier) => {
-        if (!this.isProcessingRemoteSnapshot) this.syncSupplier(supplier);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncSupplier(supplier);
       },
       onStaffUserUpsert: (staff) => {
-        if (!this.isProcessingRemoteSnapshot) this.syncStaffUser(staff);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncStaffUser(staff);
       },
       onStaffUsersBatch: (staffList) => {
-        if (!this.isProcessingRemoteSnapshot) this.syncStaffUsers(staffList);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncStaffUsers(staffList);
       },
       onStaffUserDelete: (id) => {
-        if (!this.isProcessingRemoteSnapshot) this.deleteStaffUser(id);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deleteStaffUser(id);
       },
     });
   }
@@ -336,6 +337,11 @@ export class FirestoreSyncService {
    */
   public startRealtimeSync() {
     this.stopRealtimeSync();
+
+    if (this.isSyncPaused) {
+      console.log('[FirestoreSync] Realtime sync is currently paused. Skipping startRealtimeSync.');
+      return;
+    }
 
     try {
       // 1. Settings Listener
@@ -729,6 +735,31 @@ export class FirestoreSyncService {
       }
     });
     this.unsubscribers = [];
+  }
+
+  /**
+   * Pauses all realtime listeners and outgoing sync updates.
+   * Useful when performing critical database-clearing or wipe operations.
+   */
+  public pauseSync(): void {
+    console.log('[FirestoreSync] Pausing all realtime listeners and outgoing sync...');
+    this.isSyncPaused = true;
+    this.stopRealtimeSync();
+  }
+
+  /**
+   * Resumes realtime sync and re-establishes snapshots if authenticated.
+   */
+  public resumeSync(): void {
+    console.log('[FirestoreSync] Resuming realtime sync...');
+    this.isSyncPaused = false;
+    if (FirebaseAuthService.isAuthenticated()) {
+      this.startRealtimeSync();
+    }
+  }
+
+  public isPaused(): boolean {
+    return this.isSyncPaused;
   }
 
   // ==========================================

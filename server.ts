@@ -148,8 +148,20 @@ async function startServer() {
   // POST /api/sync-state - Push latest localStorage state snapshot from client tab to server
   app.post('/api/sync-state', (req, res) => {
     try {
-      const { clientTimestamp, data, clientTabId } = req.body;
+      const { clientTimestamp, data, clientTabId, isReset } = req.body;
       const incomingTimestamp = Number(clientTimestamp) || Date.now();
+
+      if (isReset) {
+        serverStateSnapshot = data && typeof data === 'object' ? { ...data } : null;
+        lastServerStateTimestamp = Math.max(incomingTimestamp, Date.now());
+        lastUpdatingTabId = clientTabId || 'unknown';
+
+        return res.json({
+          success: true,
+          updated: true,
+          serverTimestamp: lastServerStateTimestamp,
+        });
+      }
 
       if (data && typeof data === 'object') {
         // If server has no state yet or client timestamp is newer or equal

@@ -151,6 +151,11 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     setIsWipingData(true);
     setWipeResult(null);
 
+    // Pause both Firestore realtime sync and server sync so that listeners
+    // do not immediately re-hydrate the cleared data mid-wipe
+    firestoreSync.pauseSync();
+    syncService.pause();
+
     try {
       // 1. Wipe local test data (products, sales, purchases, customers, expenses, drawers, etc.)
       if (onClearTestData) {
@@ -170,6 +175,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         }
       }
 
+      // 3. Explicitly reset and synchronize clean state to the server
+      await syncService.resetServerState();
+
       setWipeResult({
         success: true,
         message: `Database successfully cleared! All demo products, IMEI serials, and test transactions were removed${firestoreInfo}. Your store is ready for live stock.`,
@@ -187,6 +195,10 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         message: err?.message || 'Failed to wipe test data.',
       });
       setIsWipingData(false);
+    } finally {
+      // Resume sync services now that the wipe and reset are complete
+      firestoreSync.resumeSync();
+      syncService.resume();
     }
   };
 

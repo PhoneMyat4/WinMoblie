@@ -2561,19 +2561,47 @@ export const StorageService = {
   applyAllData: (data: Record<string, any>, remoteTimestamp?: number): void => {
     if (!data || typeof data !== 'object') return;
     try {
-      if (data.settings) localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(data.settings));
+      const isFresh = isFreshDatabase();
+
+      if (data.settings) {
+        // If local is currently fresh but incoming settings does not have it, preserve fresh flag
+        const settingsToSave = isFresh ? { ...data.settings, isFreshDatabase: true } : data.settings;
+        localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settingsToSave));
+      }
       if (data.staffUsers) localStorage.setItem(STORAGE_KEYS.STAFF_USERS, JSON.stringify(data.staffUsers));
       if (data.rolePermissions) localStorage.setItem(STORAGE_KEYS.ROLE_PERMISSIONS, JSON.stringify(data.rolePermissions));
-      if (data.products) localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(data.products));
-      if (data.sales) localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(data.sales));
+
+      // If user initialized fresh database and remote data has mock/demo data, do not overwrite empty collections
+      if (data.products) {
+        if (!isFresh || (Array.isArray(data.products) && data.products.length > 0 && !data.products[0]?.id?.startsWith('prod-'))) {
+          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(data.products));
+        }
+      }
+      if (data.sales) {
+        if (!isFresh || (Array.isArray(data.sales) && data.sales.length > 0 && !data.sales[0]?.id?.startsWith('sale-'))) {
+          localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(data.sales));
+        }
+      }
       if (data.creditSales) localStorage.setItem(STORAGE_KEYS.CREDIT_SALES, JSON.stringify(data.creditSales));
-      if (data.purchases) localStorage.setItem(STORAGE_KEYS.PURCHASES, JSON.stringify(data.purchases));
-      if (data.expenses) localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(data.expenses));
+      if (data.purchases) {
+        if (!isFresh || (Array.isArray(data.purchases) && data.purchases.length > 0 && !data.purchases[0]?.id?.startsWith('purch-'))) {
+          localStorage.setItem(STORAGE_KEYS.PURCHASES, JSON.stringify(data.purchases));
+        }
+      }
+      if (data.expenses) {
+        if (!isFresh || (Array.isArray(data.expenses) && data.expenses.length > 0 && !data.expenses[0]?.id?.startsWith('exp-'))) {
+          localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(data.expenses));
+        }
+      }
       if (data.expenseCategories) localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(data.expenseCategories));
       if (data.stockAdjustments) localStorage.setItem(STORAGE_KEYS.STOCK_ADJUSTMENTS, JSON.stringify(data.stockAdjustments));
       if (data.priceChanges) localStorage.setItem(STORAGE_KEYS.PRICE_CHANGES, JSON.stringify(data.priceChanges));
       if (data.stockAudits) localStorage.setItem(STORAGE_KEYS.STOCK_AUDITS, JSON.stringify(data.stockAudits));
-      if (data.customers) localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(data.customers));
+      if (data.customers) {
+        if (!isFresh || (Array.isArray(data.customers) && data.customers.length > 0 && !data.customers[0]?.id?.startsWith('cust-'))) {
+          localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(data.customers));
+        }
+      }
       if (data.suppliers) localStorage.setItem(STORAGE_KEYS.SUPPLIERS, JSON.stringify(data.suppliers));
       if (data.cashDrawer) localStorage.setItem(STORAGE_KEYS.CASH_DRAWER, JSON.stringify(data.cashDrawer));
       if (data.preOrders) localStorage.setItem(STORAGE_KEYS.PRE_ORDERS, JSON.stringify(data.preOrders));

@@ -18,6 +18,7 @@ class SyncManager {
   private tabId: string = CLIENT_TAB_ID;
   private intervalId: number | null = null;
   private isSyncing = false;
+  private isPaused = false;
   private lastSyncedServerTimestamp = 0;
   private lastKnownLocalTimestamp = 0;
   private syncStatus: SyncStatus = 'idle';
@@ -209,7 +210,7 @@ class SyncManager {
    * Execute a full bidirectional sync check between localStorage, other tabs, and server
    */
   public async performSyncCheck(): Promise<void> {
-    if (this.isSyncing) return;
+    if (this.isSyncing || this.isPaused) return;
     this.isSyncing = true;
 
     try {
@@ -296,6 +297,53 @@ class SyncManager {
     if (this.intervalId !== null) {
       clearInterval(this.intervalId);
       this.intervalId = null;
+    }
+  }
+
+  public pause(): void {
+    console.log('[SyncManager] Pausing sync service...');
+    this.isPaused = true;
+  }
+
+  public resume(): void {
+    console.log('[SyncManager] Resuming sync service...');
+    this.isPaused = false;
+  }
+
+  public isSyncPaused(): boolean {
+    return this.isPaused;
+  }
+
+  /**
+   * Pushes the fresh zeroed clean state to the server explicitly with isReset: true flag
+   * to guarantee the in-memory server snapshot does not re-contaminate this or other tabs.
+   */
+  public async resetServerState(): Promise<boolean> {
+    try {
+      const allData = StorageService.getAllData();
+      const localTs = Date.now();
+
+      const response = await authenticatedFetch('/api/sync-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientTabId: this.tabId,
+          clientTimestamp: localTs,
+          data: allData,
+          isReset: true,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        this.lastSyncedServerTimestamp = result.serverTimestamp || localTs;
+        this.lastKnownLocalTimestamp = this.lastSyncedServerTimestamp;
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.warn('[SyncManager] Failed to notify server of data reset:', e);
+      return false;
     }
   }
 }
