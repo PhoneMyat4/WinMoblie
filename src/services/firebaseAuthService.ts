@@ -4,6 +4,7 @@ import {
   signInAnonymously, 
   signOut as firebaseSignOut, 
   onAuthStateChanged, 
+  updatePassword,
   User as FirebaseUser 
 } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
@@ -75,7 +76,6 @@ export class FirebaseAuthService {
         // If user doesn't exist yet in Firebase Auth, create account
         if (
           signInErr.code === 'auth/user-not-found' ||
-          signInErr.code === 'auth/invalid-credential' ||
           signInErr.code === 'auth/invalid-email'
         ) {
           try {
@@ -84,11 +84,10 @@ export class FirebaseAuthService {
             await this.syncStaffProfileToFirestore(staff, newCred.user.uid);
             return { success: true, user: newCred.user };
           } catch (createErr: any) {
-            // If creation fails due to existing email with another password, try anonymous sign-in
             console.warn('[FirebaseAuthService] Creation error, attempting anonymous fallback:', createErr.message);
           }
         } else {
-          console.warn('[FirebaseAuthService] Sign-in warning:', signInErr.message);
+          console.warn('[FirebaseAuthService] Sign-in warning:', signInErr.code, signInErr.message);
         }
       }
 
@@ -103,6 +102,53 @@ export class FirebaseAuthService {
         success: false, 
         error: err.message || 'Firebase authentication failed' 
       };
+    }
+  }
+
+  /**
+   * Direct verification against Firebase Authentication email/password.
+   * Returns { verified: true, user } if the entered password matches Firebase Auth.
+   */
+  public static async verifyFirebaseCredentials(staff: StaffUser, enteredPassword: string): Promise<{ verified: boolean; user?: FirebaseUser }> {
+    const email = this.getAuthEmail(staff);
+    const password = enteredPassword.length >= 6 ? enteredPassword : `${enteredPassword}123456`.slice(0, 12);
+
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      this.currentUser = cred.user;
+      await this.syncStaffProfileToFirestore(staff, cred.user.uid);
+      return { verified: true, user: cred.user };
+    } catch (err: any) {
+      // Also check if enteredPassword without padding matches (if entered password was already >= 6)
+      if (password !== enteredPassword) {
+        try {
+          const directCred = await signInWithEmailAndPassword(auth, email, enteredPassword);
+          this.currentUser = directCred.user;
+          await this.syncStaffProfileToFirestore(staff, directCred.user.uid);
+          return { verified: true, user: directCred.user };
+        } catch {
+          // Both failed
+        }
+      }
+      return { verified: false };
+    }
+  }
+
+  /**
+   * Updates or synchronizes the Firebase Auth password for the current authenticated staff.
+   */
+  public static async updateAuthPassword(newPassword: string): Promise<{ success: boolean; error?: string }> {
+    const user = auth.currentUser;
+    if (!user) {
+      return { success: false, error: 'No authenticated Firebase user session found' };
+    }
+    const cleanPass = newPassword.length >= 6 ? newPassword : `${newPassword}123456`.slice(0, 12);
+    try {
+      await updatePassword(user, cleanPass);
+      return { success: true };
+    } catch (err: any) {
+      console.warn('[FirebaseAuthService] updateAuthPassword failed:', err?.message || err);
+      return { success: false, error: err?.message || 'Password update failed' };
     }
   }
 

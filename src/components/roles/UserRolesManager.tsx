@@ -216,7 +216,7 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
     setRole(user.role);
     setPhone(user.phone);
     setEmail(user.email || '');
-    setPin(user.pin);
+    setPin(user.password || user.pin || '');
     setActive(user.active);
     setRestrictWorkingHours(user.role === 'Owner' ? false : Boolean(user.restrictWorkingHours));
     setWorkStartTime(user.workStartTime || '07:30');
@@ -227,7 +227,7 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
   const handleSaveStaff = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !pin) {
-      alert('Please provide staff name and a 4-digit security PIN.');
+      alert('Please provide staff name and a password or security PIN.');
       return;
     }
 

@@ -15,6 +15,7 @@ import {
 import { StaffUser, ShopSettings } from '../../types';
 import { FirebaseAuthService } from '../../services/firebaseAuthService';
 import { checkStaffWorkingHoursAccess } from '../../utils/workingHours';
+import { StorageService } from '../../utils/storage';
 
 interface LoginScreenProps {
   staffUsers: StaffUser[];
@@ -97,12 +98,36 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       return;
     }
 
-    // Verify password (supports user.password, user.pin, or master emergency PIN/passwords)
-    const isValidPassword = 
+    // Track effective user object in case password updates
+    let effectiveUser = matchedUser;
+
+    // Verify password:
+    // 1. Check local password/PIN/emergency credentials
+    let isValidPassword = 
       (matchedUser.password && matchedUser.password === cleanPassword) ||
       (matchedUser.pin && matchedUser.pin === cleanPassword) ||
       cleanPassword === '1234' ||
       cleanPassword === 'password123';
+
+    // 2. If local check fails, verify directly with Firebase Authentication
+    // (This handles the case where the user or admin updated password in Firebase console)
+    if (!isValidPassword) {
+      try {
+        const fbResult = await FirebaseAuthService.verifyFirebaseCredentials(matchedUser, cleanPassword);
+        if (fbResult.verified) {
+          isValidPassword = true;
+          // Synchronize the new password locally so future logins and offline access succeed seamlessly
+          effectiveUser = {
+            ...matchedUser,
+            password: cleanPassword,
+            pin: cleanPassword.length <= 6 ? cleanPassword : matchedUser.pin,
+          };
+          StorageService.saveStaffUser(effectiveUser, true);
+        }
+      } catch (err) {
+        console.warn('Direct Firebase Auth verification error:', err);
+      }
+    }
 
     if (!isValidPassword) {
       setErrorMsg('Invalid username or password. Please check your credentials.');
@@ -124,7 +149,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
     // Authenticate with Firebase Auth and sync user session to Firestore
     try {
-      await FirebaseAuthService.loginStaffWithFirebase(matchedUser, cleanPassword);
+      await FirebaseAuthService.loginStaffWithFirebase(effectiveUser, cleanPassword);
     } catch (fbErr) {
       console.warn('Firebase auth connection notice:', fbErr);
     }
@@ -142,7 +167,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
     setErrorMsg('');
     setIsSubmitting(false);
-    onLoginSuccess(matchedUser);
+    onLoginSuccess(effectiveUser);
   };
 
   return (
