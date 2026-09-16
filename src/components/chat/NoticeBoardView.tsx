@@ -156,7 +156,7 @@ export const NoticeBoardView: React.FC<NoticeBoardViewProps> = ({
         isPinned: formData.isPinned,
         pinnedAt: formData.isPinned ? new Date().toISOString() : undefined,
         pinnedBy: formData.isPinned ? (currentUser?.name || 'Manager') : undefined,
-        authorId: currentUser?.id || 'staff-1',
+        authorId: currentUser?.id || 'owner',
         authorName: currentUser?.name || 'Store Staff',
         authorRole: currentUser?.role || 'Manager',
         createdAt: new Date().toISOString(),

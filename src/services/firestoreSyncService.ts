@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { FirebaseAuthService } from './firebaseAuthService';
-import { StorageService, STORAGE_KEYS, isMockProduct } from '../utils/storage';
+import { StorageService, STORAGE_KEYS, isMockProduct, isMockStaffUser, MOCK_STAFF_IDS } from '../utils/storage';
 import { 
   Product, 
   Sale, 
@@ -344,6 +344,9 @@ export class FirestoreSyncService {
     }
 
     try {
+      // Purge any residual mock staff from Firestore in the background
+      this.purgeMockStaffUsersFromFirestore().catch(() => {});
+
       // 1. Settings Listener
       const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snap) => {
         if (snap.exists()) {
@@ -527,22 +530,28 @@ export class FirestoreSyncService {
       const unsubStaff = onSnapshot(query(collection(db, 'staffUsers'), limit(500)), (snap) => {
         if (!snap.empty) {
           const remoteStaff: StaffUser[] = [];
-          snap.forEach(d => remoteStaff.push(d.data() as StaffUser));
-          if (remoteStaff.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              const localStaff = StorageService.getStaffUsers();
-              const merged = [...localStaff];
-              remoteStaff.forEach(remote => {
-                const idx = merged.findIndex(l => l.id === remote.id);
-                if (idx >= 0) merged[idx] = { ...merged[idx], ...remote };
-                else merged.push(remote);
-              });
-              StorageService.saveStaffUsers(merged);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+          snap.forEach(d => {
+            const data = d.data() as StaffUser;
+            if (!isMockStaffUser(data)) {
+              remoteStaff.push(data);
+            } else {
+              deleteDoc(d.ref).catch(() => {});
             }
+          });
+          this.isProcessingRemoteSnapshot = true;
+          try {
+            const localStaff = StorageService.getStaffUsers();
+            const merged = [...localStaff];
+            remoteStaff.forEach(remote => {
+              const idx = merged.findIndex(l => l.id === remote.id);
+              if (idx >= 0) merged[idx] = { ...merged[idx], ...remote };
+              else merged.push(remote);
+            });
+            const cleanMerged = merged.filter(u => !isMockStaffUser(u));
+            StorageService.saveStaffUsers(cleanMerged);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+          } finally {
+            this.isProcessingRemoteSnapshot = false;
           }
         }
       }, (err) => console.warn('[FirestoreSync] Staff listener:', err.message));
@@ -956,7 +965,20 @@ export class FirestoreSyncService {
   }
 
   public async syncStaffUsers(staff: StaffUser[]): Promise<void> {
-    await this.batchWriteCollection('staffUsers', staff, u => u.id);
+    const cleanStaff = staff.filter(u => !isMockStaffUser(u));
+    await this.batchWriteCollection('staffUsers', cleanStaff, u => u.id);
+  }
+
+  public async purgeMockStaffUsersFromFirestore(): Promise<void> {
+    try {
+      const mockIds = ['staff-1', 'staff-2', 'staff-3', 'staff-4'];
+      for (const id of mockIds) {
+        const docRef = doc(db, 'staffUsers', id);
+        await deleteDoc(docRef).catch(() => {});
+      }
+    } catch (err: any) {
+      console.warn('[FirestoreSync] Error purging mock staff from Firestore:', err?.message || err);
+    }
   }
 
   public async syncStaffUser(staff: StaffUser): Promise<void> {

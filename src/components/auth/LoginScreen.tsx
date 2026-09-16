@@ -76,7 +76,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setIsSubmitting(true);
 
     // Find matching registered staff user by username, email, phone, or exact name
-    const matchedUser = activeStaff.find((u) => {
+    let matchedUser = activeStaff.find((u) => {
       const uName = (u.username || '').trim().toLowerCase();
       const fullName = (u.name || '').trim().toLowerCase();
       const phoneDigits = (u.phone || '').replace(/\D/g, '');
@@ -90,6 +90,26 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         (cleanUsername.includes('@') && email === cleanUsername)
       );
     });
+
+    // If all mock accounts were removed and no staff accounts exist yet, bootstrap the Owner account
+    if (!matchedUser && activeStaff.length === 0) {
+      const isOwnerEmail = cleanUsername === 'phonemyatpaing950@gmail.com' || cleanUsername.includes('@');
+      const ownerUsername = isOwnerEmail ? cleanUsername.split('@')[0] : (cleanUsername || 'owner');
+      const ownerAccount: StaffUser = {
+        id: `owner-${Date.now()}`,
+        username: ownerUsername,
+        name: isOwnerEmail ? `Store Owner (${ownerUsername})` : 'Store Owner',
+        role: 'Owner',
+        email: isOwnerEmail ? cleanUsername : 'owner@apexpos.internal',
+        phone: '09-123456789',
+        pin: cleanPassword.length <= 6 && /^\d+$/.test(cleanPassword) ? cleanPassword : '1234',
+        password: cleanPassword,
+        active: true,
+        avatarColor: 'bg-purple-600',
+      };
+      StorageService.saveStaffUser(ownerAccount, true);
+      matchedUser = ownerAccount;
+    }
 
     if (!matchedUser) {
       setErrorMsg('Invalid username or password. Please check your credentials.');
@@ -219,6 +239,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             <span>Firebase Auth & Firestore Connected</span>
           </div>
         </div>
+
+        {/* Clean slate notice if no staff accounts exist */}
+        {activeStaff.length === 0 && (
+          <div className="mb-4 p-3 bg-purple-950/40 border border-purple-800/60 rounded-2xl text-purple-200 text-xs text-left">
+            <p className="font-bold text-purple-100 flex items-center gap-1.5 mb-0.5">
+              <ShieldCheck className="w-4 h-4 text-purple-400 shrink-0" />
+              <span>Clean Slate Mode (0 Staff Accounts)</span>
+            </p>
+            <p className="text-[11px] text-purple-300/90 leading-relaxed">
+              Sign in with any username (e.g. <span className="font-semibold text-white">owner</span> or your email) and password to initialize your genuine Store Owner account.
+            </p>
+          </div>
+        )}
 
         {/* Login Form */}
         <form onSubmit={handleLoginSubmit} className="space-y-4">

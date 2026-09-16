@@ -93,7 +93,7 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
   const [deliveryCharges, setDeliveryCharges] = useState<number>(
     purchase.deliveryCharges !== undefined ? purchase.deliveryCharges : (purchase.shippingFee || 0)
   );
-  const [receivedBy, setReceivedBy] = useState<string>(currentStaffName || purchase.receivedBy || 'Ko Aung Kyaw');
+  const [receivedBy, setReceivedBy] = useState<string>(currentStaffName || purchase.receivedBy || 'Store Owner');
   const [receivedDate, setReceivedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [receivingNotes, setReceivingNotes] = useState<string>(purchase.receivingNotes || '');
   const [inspectionAcknowledged, setInspectionAcknowledged] = useState<boolean>(true);

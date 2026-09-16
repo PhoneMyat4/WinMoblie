@@ -49,7 +49,7 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
     telegramUsername: settings.telegramContact || '@shopmobile',
     facebookPage: 'facebook.com/mobilezone',
     showQrCode: true,
-    qrAccountName: 'Ko Aung Kyaw (Shop Account)',
+    qrAccountName: 'Store Account',
     qrAccountNumber: '09-798123456',
     qrCustomText: 'Scan to Pay via KPay / Wave',
     qrImageUrl: undefined,
@@ -570,7 +570,7 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
                       type="text"
                       value={customization.qrAccountName || ''}
                       onChange={(e) => setCustomization({ ...customization, qrAccountName: e.target.value })}
-                      placeholder="e.g. Ko Aung Kyaw (Shop Account)"
+                      placeholder="e.g. Store Account Name"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
                     />
                   </div>

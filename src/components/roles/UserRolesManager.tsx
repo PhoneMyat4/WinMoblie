@@ -19,6 +19,7 @@ import {
   Save,
   Sliders,
   Eye,
+  EyeOff,
   Search,
   CheckSquare,
   Square,
@@ -41,6 +42,7 @@ import {
   getEffectiveUserPermissions
 } from '../../utils/permissionUtils';
 import { formatTime12Hour, checkStaffWorkingHoursAccess } from '../../utils/workingHours';
+import { StorageService, isMockStaffUser } from '../../utils/storage';
 
 interface UserRolesManagerProps {
   staffUsers: StaffUser[];
@@ -48,6 +50,7 @@ interface UserRolesManagerProps {
   rolePermissions: Record<StaffRole, RolePermissions>;
   onSaveStaffUser: (user: StaffUser) => void;
   onDeleteStaffUser: (id: string) => void;
+  onPurgeMockStaffUsers?: () => void;
   onSwitchActiveStaff: (user: StaffUser) => void;
   onSaveRolePermissions: (permissions: Record<StaffRole, RolePermissions>) => void;
   onResetRolePermissions: (role?: StaffRole) => void;
@@ -61,6 +64,7 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
   rolePermissions,
   onSaveStaffUser,
   onDeleteStaffUser,
+  onPurgeMockStaffUsers,
   onSwitchActiveStaff,
   onSaveRolePermissions,
   onResetRolePermissions,
@@ -103,10 +107,13 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
   const [switchingToUser, setSwitchingToUser] = useState<StaffUser | null>(null);
   const [enteredPin, setEnteredPin] = useState('');
   const [pinError, setPinError] = useState(false);
+  const [showSwitchPinHint, setShowSwitchPinHint] = useState(false);
+  const [revealedPins, setRevealedPins] = useState<Record<string, boolean>>({});
+  const [showModalPin, setShowModalPin] = useState(false);
 
   // Simulator State
   const [simulatedStaffId, setSimulatedStaffId] = useState<string>(
-    settings.currentStaffId || staffUsers[0]?.id || 'staff-1'
+    settings.currentStaffId || staffUsers[0]?.id || 'owner'
   );
 
   const activeStaffUser = useMemo(() => {
@@ -801,40 +808,110 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
       {/* SUBTAB 2: STAFF ACCOUNTS */}
       {activeSubTab === 'staff' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {staffUsers.map((user) => {
-              const isCurrentActive = settings.currentStaffId === user.id || settings.currentStaffName === user.name;
-              const overrideCount = user.customPermissions ? Object.keys(user.customPermissions).length : 0;
-
-              return (
-                <div 
-                  key={user.id}
-                  className={`bg-white p-5 rounded-3xl border transition-all flex flex-col justify-between ${
-                    isCurrentActive ? 'border-purple-500 ring-2 ring-purple-100 shadow-md' : 'border-slate-200 shadow-2xs hover:border-slate-300'
-                  }`}
+          {/* Header Action Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200">
+            <div>
+              <h2 className="text-sm font-black text-slate-900">Registered Staff Accounts ({staffUsers.length})</h2>
+              <p className="text-xs text-slate-500">Manage real employees, PINs, login credentials, and shift hours.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {staffUsers.some(u => isMockStaffUser(u)) && (
+                <button
+                  type="button"
+                  id="purge-mock-staff-accounts-btn"
+                  onClick={() => {
+                    if (confirm('Are you sure you want to permanently remove all mock demonstration staff accounts?')) {
+                      if (onPurgeMockStaffUsers) {
+                        onPurgeMockStaffUsers();
+                      } else {
+                        StorageService.purgeMockStaffUsers();
+                        window.location.reload();
+                      }
+                    }
+                  }}
+                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
                 >
-                  <div>
-                    <div className="flex items-start justify-between mb-3">
-                      <div className={`w-11 h-11 rounded-2xl ${user.avatarColor || 'bg-slate-700'} text-white font-black text-sm flex items-center justify-center shadow-xs`}>
-                        {(user.name || 'Staff').slice(0, 2).toUpperCase()}
-                      </div>
+                  <Trash2 className="w-4 h-4 text-rose-600" />
+                  <span>Purge Mock Accounts</span>
+                </button>
+              )}
+              <button
+                type="button"
+                id="add-new-staff-account-btn"
+                onClick={handleOpenNewStaffModal}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Add Staff User</span>
+              </button>
+            </div>
+          </div>
 
-                      <div className="flex items-center gap-1">
-                        {isCurrentActive && (
-                          <span className="px-2 py-0.5 bg-purple-100 text-purple-800 font-bold text-[10px] rounded-full">
-                            Active
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditStaffModal(user)}
-                          className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
-                          title="Edit staff account details"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
+          {staffUsers.length === 0 ? (
+            <div className="bg-white p-10 rounded-3xl border border-slate-200 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 mx-auto flex items-center justify-center">
+                <Users className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900">No Staff Accounts Registered</h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                All mock staff user accounts have been removed. Add your genuine Store Owner, Manager, or Cashier accounts below.
+              </p>
+              <button
+                type="button"
+                onClick={handleOpenNewStaffModal}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Create Staff / Owner Account</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {staffUsers.map((user) => {
+                const isCurrentActive = settings.currentStaffId === user.id || settings.currentStaffName === user.name;
+                const overrideCount = user.customPermissions ? Object.keys(user.customPermissions).length : 0;
+
+                return (
+                  <div 
+                    key={user.id}
+                    className={`bg-white p-5 rounded-3xl border transition-all flex flex-col justify-between ${
+                      isCurrentActive ? 'border-purple-500 ring-2 ring-purple-100 shadow-md' : 'border-slate-200 shadow-2xs hover:border-slate-300'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-start justify-between mb-3">
+                        <div className={`w-11 h-11 rounded-2xl ${user.avatarColor || 'bg-slate-700'} text-white font-black text-sm flex items-center justify-center shadow-xs`}>
+                          {(user.name || 'Staff').slice(0, 2).toUpperCase()}
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          {isCurrentActive && (
+                            <span className="px-2 py-0.5 bg-purple-100 text-purple-800 font-bold text-[10px] rounded-full">
+                              Active
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditStaffModal(user)}
+                            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
+                            title="Edit staff account details"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm(`Are you sure you want to delete staff account "${user.name}"?`)) {
+                                onDeleteStaffUser(user.id);
+                              }
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
+                            title="Delete staff account"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
 
                     <h3 className="text-sm font-black text-slate-900">{user.name}</h3>
                     <div className="flex items-center gap-1.5 flex-wrap mt-1">
@@ -857,10 +934,23 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
                         <Phone className="w-3 h-3 text-slate-400" />
                         {user.phone || 'No phone'}
                       </p>
-                      <p className="flex items-center gap-1.5">
-                        <KeyRound className="w-3 h-3 text-slate-400" />
-                        <span>Security: ••••••••</span>
-                      </p>
+                      <div className="flex items-center justify-between py-1 px-2 rounded-xl bg-slate-50 border border-slate-200/80">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <KeyRound className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                          <span className="text-[10px] text-slate-500 font-bold uppercase">PIN:</span>
+                          <span className="font-mono font-black text-slate-800 text-xs tracking-wider">
+                            {revealedPins[user.id] ? (user.pin || user.password || '1234') : '••••'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setRevealedPins(prev => ({ ...prev, [user.id]: !prev[user.id] }))}
+                          className="p-1 text-slate-400 hover:text-purple-700 hover:bg-purple-100/60 rounded-md transition-colors cursor-pointer shrink-0"
+                          title={revealedPins[user.id] ? "Hide Operator PIN" : "Show Operator PIN"}
+                        >
+                          {revealedPins[user.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
                       <div className="flex items-center gap-1.5 pt-1 text-[10px]">
                         <Clock className="w-3 h-3 text-slate-400 shrink-0" />
                         {user.role === 'Owner' ? (
@@ -909,8 +999,9 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
               );
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+    )}
 
       {/* SUBTAB 3: PER-USER CUSTOM OVERRIDES */}
       {activeSubTab === 'user_overrides' && (
@@ -1271,7 +1362,7 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">Full Name *</label>
                   <input
                     type="text"
-                    placeholder="e.g. Ko Aung Kyaw"
+                    placeholder="e.g. Store Manager"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold"
@@ -1311,15 +1402,28 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Password / PIN *</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-slate-700 text-xs">Switch Operator PIN *</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowModalPin(!showModalPin)}
+                      className="text-[11px] text-purple-600 hover:text-purple-800 font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      {showModalPin ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      <span>{showModalPin ? 'Hide' : 'Show PIN'}</span>
+                    </button>
+                  </div>
                   <input
-                    type="password"
-                    placeholder="e.g. password or PIN"
+                    type={showModalPin ? "text" : "password"}
+                    placeholder="e.g. 1234"
                     value={pin}
                     onChange={(e) => setPin(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono tracking-wider font-bold"
                     required
                   />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    4-digit security code used to switch operators and unlock cashier terminals.
+                  </p>
                 </div>
               </div>
 
@@ -1448,7 +1552,7 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
               </div>
 
               <div className="pt-3 border-t border-slate-200 flex justify-between items-center">
-                {editingStaff && staffUsers.length > 1 ? (
+                {editingStaff ? (
                   <button
                     type="button"
                     onClick={() => {
@@ -1500,6 +1604,41 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
               <p className="text-xs text-slate-500 mt-1">
                 Enter 4-digit PIN for <strong>{switchingToUser.name}</strong>
               </p>
+            </div>
+
+            {/* Operator PIN Helper / Reveal */}
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 text-left space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-slate-600 flex items-center gap-1.5 text-[11px]">
+                  <KeyRound className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                  Operator PIN:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowSwitchPinHint(!showSwitchPinHint)}
+                  className="text-[11px] font-bold text-purple-600 hover:text-purple-800 flex items-center gap-1 cursor-pointer"
+                >
+                  {showSwitchPinHint ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  <span>{showSwitchPinHint ? 'Hide' : 'Reveal PIN'}</span>
+                </button>
+              </div>
+              {showSwitchPinHint && (
+                <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-purple-200">
+                  <span className="font-mono font-black text-sm tracking-widest text-purple-900">
+                    {switchingToUser.pin || switchingToUser.password || '1234'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEnteredPin(switchingToUser.pin || switchingToUser.password || '1234');
+                      setPinError(false);
+                    }}
+                    className="text-[10px] font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded-md border border-purple-200 transition-colors cursor-pointer"
+                  >
+                    Quick Fill
+                  </button>
+                </div>
+              )}
             </div>
 
             <form onSubmit={handleVerifySwitchPin} className="space-y-4">

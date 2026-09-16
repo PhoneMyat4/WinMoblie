@@ -256,6 +256,29 @@ export function isMockProduct(p: { id?: string } | null | undefined): boolean {
   return MOCK_PRODUCT_IDS.has(p.id) || p.id.startsWith('prod-cook-');
 }
 
+// Known IDs and names of mock/sample demonstration staff users
+export const MOCK_STAFF_IDS = new Set<string>([
+  'staff-1', 'staff-2', 'staff-3', 'staff-4'
+]);
+
+export function isMockStaffUser(u: { id?: string; name?: string; username?: string; email?: string } | null | undefined): boolean {
+  if (!u) return false;
+  if (u.id && MOCK_STAFF_IDS.has(u.id)) return true;
+  if (u.email && (
+    u.email === 'aungkyaw@apexmobile.mm' ||
+    u.email === 'thandar@apexmobile.mm' ||
+    u.email === 'minthu@apexmobile.mm' ||
+    u.email === 'zawzaw@apexmobile.mm'
+  )) return true;
+  if (u.name && (
+    u.name.includes('Ko Aung Kyaw') ||
+    u.name.includes('Ma Thandar') ||
+    u.name.includes('Ko Min Thu') ||
+    u.name.includes('Ko Zaw Zaw')
+  )) return true;
+  return false;
+}
+
 export const StorageService = {
   setSyncHandler: (handler: StorageChangeHandler | null) => {
     activeStorageSyncHandler = handler;
@@ -291,6 +314,16 @@ export const StorageService = {
     } catch {
       // ignore
     }
+    // Purge mock staff identity references if still set to Ko Aung Kyaw (Owner)
+    if (s.currentStaffId === 'staff-1' || s.currentStaffName === 'Ko Aung Kyaw (Owner)') {
+      s.currentStaffName = 'Store Owner';
+      s.currentStaffId = 'owner';
+      s.currentStaffRole = 'Owner';
+    }
+    if (s.invoiceCustomization?.qrAccountName === 'Ko Aung Kyaw (Golden Star)' || s.invoiceCustomization?.qrAccountName === 'Ko Aung Kyaw (Shop Account)') {
+      s.invoiceCustomization.qrAccountName = 'Shop Account (Golden Star)';
+    }
+
     return s;
   },
   saveSettings: (settings: ShopSettings, triggerSync = true) => {
@@ -346,10 +379,16 @@ export const StorageService = {
   // Staff Users
   getStaffUsers: (): StaffUser[] => {
     let raw = getItem<StaffUser[]>(STORAGE_KEYS.STAFF_USERS, initialStaffUsers);
-    if (!Array.isArray(raw) || raw.length === 0) {
-      raw = initialStaffUsers;
+    if (!Array.isArray(raw)) {
+      raw = [];
     }
-    return raw.filter(Boolean).map((u, idx) => ({
+    // Filter out mock staff users
+    const filtered = raw.filter(u => u && !isMockStaffUser(u));
+    // If mock users existed in storage, immediately persist the clean list
+    if (filtered.length !== raw.length) {
+      setItem(STORAGE_KEYS.STAFF_USERS, filtered);
+    }
+    return filtered.map((u, idx) => ({
       ...u,
       username: u.username || (
         u.role === 'Owner' ? 'owner' :
@@ -362,6 +401,15 @@ export const StorageService = {
       workStartTime: u.workStartTime || (u.restrictWorkingHours ? '07:30' : undefined),
       workEndTime: u.workEndTime || (u.restrictWorkingHours ? '19:00' : undefined),
     }));
+  },
+  purgeMockStaffUsers: (): StaffUser[] => {
+    const raw = getItem<StaffUser[]>(STORAGE_KEYS.STAFF_USERS, []);
+    const clean = (Array.isArray(raw) ? raw : []).filter(u => u && !isMockStaffUser(u));
+    StorageService.saveStaffUsers(clean, true);
+    return clean;
+  },
+  clearAllStaffUsers: (): void => {
+    StorageService.saveStaffUsers([], true);
   },
   saveStaffUsers: (users: StaffUser[], triggerSync = true) => {
     setItem(STORAGE_KEYS.STAFF_USERS, users);

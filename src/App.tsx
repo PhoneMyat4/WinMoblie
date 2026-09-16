@@ -491,6 +491,13 @@ export default function App() {
     });
   };
 
+  const handlePurgeMockStaffUsers = () => {
+    const updated = StorageService.purgeMockStaffUsers();
+    setStaffUsers(updated);
+    firestoreSync.purgeMockStaffUsersFromFirestore().catch(() => {});
+    AuditLogger.logSecurity('STAFF_DELETED', `Purged all mock demonstration staff user accounts`, currentActiveUser);
+  };
+
   const handleSwitchActiveStaff = (user: StaffUser) => {
     const latestStaff = StorageService.getStaffUsers();
     const freshUser = latestStaff.find(u => u.id === user.id) || user;
@@ -889,6 +896,7 @@ export default function App() {
               rolePermissions={rolePermissions}
               onSaveStaffUser={handleSaveStaffUser}
               onDeleteStaffUser={handleDeleteStaffUser}
+              onPurgeMockStaffUsers={handlePurgeMockStaffUsers}
               onSwitchActiveStaff={handleSwitchActiveStaff}
               onSaveRolePermissions={handleSaveRolePermissions}
               onResetRolePermissions={handleResetRolePermissions}

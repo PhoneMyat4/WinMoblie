@@ -37,56 +37,7 @@ export const initialExpenseCategories: ExpenseCategoryItem[] = [
   { id: 'other_general', name: 'General Miscellaneous', icon: 'Tag', badgeColor: 'slate', description: 'Daily petty cash & miscellaneous operational expenses', isDefault: true },
 ];
 
-export const initialStaffUsers: StaffUser[] = [
-  {
-    id: 'staff-1',
-    username: 'owner',
-    name: 'Ko Aung Kyaw (Owner)',
-    role: 'Owner',
-    phone: '09-798123456',
-    email: 'aungkyaw@apexmobile.mm',
-    pin: '1234',
-    password: 'password123',
-    active: true,
-    avatarColor: 'bg-purple-600',
-  },
-  {
-    id: 'staff-2',
-    username: 'manager',
-    name: 'Ma Thandar (Manager)',
-    role: 'Manager',
-    phone: '09-974567890',
-    email: 'thandar@apexmobile.mm',
-    pin: '2345',
-    password: 'password123',
-    active: true,
-    avatarColor: 'bg-blue-600',
-  },
-  {
-    id: 'staff-3',
-    username: 'cashier',
-    name: 'Ko Min Thu (Cashier)',
-    role: 'Cashier',
-    phone: '09-450112233',
-    email: 'minthu@apexmobile.mm',
-    pin: '3456',
-    password: 'password123',
-    active: true,
-    avatarColor: 'bg-emerald-600',
-  },
-  {
-    id: 'staff-4',
-    username: 'stock',
-    name: 'Ko Zaw Zaw (Stock Controller)',
-    role: 'Inventory_Staff',
-    phone: '09-250998877',
-    email: 'zawzaw@apexmobile.mm',
-    pin: '4567',
-    password: 'password123',
-    active: true,
-    avatarColor: 'bg-amber-600',
-  },
-];
+export const initialStaffUsers: StaffUser[] = [];
 
 export const initialSettings: ShopSettings = {
   shopName: 'Golden Star Mobile & Gadgets',
@@ -111,9 +62,9 @@ export const initialSettings: ShopSettings = {
   warrantyPolicy: '• 1 Year Official Brand Warranty for Brand New phones\n• 7 Days Checking Warranty for Used / Secondhand phones\n• 6 Months Warranty for Original Chargers & Power Banks\n• No warranty for physical drop damage or water ingress.',
   receiptFooterMessage: 'ဝယ်ယူအားပေးမှုအတွက် အထူးကျေးဇူးတင်ရှိပါသည်။ (Thank You for Shopping with Us!)',
   loyaltyPointsPerDollar: 0.001, // 1 pt per 1,000 Ks
-  currentStaffName: 'Ko Aung Kyaw (Owner)',
+  currentStaffName: 'Store Owner',
   currentStaffRole: 'Owner',
-  currentStaffId: 'staff-1',
+  currentStaffId: 'owner',
   enableSoundEffects: true,
   invoiceCustomization: {
     headerTitle: 'GOLDEN STAR MOBILE',
@@ -128,7 +79,7 @@ export const initialSettings: ShopSettings = {
     facebookPage: 'facebook.com/goldenstarmobile.ygn',
     showQrCode: true,
     qrType: 'kpay',
-    qrAccountName: 'Ko Aung Kyaw (Golden Star)',
+    qrAccountName: 'Shop Account (Golden Star)',
     qrAccountNumber: '09-798123456',
     qrCustomText: 'Scan to Pay via KPay / Wave',
     showImeiDetails: true,
