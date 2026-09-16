@@ -326,6 +326,12 @@ export default function App() {
     AuditLogger.logInventory('PRODUCT_DELETED', `Deleted product: ${existing?.name || id}`, currentActiveUser, { targetId: id });
   };
 
+  const handleClearAllProducts = () => {
+    StorageService.clearAllProducts();
+    setProducts([]);
+    AuditLogger.logInventory('PRODUCT_DELETED', 'Cleared all inventory products', currentActiveUser);
+  };
+
   const handleStockAdjustment = (adj: StockAdjustment) => {
     StorageService.adjustStock(adj);
     AuditLogger.logInventory(
@@ -726,6 +732,7 @@ export default function App() {
               onSaveProduct={handleSaveProduct}
               onBulkSaveProducts={handleBulkSaveProducts}
               onDeleteProduct={handleDeleteProduct}
+              onClearAllProducts={handleClearAllProducts}
               onOpenProductHistory={(product) => setHistoryModalProduct(product)}
               onOpenStockCheck={() => setActiveTab('stock_check')}
               onOpenQuarantineRma={() => setActiveTab('quarantine_rma')}

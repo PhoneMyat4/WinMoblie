@@ -107,7 +107,7 @@ const QUICK_PROMPTS = [
   { label: "Download Daily Profit PDF", prompt: "Please generate and download today's Daily Gross Profit & P&L Audit Dossier as a PDF report.", icon: Download },
   { label: "Annual Profit PDF", prompt: "Generate and download our Annual Profit and Loss Statement PDF report for this fiscal year.", icon: FileText },
   { label: "Scan Phone Box", prompt: "Please inspect this phone box photo, read the sticker, and extract brand, model, specs, and IMEI to register into inventory.", icon: ImageIcon },
-  { label: "Post Ad to Facebook", prompt: "Make a Facebook advertisement post for product prod-1 with AI generated photo and caption.", icon: Share2 },
+  { label: "Post Ad to Facebook", prompt: "Make a Facebook advertisement post for our featured phone with AI generated photo and caption.", icon: Share2 },
   { label: "Today's Z-Report", prompt: "Generate today's complete Z-Report with sales, refunds, expenses, and drawer balance.", icon: BarChart3 },
   { label: "Change Price", prompt: 'Change the selling price of product "name - n 16, brand Xiaomi, 12/128GB" to 550000', icon: Wand2 },
   { label: "Dead Stock Items", prompt: "Identify dead stock items with 0 sales and estimate total tied-up capital.", icon: AlertTriangle },

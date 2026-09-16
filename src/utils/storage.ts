@@ -244,6 +244,18 @@ export interface StorageChangeHandler {
 
 let activeStorageSyncHandler: StorageChangeHandler | null = null;
 
+// Known IDs of mock/sample demonstration products
+export const MOCK_PRODUCT_IDS = new Set<string>([
+  'prod-1', 'prod-2', 'prod-3', 'prod-4', 'prod-4b', 'prod-5', 'prod-5b', 'prod-6', 
+  'prod-7', 'prod-8', 'prod-9', 'prod-10', 'prod-10b', 'prod-10c', 'prod-11', 'prod-12', 'prod-15',
+  'prod-cook-1', 'prod-cook-2', 'prod-cook-3', 'prod-cook-4', 'prod-cook-5', 'prod-cook-6'
+]);
+
+export function isMockProduct(p: { id?: string } | null | undefined): boolean {
+  if (!p || !p.id) return false;
+  return MOCK_PRODUCT_IDS.has(p.id) || p.id.startsWith('prod-cook-');
+}
+
 export const StorageService = {
   setSyncHandler: (handler: StorageChangeHandler | null) => {
     activeStorageSyncHandler = handler;
@@ -416,21 +428,10 @@ export const StorageService = {
     const rawProds = getItem(STORAGE_KEYS.PRODUCTS, initialProducts);
     const prods = Array.isArray(rawProds) ? rawProds.filter(p => p && typeof p === 'object' && p.id) : [];
     
-    // One-time migration guard for initial sample cookware - respects user deletions afterwards
-    let list = [...prods];
-    try {
-      const COOKWARE_MIGRATED_KEY = 'mobileshop_cookware_migrated_v1';
-      if (typeof localStorage !== 'undefined' && !localStorage.getItem(COOKWARE_MIGRATED_KEY)) {
-        const hasCookware = list.some(p => p && canonicalCategory(p.category) === 'cookware');
-        if (!hasCookware && list.length > 0 && !isFreshDatabase()) {
-          const cookwareSeed = initialProducts.filter(p => p && p.category === 'cookware');
-          list = [...list, ...cookwareSeed];
-          setItem(STORAGE_KEYS.PRODUCTS, list, false);
-        }
-        localStorage.setItem(COOKWARE_MIGRATED_KEY, 'true');
-      }
-    } catch {
-      // ignore
+    // Automatically purge mock products so store has clean, real inventory
+    let list = prods.filter(p => !isMockProduct(p));
+    if (list.length !== prods.length) {
+      setItem(STORAGE_KEYS.PRODUCTS, list, false);
     }
 
     // Merge any duplicate products created from legacy repurchasing glitches
@@ -612,6 +613,26 @@ export const StorageService = {
     if (triggerSync && activeStorageSyncHandler?.onProductDelete) {
       activeStorageSyncHandler.onProductDelete(id);
     }
+  },
+  clearAllProducts: (triggerSync = true) => {
+    const existing = StorageService.getProducts();
+    StorageService.saveProducts([]);
+    if (triggerSync && activeStorageSyncHandler?.onProductDelete) {
+      existing.forEach(p => activeStorageSyncHandler?.onProductDelete?.(p.id));
+    }
+  },
+  purgeMockProducts: (triggerSync = true) => {
+    const current = StorageService.getProducts();
+    const filtered = current.filter(p => !isMockProduct(p));
+    StorageService.saveProducts(filtered);
+    if (triggerSync && activeStorageSyncHandler?.onProductDelete) {
+      current.forEach(p => {
+        if (isMockProduct(p)) {
+          activeStorageSyncHandler?.onProductDelete?.(p.id);
+        }
+      });
+    }
+    return filtered;
   },
 
   // Damage Logs (3-Phase Quarantine, Assessment & Disposition System)

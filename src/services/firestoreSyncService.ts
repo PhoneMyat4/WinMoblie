@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { FirebaseAuthService } from './firebaseAuthService';
-import { StorageService, STORAGE_KEYS } from '../utils/storage';
+import { StorageService, STORAGE_KEYS, isMockProduct } from '../utils/storage';
 import { 
   Product, 
   Sale, 
@@ -377,7 +377,14 @@ export class FirestoreSyncService {
       const unsubProducts = onSnapshot(query(collection(db, 'products'), limit(500)), (snap) => {
         if (!snap.empty) {
           const remoteProducts: Product[] = [];
-          snap.forEach(d => remoteProducts.push(d.data() as Product));
+          snap.forEach(d => {
+            const data = d.data() as Product;
+            if (data && isMockProduct(data)) {
+              deleteDoc(doc(db, 'products', d.id)).catch(() => {});
+            } else if (data) {
+              remoteProducts.push(data);
+            }
+          });
           if (remoteProducts.length > 0) {
             this.isProcessingRemoteSnapshot = true;
             try {
@@ -1630,7 +1637,10 @@ export class FirestoreSyncService {
       };
 
       // Pull all remaining collections
-      await pullCollection<Product>('products', items => StorageService.bulkSaveProducts(items, true, false));
+      await pullCollection<Product>('products', items => {
+        const filtered = items.filter(p => !isMockProduct(p));
+        StorageService.bulkSaveProducts(filtered, true, false);
+      });
       await pullCollection<Sale>('sales', items => StorageService.bulkSaveSales(items, false));
       await pullCollection<CreditSaleRecord>('creditSales', items => StorageService.saveCreditSales(items));
       await pullCollection<PurchaseRecord>('purchases', items => StorageService.bulkSavePurchases(items, false));

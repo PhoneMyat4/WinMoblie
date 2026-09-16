@@ -66,6 +66,7 @@ interface InventoryManagerProps {
   onOpenStockCheck?: () => void;
   onOpenQuarantineRma?: () => void;
   onBulkSaveProducts?: (products: Product[], mergeWithExisting: boolean) => void;
+  onClearAllProducts?: () => void;
 }
 
 export const InventoryManager: React.FC<InventoryManagerProps> = ({
@@ -77,6 +78,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   onOpenStockCheck,
   onOpenQuarantineRma,
   onBulkSaveProducts,
+  onClearAllProducts,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('all');
@@ -772,6 +774,23 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
             <span>Bulk Import</span>
           </button>
+
+          {onClearAllProducts && safeProducts.length > 0 && (
+            <button
+              id="clear-all-products-btn"
+              type="button"
+              onClick={() => {
+                if (window.confirm('Are you sure you want to remove all products from inventory? This cannot be undone.')) {
+                  onClearAllProducts();
+                }
+              }}
+              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 shadow-2xs transition-all cursor-pointer"
+              title="Remove all products from inventory"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+              <span>Clear Products</span>
+            </button>
+          )}
 
           {onOpenStockCheck && (
             <button
