@@ -1463,6 +1463,7 @@ export class FirestoreSyncService {
 
       await setDoc(doc(db, 'settings', 'global'), sanitizeForFirestore({
         ...settings,
+        isFreshDatabase: true,
         lastSyncedAt: new Date().toISOString(),
       }), { merge: true });
 

@@ -123,7 +123,21 @@ try {
 
 function isFreshDatabase(): boolean {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') return false;
-  return localStorage.getItem(STORAGE_KEYS.IS_FRESH_DATABASE) === 'true';
+  if (localStorage.getItem(STORAGE_KEYS.IS_FRESH_DATABASE) === 'true') return true;
+  try {
+    const rawSettings = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+    if (rawSettings) {
+      const parsed = JSON.parse(rawSettings);
+      if (parsed?.isFreshDatabase === true) {
+        // Also heal the dedicated flag so subsequent checks are fast
+        localStorage.setItem(STORAGE_KEYS.IS_FRESH_DATABASE, 'true');
+        return true;
+      }
+    }
+  } catch {
+    // ignore parse error
+  }
+  return false;
 }
 
 function getItem<T>(key: string, defaultValue: T): T {
@@ -2370,8 +2384,16 @@ export const StorageService = {
     };
     localStorage.setItem(STORAGE_KEYS.CASH_DRAWER, JSON.stringify(cleanDrawer));
 
+    // Persist isFreshDatabase: true directly into the settings document as well
+    const currentSettings = StorageService.getSettings();
+    const freshSettings: ShopSettings = {
+      ...currentSettings,
+      isFreshDatabase: true,
+    };
+    StorageService.saveSettings(freshSettings, true);
+
     // Log initialization event in clean audit log
-    const currentStaffId = StorageService.getSettings().currentStaffId || 'user-1';
+    const currentStaffId = freshSettings.currentStaffId || 'user-1';
     const staffUser = StorageService.getStaffUsers().find(s => s.id === currentStaffId);
     const auditEntry: AuditLogEntry = {
       id: `audit_fresh_${Date.now()}`,
@@ -2404,7 +2426,8 @@ export const StorageService = {
   },
   resetAllToDemoData: () => {
     localStorage.removeItem(STORAGE_KEYS.IS_FRESH_DATABASE);
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(initialSettings));
+    const cleanInitialSettings = { ...initialSettings, isFreshDatabase: false };
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(cleanInitialSettings));
     localStorage.setItem(STORAGE_KEYS.STAFF_USERS, JSON.stringify(initialStaffUsers));
     localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(initialProducts));
     localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(initialSales));

@@ -986,6 +986,7 @@ export interface ShopSettings {
   expenseCategories?: ExpenseCategoryItem[];
   socialMediaConfig?: FacebookPageConfig;
   secrets?: ShopSecretsConfig;
+  isFreshDatabase?: boolean; // When true, database is fresh clean across all synced devices, forbidding demo data fallbacks
 }
 
 export type AppTab = 
