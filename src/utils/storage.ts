@@ -535,10 +535,10 @@ export const StorageService = {
             ...match,
             costPrice: newProd.costPrice > 0 ? newProd.costPrice : match.costPrice,
             sellingPrice: newProd.sellingPrice > 0 ? newProd.sellingPrice : match.sellingPrice,
-            stock: isPhone && mergedPairs.length > 0 ? mergedPairs.length : match.stock + newProd.stock,
+            stock: isPhone && mergedPairs.length > 0 ? mergedPairs.length : (typeof newProd.stock === 'number' ? newProd.stock : match.stock),
             imeiPairs: isPhone && mergedPairs.length > 0 ? mergedPairs : match.imeiPairs,
             imeiList: isPhone && mergedFlatList.size > 0 ? Array.from(mergedFlatList) : match.imeiList,
-            lastRestockedAt: new Date().toISOString(),
+            lastRestockedAt: newProd.lastRestockedAt || match.lastRestockedAt || new Date().toISOString(),
           };
           return;
         }
