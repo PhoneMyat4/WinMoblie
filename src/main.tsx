@@ -1,6 +1,7 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import './index.css';
 
 // Filter out benign ZXing internal frame decode noise that floods console
@@ -22,7 +23,9 @@ if (typeof window !== 'undefined') {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );
 

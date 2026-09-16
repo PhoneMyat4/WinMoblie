@@ -258,21 +258,22 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   }, []);
 
   // Financial Stock Valuation
-  const totalUnits = products.reduce((s, p) => s + p.stock, 0);
-  const totalCostValuation = products.reduce((s, p) => s + (p.costPrice * p.stock), 0);
-  const totalRetailValuation = products.reduce((s, p) => s + (p.sellingPrice * p.stock), 0);
+  const safeProducts = useMemo(() => Array.isArray(products) ? products.filter(Boolean) : [], [products]);
+  const totalUnits = safeProducts.reduce((s, p) => s + (Number(p.stock) || 0), 0);
+  const totalCostValuation = safeProducts.reduce((s, p) => s + ((Number(p.costPrice) || 0) * (Number(p.stock) || 0)), 0);
+  const totalRetailValuation = safeProducts.reduce((s, p) => s + ((Number(p.sellingPrice) || 0) * (Number(p.stock) || 0)), 0);
   const projectedGrossProfit = totalRetailValuation - totalCostValuation;
-  const lowStockItems = products.filter(p => p.stock <= p.minStockAlert);
+  const lowStockItems = safeProducts.filter(p => (Number(p.stock) || 0) <= (Number(p.minStockAlert) || 0));
 
   // Available Brands for current category selection
   const availableBrands = useMemo(() => {
     const targetProducts = selectedCategory === 'all'
-      ? products
-      : products.filter(p => canonicalCategory(p.category) === selectedCategory);
+      ? safeProducts
+      : safeProducts.filter(p => p && canonicalCategory(p.category) === selectedCategory);
 
     const brandMap = new Map<string, number>();
     targetProducts.forEach(p => {
-      if (p.brand && p.brand.trim()) {
+      if (p && p.brand && p.brand.trim()) {
         const b = p.brand.trim();
         brandMap.set(b, (brandMap.get(b) || 0) + 1);
       }
@@ -281,11 +282,12 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     return Array.from(brandMap.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [products, selectedCategory]);
+  }, [safeProducts, selectedCategory]);
 
   // Available Subcategories for current category & brand selection
   const availableSubCategories = useMemo(() => {
-    const targetProducts = products.filter(p => {
+    const targetProducts = safeProducts.filter(p => {
+      if (!p) return false;
       const matchCat = selectedCategory === 'all' || canonicalCategory(p.category) === selectedCategory;
       const matchBrand = selectedBrand === 'all' || (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
       return matchCat && matchBrand;
@@ -293,7 +295,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
     const subMap = new Map<string, number>();
     targetProducts.forEach(p => {
-      if (p.subCategory && p.subCategory.trim()) {
+      if (p && p.subCategory && p.subCategory.trim()) {
         const sub = p.subCategory.trim();
         subMap.set(sub, (subMap.get(sub) || 0) + 1);
       }
@@ -302,11 +304,12 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     return Array.from(subMap.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [products, selectedCategory, selectedBrand]);
+  }, [safeProducts, selectedCategory, selectedBrand]);
 
   // Available RAM options (extracted from phone products)
   const availableRams = useMemo(() => {
-    const targetProducts = products.filter(p => {
+    const targetProducts = safeProducts.filter(p => {
+      if (!p) return false;
       const matchCat = selectedCategory === 'all' || canonicalCategory(p.category) === selectedCategory;
       const matchBrand = selectedBrand === 'all' || (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
       return matchCat && matchBrand;
@@ -314,6 +317,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
     const ramMap = new Map<string, number>();
     targetProducts.forEach(p => {
+      if (!p) return;
       const isPhone = isPhoneCategory(p.category);
       if (p.ram && p.ram.trim() && p.ram !== '-') {
         const r = p.ram.trim().toUpperCase();
@@ -334,11 +338,12 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         const numB = parseInt(b.name) || 0;
         return numA - numB;
       });
-  }, [products, selectedCategory, selectedBrand]);
+  }, [safeProducts, selectedCategory, selectedBrand]);
 
   // Available ROM / Storage options (extracted from phone products)
   const availableRoms = useMemo(() => {
-    const targetProducts = products.filter(p => {
+    const targetProducts = safeProducts.filter(p => {
+      if (!p) return false;
       const matchCat = selectedCategory === 'all' || canonicalCategory(p.category) === selectedCategory;
       const matchBrand = selectedBrand === 'all' || (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
       return matchCat && matchBrand;
@@ -346,6 +351,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
     const romMap = new Map<string, number>();
     targetProducts.forEach(p => {
+      if (!p) return;
       const isPhone = isPhoneCategory(p.category);
       if (p.rom && p.rom.trim() && p.rom !== '-') {
         const r = p.rom.trim().toUpperCase();
@@ -369,11 +375,12 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         };
         return getBytes(a.name) - getBytes(b.name);
       });
-  }, [products, selectedCategory, selectedBrand]);
+  }, [safeProducts, selectedCategory, selectedBrand]);
 
   // Available Color options
   const availableColors = useMemo(() => {
-    const targetProducts = products.filter(p => {
+    const targetProducts = safeProducts.filter(p => {
+      if (!p) return false;
       const matchCat = selectedCategory === 'all' || canonicalCategory(p.category) === selectedCategory;
       const matchBrand = selectedBrand === 'all' || (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
       return matchCat && matchBrand;
@@ -381,7 +388,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
     const colorMap = new Map<string, number>();
     targetProducts.forEach(p => {
-      if (p.color && p.color.trim()) {
+      if (p && p.color && p.color.trim()) {
         const c = p.color.trim();
         colorMap.set(c, (colorMap.get(c) || 0) + 1);
       }
@@ -390,14 +397,14 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     return Array.from(colorMap.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  }, [products, selectedCategory, selectedBrand]);
+  }, [safeProducts, selectedCategory, selectedBrand]);
 
   // Total count in currently active category
   const currentCategoryCount = useMemo(() => {
     return selectedCategory === 'all'
-      ? products.length
-      : products.filter(p => canonicalCategory(p.category) === selectedCategory).length;
-  }, [products, selectedCategory]);
+      ? safeProducts.length
+      : safeProducts.filter(p => p && canonicalCategory(p.category) === selectedCategory).length;
+  }, [safeProducts, selectedCategory]);
 
   // Check whether current category or catalog involves phone products
   const isPhoneCategoryActive = selectedCategory === 'all' || isPhoneCategory(selectedCategory as ProductCategory);
@@ -406,7 +413,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   const filteredProducts = useMemo(() => {
     const tokens = searchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
 
-    return products.filter(p => {
+    return safeProducts.filter(p => {
+      if (!p) return false;
       const matchesCat = selectedCategory === 'all' || canonicalCategory(p.category) === selectedCategory;
       const matchesSubCat = selectedSubCategory === 'all' || 
         (p.subCategory && p.subCategory.toLowerCase() === selectedSubCategory.toLowerCase());
@@ -844,8 +852,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               </span>
               <span className="px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 font-mono text-[10px] font-bold">
                 {selectedCategory === 'all' 
-                  ? products.length 
-                  : products.filter(p => p.category === selectedCategory).length}
+                  ? safeProducts.length 
+                  : safeProducts.filter(p => p && canonicalCategory(p.category) === selectedCategory).length}
               </span>
             </div>
             <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 shrink-0 ${isCategoryDropdownOpen ? 'rotate-180 text-slate-700' : ''}`} />
@@ -865,8 +873,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 {categories.map(cat => {
                   const isSelected = selectedCategory === cat.id;
                   const count = cat.id === 'all' 
-                    ? products.length 
-                    : products.filter(p => p.category === cat.id).length;
+                    ? safeProducts.length 
+                    : safeProducts.filter(p => p && canonicalCategory(p.category) === cat.id).length;
 
                   return (
                     <button

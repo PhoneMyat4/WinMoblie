@@ -230,10 +230,16 @@ export default function App() {
   }, []);
 
   // Compute live badges
-  const lowStockCount = products.filter(p => p.stock <= p.minStockAlert).length;
+  const lowStockCount = useMemo(() => {
+    if (!Array.isArray(products)) return 0;
+    return products.filter(p => p && (Number(p.stock) || 0) <= (Number(p.minStockAlert) || 0)).length;
+  }, [products]);
+
   const quarantinedCount = useMemo(() => {
     try {
-      return StorageService.getDamageLogs().filter(l => l.status === 'Quarantined').length;
+      const logs = StorageService.getDamageLogs();
+      if (!Array.isArray(logs)) return 0;
+      return logs.filter(l => l && l.status === 'Quarantined').length;
     } catch {
       return 0;
     }
@@ -563,16 +569,33 @@ export default function App() {
   };
 
   // Current Active Staff and Access Authorization
-  const currentActiveUser = useMemo(() => {
+  const currentActiveUser: StaffUser = useMemo(() => {
+    const fallbackUser: StaffUser = {
+      id: 'staff-owner-1',
+      username: 'owner',
+      name: 'Shop Owner',
+      role: 'Owner',
+      phone: '09-123456789',
+      pin: '1234',
+      password: 'password123',
+      active: true
+    };
+    if (!Array.isArray(staffUsers) || staffUsers.length === 0) {
+      return fallbackUser;
+    }
     return (
-      staffUsers.find(u => u.id === settings.currentStaffId) || 
-      staffUsers.find(u => u.name === settings.currentStaffName) || 
-      staffUsers[0]
+      staffUsers.find(u => u && u.id === settings.currentStaffId) || 
+      staffUsers.find(u => u && u.name === settings.currentStaffName) || 
+      staffUsers.find(u => Boolean(u)) || 
+      fallbackUser
     );
   }, [staffUsers, settings.currentStaffId, settings.currentStaffName]);
 
-  const effectiveUserPerms = getEffectiveUserPermissions(currentActiveUser, rolePermissions);
-  const canAccessAiCopilot = Boolean(effectiveUserPerms.canAccessAiCopilot ?? (currentActiveUser.role === 'Owner' || currentActiveUser.role === 'Manager'));
+  const effectiveUserPerms = useMemo(() => {
+    return getEffectiveUserPermissions(currentActiveUser, rolePermissions);
+  }, [currentActiveUser, rolePermissions]);
+
+  const canAccessAiCopilot = Boolean(effectiveUserPerms?.canAccessAiCopilot ?? (currentActiveUser.role === 'Owner' || currentActiveUser.role === 'Manager'));
   const isCurrentTabPermitted = isTabAccessibleForUser(activeTab, currentActiveUser, rolePermissions);
 
   if (isLocked) {

@@ -146,14 +146,38 @@ function getItem<T>(key: string, defaultValue: T): T {
   }
   try {
     const saved = localStorage.getItem(key);
-    if (!saved) {
+    if (!saved || saved === 'null' || saved === 'undefined') {
       // If the user initialized a fresh clean database, do not fall back to mock demo data arrays
-      if (isFreshDatabase() && Array.isArray(defaultValue)) {
+      // BUT staff users, shop settings, and role permissions must NEVER be wiped to empty array!
+      if (
+        isFreshDatabase() && 
+        Array.isArray(defaultValue) && 
+        key !== STORAGE_KEYS.STAFF_USERS && 
+        key !== STORAGE_KEYS.SETTINGS && 
+        key !== STORAGE_KEYS.ROLE_PERMISSIONS
+      ) {
         return [] as unknown as T;
       }
       return defaultValue;
     }
-    return JSON.parse(saved);
+    const parsed = JSON.parse(saved);
+    if (parsed === null || parsed === undefined) {
+      if (
+        isFreshDatabase() && 
+        Array.isArray(defaultValue) && 
+        key !== STORAGE_KEYS.STAFF_USERS && 
+        key !== STORAGE_KEYS.SETTINGS && 
+        key !== STORAGE_KEYS.ROLE_PERMISSIONS
+      ) {
+        return [] as unknown as T;
+      }
+      return defaultValue;
+    }
+    // If defaultValue is an array, ensure parsed is also an array!
+    if (Array.isArray(defaultValue) && !Array.isArray(parsed)) {
+      return defaultValue;
+    }
+    return parsed;
   } catch (err) {
     console.error(`Error reading ${key} from storage:`, err);
     return defaultValue;
@@ -228,7 +252,13 @@ export const StorageService = {
 
   // Settings
   getSettings: (): ShopSettings => {
-    const s = getItem(STORAGE_KEYS.SETTINGS, initialSettings);
+    let s = getItem(STORAGE_KEYS.SETTINGS, initialSettings);
+    if (!s || typeof s !== 'object') {
+      s = { ...initialSettings };
+    }
+    if (!s.shopName) {
+      s.shopName = initialSettings.shopName;
+    }
     if (s?.secrets) {
       if ((s.secrets as any).openAiApiKey) delete (s.secrets as any).openAiApiKey;
       if ((s.secrets as any).geminiApiKey) delete (s.secrets as any).geminiApiKey;
@@ -303,8 +333,11 @@ export const StorageService = {
 
   // Staff Users
   getStaffUsers: (): StaffUser[] => {
-    const raw = getItem<StaffUser[]>(STORAGE_KEYS.STAFF_USERS, initialStaffUsers);
-    return raw.map((u, idx) => ({
+    let raw = getItem<StaffUser[]>(STORAGE_KEYS.STAFF_USERS, initialStaffUsers);
+    if (!Array.isArray(raw) || raw.length === 0) {
+      raw = initialStaffUsers;
+    }
+    return raw.filter(Boolean).map((u, idx) => ({
       ...u,
       username: u.username || (
         u.role === 'Owner' ? 'owner' :
@@ -380,31 +413,37 @@ export const StorageService = {
 
   // Products & Inventory
   getProducts: (): Product[] => {
-    const prods = getItem(STORAGE_KEYS.PRODUCTS, initialProducts);
+    const rawProds = getItem(STORAGE_KEYS.PRODUCTS, initialProducts);
+    const prods = Array.isArray(rawProds) ? rawProds.filter(p => p && typeof p === 'object' && p.id) : [];
     
     // One-time migration guard for initial sample cookware - respects user deletions afterwards
-    let list = prods;
-    const COOKWARE_MIGRATED_KEY = 'mobileshop_cookware_migrated_v1';
-    if (typeof localStorage !== 'undefined' && !localStorage.getItem(COOKWARE_MIGRATED_KEY)) {
-      const hasCookware = prods.some(p => canonicalCategory(p.category) === 'cookware');
-      if (!hasCookware && prods.length > 0 && !isFreshDatabase()) {
-        const cookwareSeed = initialProducts.filter(p => p.category === 'cookware');
-        list = [...prods, ...cookwareSeed];
-        setItem(STORAGE_KEYS.PRODUCTS, list);
+    let list = [...prods];
+    try {
+      const COOKWARE_MIGRATED_KEY = 'mobileshop_cookware_migrated_v1';
+      if (typeof localStorage !== 'undefined' && !localStorage.getItem(COOKWARE_MIGRATED_KEY)) {
+        const hasCookware = list.some(p => p && canonicalCategory(p.category) === 'cookware');
+        if (!hasCookware && list.length > 0 && !isFreshDatabase()) {
+          const cookwareSeed = initialProducts.filter(p => p && p.category === 'cookware');
+          list = [...list, ...cookwareSeed];
+          setItem(STORAGE_KEYS.PRODUCTS, list, false);
+        }
+        localStorage.setItem(COOKWARE_MIGRATED_KEY, 'true');
       }
-      localStorage.setItem(COOKWARE_MIGRATED_KEY, 'true');
+    } catch {
+      // ignore
     }
 
     // Merge any duplicate products created from legacy repurchasing glitches
     const deduplicated: Product[] = [];
     const seenMap = new Map<string, number>();
     list.forEach(p => {
+      if (!p || typeof p !== 'object') return;
       const key = `${canonicalCategory(p.category)}|${normalizeVariantText(p.brand)}|${normalizeVariantText(p.name)}|${normalizeVariantText(p.rom || p.storage)}|${normalizeVariantText(p.color)}`;
       if (seenMap.has(key)) {
         const existingIdx = seenMap.get(key)!;
         const existing = deduplicated[existingIdx];
         // Merge stock and IMEIs into the existing primary product
-        existing.stock += p.stock;
+        existing.stock = (Number(existing.stock) || 0) + (Number(p.stock) || 0);
         if (p.costPrice && p.costPrice > 0) existing.costPrice = p.costPrice;
         if (p.sellingPrice && p.sellingPrice > 0) existing.sellingPrice = p.sellingPrice;
         if (p.imeiPairs && p.imeiPairs.length > 0) {
@@ -427,14 +466,20 @@ export const StorageService = {
       }
     });
     if (deduplicated.length !== list.length) {
-      setItem(STORAGE_KEYS.PRODUCTS, deduplicated);
+      setItem(STORAGE_KEYS.PRODUCTS, deduplicated, false);
       list = deduplicated;
     }
 
-    return list.map(p => ({
+    return list.filter(Boolean).map(p => ({
       ...p,
+      stock: typeof p.stock === 'number' && !isNaN(p.stock) ? p.stock : 0,
+      costPrice: typeof p.costPrice === 'number' && !isNaN(p.costPrice) ? p.costPrice : 0,
+      sellingPrice: typeof p.sellingPrice === 'number' && !isNaN(p.sellingPrice) ? p.sellingPrice : 0,
+      minStockAlert: typeof p.minStockAlert === 'number' && !isNaN(p.minStockAlert) ? p.minStockAlert : 2,
       category: canonicalCategory(p.category),
-      model: p.model || p.name,
+      model: p.model || p.name || '',
+      imeiList: Array.isArray(p.imeiList) ? p.imeiList : [],
+      imeiPairs: Array.isArray(p.imeiPairs) ? p.imeiPairs : [],
     }));
   },
   saveProducts: (products: Product[]) => setItem(STORAGE_KEYS.PRODUCTS, products),
@@ -506,14 +551,15 @@ export const StorageService = {
     }
   },
   bulkSaveProducts: (newProducts: Product[], mergeDuplicates: boolean = true, triggerSync: boolean = false) => {
+    if (!newProducts || !Array.isArray(newProducts) || newProducts.length === 0) return;
     const existing = StorageService.getProducts();
     const currentList = [...existing];
 
-    newProducts.forEach(newProd => {
+    newProducts.filter(p => p && typeof p === 'object' && p.id).forEach(newProd => {
       if (mergeDuplicates) {
         // Match exact variant
         const exactMatchIndex = currentList.findIndex(p =>
-          isSameProductVariant(p, newProd) || (p.sku && newProd.sku && p.sku === newProd.sku)
+          p && (isSameProductVariant(p, newProd) || (p.sku && newProd.sku && p.sku === newProd.sku))
         );
 
         if (exactMatchIndex >= 0) {
@@ -523,13 +569,15 @@ export const StorageService = {
           // Merge IMEIs
           const mergedPairs = [...(match.imeiPairs || [])];
           (newProd.imeiPairs || []).forEach(p => {
-            if (!mergedPairs.some(ep => ep.imei1 === p.imei1)) {
+            if (p && p.imei1 && !mergedPairs.some(ep => ep.imei1 === p.imei1)) {
               mergedPairs.push(p);
             }
           });
 
           const mergedFlatList = new Set(match.imeiList || []);
-          (newProd.imeiList || []).forEach(im => mergedFlatList.add(im));
+          (newProd.imeiList || []).forEach(im => {
+            if (im) mergedFlatList.add(im);
+          });
 
           currentList[exactMatchIndex] = {
             ...match,
@@ -545,7 +593,7 @@ export const StorageService = {
       }
 
       // Check if product with identical ID exists
-      const idIndex = currentList.findIndex(p => p.id === newProd.id);
+      const idIndex = currentList.findIndex(p => p && p.id === newProd.id);
       if (idIndex >= 0) {
         currentList[idIndex] = newProd;
       } else {

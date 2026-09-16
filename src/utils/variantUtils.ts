@@ -66,6 +66,7 @@ export const extractNormalizedColor = (color?: string): string => {
  * Two items match IF AND ONLY IF this composite key is identical.
  */
 export const getProductVariantKey = (item: VariantSpecifications): string => {
+  if (!item) return '';
   const brand = normalizeVariantText(item.brand);
   // Strip brand prefix if present in name to allow "Xiaomi n 16" and "n 16" (with brand Xiaomi) to match
   let rawName = normalizeVariantText(item.name);
@@ -97,7 +98,10 @@ export const isSameProductVariant = (
   a: VariantSpecifications,
   b: VariantSpecifications
 ): boolean => {
-  return getProductVariantKey(a) === getProductVariantKey(b);
+  if (!a || !b) return false;
+  const keyA = getProductVariantKey(a);
+  const keyB = getProductVariantKey(b);
+  return Boolean(keyA && keyB && keyA === keyB);
 };
 
 /**
