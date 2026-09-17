@@ -184,7 +184,7 @@ export const PosProductHoverPreview: React.FC<PosProductHoverPreviewProps> = ({
           <span className={`px-2.5 py-1 rounded-lg text-xs font-black shadow-xs border ${
             isUnavailable
               ? 'bg-rose-50 text-rose-700 border-rose-200'
-              : sellableStock <= product.minStockAlert
+              : (product.minStockAlert > 0 ? sellableStock <= product.minStockAlert : sellableStock <= 0)
                 ? 'bg-amber-50 text-amber-800 border-amber-200'
                 : 'bg-emerald-50 text-emerald-800 border-emerald-200'
           }`}>
@@ -453,7 +453,7 @@ export const PosProductMobileDetailModal: React.FC<PosProductMobileDetailModalPr
               <span className={`px-2.5 py-1 rounded-lg text-xs font-bold shadow-xs border ${
                 isUnavailable
                   ? 'bg-rose-50 text-rose-700 border-rose-200'
-                  : sellableStock <= product.minStockAlert
+                  : (product.minStockAlert > 0 ? sellableStock <= product.minStockAlert : sellableStock <= 0)
                     ? 'bg-amber-50 text-amber-800 border-amber-200'
                     : 'bg-emerald-50 text-emerald-800 border-emerald-200'
               }`}>

@@ -726,7 +726,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       setItemBarcode(prod.barcode);
       setItemSku(prod.sku);
       setItemWarrantyMonths(prod.warrantyMonths !== undefined ? prod.warrantyMonths : 12);
-      setItemMinStockAlert(prod.minStockAlert || 2);
+      setItemMinStockAlert(prod.minStockAlert !== undefined ? prod.minStockAlert : 2);
       setItemDescription(prod.description || '');
       setItemUnitCost(prod.costPrice);
       setItemSellingPrice(prod.sellingPrice);
@@ -2554,17 +2554,14 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">Min Stock Alert</label>
                     <input
                       type="number"
-                      min="1"
-                      placeholder="2"
-                      value={itemMinStockAlert === 0 ? '' : itemMinStockAlert}
+                      min="0"
+                      placeholder="0"
+                      value={itemMinStockAlert}
                       onFocus={(e) => e.target.select()}
                       onClick={(e) => e.currentTarget.select()}
                       onChange={(e) => {
                         const val = e.target.value;
-                        setItemMinStockAlert(val === '' ? 0 : Math.max(0, parseInt(val) || 0));
-                      }}
-                      onBlur={() => {
-                        if (!itemMinStockAlert || itemMinStockAlert < 1) setItemMinStockAlert(1);
+                        setItemMinStockAlert(val === '' ? 0 : Math.max(0, parseInt(val, 10) || 0));
                       }}
                       className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-indigo-500 outline-hidden"
                     />

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Bot, 
-  Sparkles, 
+  TrendingUp, 
   X, 
   Send, 
   Mic, 
@@ -112,7 +112,7 @@ const QUICK_PROMPTS = [
   { label: "Change Price", prompt: 'Change the selling price of product "name - n 16, brand Xiaomi, 12/128GB" to 550000', icon: Wand2 },
   { label: "Dead Stock Items", prompt: "Identify dead stock items with 0 sales and estimate total tied-up capital.", icon: AlertTriangle },
   { label: "Stock Aging", prompt: "Show me the inventory aging report categorized by 30, 60, and 90+ day brackets.", icon: Clock },
-  { label: "Category Margins", prompt: "Break down sales revenue and profit margins across all product categories.", icon: Sparkles },
+  { label: "Category Margins", prompt: "Break down sales revenue and profit margins across all product categories.", icon: TrendingUp },
   { label: "Add New Phone", prompt: "I want to add new phone inventory. Please guide me through the required specs and IMEIs.", icon: Package },
 ];
 
@@ -696,8 +696,8 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           <div>
             <div className="flex items-center gap-1.5">
               <span className="font-semibold text-sm tracking-tight text-white">Aura Copilot</span>
-              <span className="text-[10px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 rounded-full font-medium flex items-center gap-0.5">
-                <Sparkles className="w-2.5 h-2.5 text-emerald-300" />
+              <span className="text-[10px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 rounded-full font-medium flex items-center gap-1">
+                <Bot className="w-2.5 h-2.5 text-emerald-300" />
                 GPT-4o-mini Tools
               </span>
             </div>
@@ -1161,7 +1161,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
         {isLoading && (
           <div className="flex items-center gap-2 text-slate-500 text-xs py-2 px-1">
             <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0 animate-pulse">
-              <Sparkles className="w-3.5 h-3.5" />
+              <Bot className="w-3.5 h-3.5" />
             </div>
             <div className="flex items-center gap-2 bg-white border border-slate-200 px-3 py-2 rounded-xl shadow-xs">
               <RefreshCw className="w-3.5 h-3.5 text-indigo-600 animate-spin" />

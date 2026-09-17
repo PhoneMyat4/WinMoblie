@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Package, X, Plus, Trash2, Check, Barcode, Smartphone, Layers, Sparkles, RefreshCw, Camera, ChevronRight } from 'lucide-react';
+import { Package, X, Plus, Trash2, Check, Barcode, Smartphone, Layers, Sparkles, RefreshCw, Camera, ChevronRight, Calculator, TrendingUp } from 'lucide-react';
 import { Product, ProductCategory, DeviceCondition, ShopSettings, ImeiPair } from '../../types';
 import { formatImei } from '../../utils/formatters';
 import { 
@@ -11,8 +11,13 @@ import {
   extractNormalizedRom
 } from '../../utils/variantUtils';
 import { BoxScannerModal } from './BoxScannerModal';
+import { PriceFormulaModal } from './PriceFormulaModal';
 import { ExtractedBoxSpecs } from '../../utils/boxScannerService';
 import { ProductPhotoUploader } from '../common/ProductPhotoUploader';
+import { 
+  calculateSellingPriceFromFormula, 
+  loadFormulaConfig 
+} from '../../utils/pricingFormula';
 import {
   CANONICAL_CATEGORIES,
   canonicalCategory,
@@ -27,6 +32,9 @@ interface NewProductModalProps {
   settings: ShopSettings;
   editingProduct?: Product | null;
   products?: Product[];
+  zIndexClass?: string;
+  modalTitle?: string;
+  modalSubtitle?: string;
   onClose: () => void;
   onSave: (product: Product) => void;
 }
@@ -34,16 +42,33 @@ interface NewProductModalProps {
 const RAM_PRESETS = ['-', '4GB', '6GB', '8GB', '12GB', '14GB', '16GB', '18GB', '24GB'];
 const ROM_PRESETS = ['32GB', '64GB', '128GB', '256GB', '512GB', '1TB', '2TB'];
 
+/**
+ * Strips the brand prefix from a model name or product title so the model input
+ * and dropdown remain clean (e.g. "Redmi A7pro" under brand "Redmi" -> "A7pro").
+ */
+export const extractCleanModelName = (rawNameOrModel: string | undefined, brandName: string | undefined): string => {
+  if (!rawNameOrModel || !rawNameOrModel.trim()) return '';
+  const trimmed = rawNameOrModel.trim();
+  if (!brandName || !brandName.trim()) return trimmed;
+  const brandPattern = new RegExp(`^${brandName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i');
+  return trimmed.replace(brandPattern, '').trim() || trimmed;
+};
+
 export const NewProductModal: React.FC<NewProductModalProps> = ({
   settings,
   editingProduct,
   products = [],
+  zIndexClass = 'z-50',
+  modalTitle,
+  modalSubtitle,
   onClose,
   onSave,
 }) => {
-  const [name, setName] = useState<string>(editingProduct?.name || '');
-  const [brand, setBrand] = useState<string>(editingProduct?.brand || '');
-  const [model, setModel] = useState<string>(editingProduct?.model || '');
+  const initialBrand = editingProduct?.brand || '';
+  const initialCleanModel = extractCleanModelName(editingProduct?.model || editingProduct?.name, initialBrand);
+  const [brand, setBrand] = useState<string>(initialBrand);
+  const [model, setModel] = useState<string>(initialCleanModel || editingProduct?.model || '');
+  const [name, setName] = useState<string>(initialCleanModel || editingProduct?.name || '');
   const [category, setCategory] = useState<ProductCategory>(
     editingProduct?.category ? canonicalCategory(editingProduct.category) : 'brand_new_phones'
   );
@@ -58,7 +83,9 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   const [costPrice, setCostPrice] = useState<number>(editingProduct?.costPrice || 0);
   const [sellingPrice, setSellingPrice] = useState<number>(editingProduct?.sellingPrice || 0);
   const [stock, setStock] = useState<number>(editingProduct?.stock || 1);
-  const [minStockAlert, setMinStockAlert] = useState<number>(editingProduct?.minStockAlert || 2);
+  const [minStockAlert, setMinStockAlert] = useState<number | string>(
+    editingProduct?.minStockAlert !== undefined ? editingProduct.minStockAlert : 2
+  );
   const [warrantyMonths, setWarrantyMonths] = useState<number>(editingProduct?.warrantyMonths ?? 12);
   const [description, setDescription] = useState<string>(editingProduct?.description || '');
   const [dualImei, setDualImei] = useState<boolean>(editingProduct?.dualImei ?? true);
@@ -90,9 +117,24 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   const [newImei1Input, setNewImei1Input] = useState<string>('');
   const [newImei2Input, setNewImei2Input] = useState<string>('');
   const [isBoxScannerOpen, setIsBoxScannerOpen] = useState<boolean>(false);
+  const [isFormulaCalculatorOpen, setIsFormulaCalculatorOpen] = useState<boolean>(false);
+  const [autoCalcNotice, setAutoCalcNotice] = useState<string | null>(null);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState<boolean>(false);
   const modelInputRef = useRef<HTMLInputElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
+
+  const handleQuickCalculateFormula = () => {
+    if (costPrice <= 0) {
+      setAutoCalcNotice('Please enter a Cost Price first to calculate selling price');
+      setTimeout(() => setAutoCalcNotice(null), 3000);
+      return;
+    }
+    const config = loadFormulaConfig();
+    const result = calculateSellingPriceFromFormula(costPrice, config, name || model);
+    setSellingPrice(result.finalSellingPrice);
+    setAutoCalcNotice(`Auto-set price: ${settings.currencySymbol}${result.finalSellingPrice.toLocaleString()} (Profit: +${settings.currencySymbol}${result.profit.toLocaleString()}, ${result.marginPercent}% margin)`);
+    setTimeout(() => setAutoCalcNotice(null), 4000);
+  };
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -115,12 +157,10 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     
     if (specs.model) {
       const trimmedModel = specs.model.trim();
-      const trimmedBrand = (specs.brand || brand).trim();
-      const formattedName = trimmedBrand && !trimmedModel.toLowerCase().startsWith(trimmedBrand.toLowerCase())
-        ? `${trimmedBrand} ${trimmedModel}`
-        : trimmedModel;
-      setName(formattedName);
-      setModel(trimmedModel);
+      const effectiveBrand = specs.brand || brand;
+      const cleanModel = extractCleanModelName(trimmedModel, effectiveBrand) || trimmedModel;
+      setName(cleanModel);
+      setModel(cleanModel);
     }
     
     if (specs.color) setColor(specs.color);
@@ -206,17 +246,26 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     const modelSet = new Set<string>();
     // From taxonomy
     const taxModels = getModelsForBrand(category, brand, subCategory);
-    taxModels.forEach(m => modelSet.add(m.name));
+    taxModels.forEach(m => {
+      const clean = extractCleanModelName(m.name, brand);
+      if (clean) modelSet.add(clean);
+    });
     if (modelSet.size === 0 && brand) {
-      getModelsForBrand(category, brand).forEach(m => modelSet.add(m.name));
+      getModelsForBrand(category, brand).forEach(m => {
+        const clean = extractCleanModelName(m.name, brand);
+        if (clean) modelSet.add(clean);
+      });
     }
 
-    // From products matching this category and brand
+    // From registered products matching this category and brand
     products.forEach((p) => {
       if (canonicalCategory(p.category) === category) {
         if (brand && p.brand && p.brand.toLowerCase() === brand.toLowerCase()) {
-          if (p.model && p.model.trim()) modelSet.add(p.model.trim());
-          else if (p.name && p.name.trim()) modelSet.add(p.name.trim());
+          const raw = (p.model && p.model.trim()) || (p.name && p.name.trim()) || '';
+          if (raw) {
+            const clean = extractCleanModelName(raw, brand);
+            if (clean) modelSet.add(clean);
+          }
         }
       }
     });
@@ -230,8 +279,13 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       return availableModels;
     }
     const q = name.toLowerCase().trim();
-    return availableModels.filter(m => m.toLowerCase().includes(q));
-  }, [availableModels, name]);
+    const cleanQ = extractCleanModelName(name, brand).toLowerCase().trim();
+
+    return availableModels.filter(m => {
+      const mLower = m.toLowerCase();
+      return mLower.includes(q) || (cleanQ && mLower.includes(cleanQ));
+    });
+  }, [availableModels, name, brand]);
 
   // Available Colors strictly isolated to current category, brand, and model
   const availableColors = useMemo(() => {
@@ -272,16 +326,24 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   }, [availableModels, products, category, brand]);
 
   // Current Form Specifications for Variant Comparison
-  const currentFormSpecs = useMemo(() => ({
-    name,
-    brand,
-    category,
-    subCategory,
-    condition,
-    ram: isPhone ? ram : undefined,
-    rom: isPhone ? rom : undefined,
-    color: isPhone ? color : undefined,
-  }), [name, brand, category, subCategory, condition, ram, rom, color, isPhone]);
+  const currentFormSpecs = useMemo(() => {
+    const cleanModel = extractCleanModelName(model || name, brand);
+    const trimmedBrand = brand.trim();
+    const fullProductName = trimmedBrand && !cleanModel.toLowerCase().startsWith(trimmedBrand.toLowerCase())
+      ? `${trimmedBrand} ${cleanModel}`
+      : (cleanModel || name);
+
+    return {
+      name: fullProductName,
+      brand,
+      category,
+      subCategory,
+      condition,
+      ram: isPhone ? ram : undefined,
+      rom: isPhone ? rom : undefined,
+      color: isPhone ? color : undefined,
+    };
+  }, [name, model, brand, category, subCategory, condition, ram, rom, color, isPhone]);
 
   // Dynamic EXACT Variant Match in catalog
   const matchedExactVariant = useMemo(() => {
@@ -291,9 +353,15 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
   // Other Sister Variants sharing the same model title/brand
   const sisterVariants = useMemo(() => {
-    if (!name.trim()) return [];
-    return findSisterVariants(products, name, brand, editingProduct?.id);
-  }, [products, name, brand, editingProduct]);
+    const cleanModel = extractCleanModelName(model || name, brand);
+    if (!cleanModel) return [];
+    const trimmedBrand = brand.trim();
+    const fullProductName = trimmedBrand && !cleanModel.toLowerCase().startsWith(trimmedBrand.toLowerCase())
+      ? `${trimmedBrand} ${cleanModel}`
+      : (cleanModel || name);
+
+    return findSisterVariants(products, fullProductName, brand, editingProduct?.id);
+  }, [products, name, model, brand, editingProduct]);
 
   // Category Change Handler: resets fields when switching to another category
   const handleCategoryChange = (newCat: ProductCategory) => {
@@ -313,19 +381,23 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   // Brand Change Handler (create-able and search-able text box)
   const handleBrandChange = (newBrand: string) => {
     setBrand(newBrand);
+    if (newBrand.trim() && name.trim()) {
+      const cleaned = extractCleanModelName(name, newBrand);
+      if (cleaned !== name) {
+        setName(cleaned);
+        setModel(cleaned);
+      }
+    }
   };
 
   // Handler: Level 4 Model Select
   const handleModelSelect = (selectedModelName: string) => {
-    setModel(selectedModelName);
-    const trimmedBrand = brand.trim();
-    const formattedName = trimmedBrand && !selectedModelName.toLowerCase().startsWith(trimmedBrand.toLowerCase())
-      ? `${trimmedBrand} ${selectedModelName}`
-      : selectedModelName;
-    setName(formattedName);
+    const cleanModel = extractCleanModelName(selectedModelName, brand) || selectedModelName.trim();
+    setModel(cleanModel);
+    setName(cleanModel);
 
     // Auto-select or suggest first color variant if available
-    const colors = getColorsForModel(category, brand, selectedModelName);
+    const colors = getColorsForModel(category, brand, cleanModel);
     if (colors.length > 0 && (!color || color === 'Black')) {
       setColor(colors[0]);
     }
@@ -333,11 +405,21 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
   // Handle typing product name
   const handleNameChange = (val: string) => {
-    setName(val);
-    setModel(val);
+    let cleanVal = val;
+    const trimmed = val.trim();
+
+    // If a brand is already selected, and user types or pastes with brand prefix (e.g. "Redmi A7pro" under Redmi)
+    if (brand && trimmed) {
+      const brandPrefix = brand.trim().toLowerCase() + ' ';
+      if (trimmed.toLowerCase().startsWith(brandPrefix)) {
+        cleanVal = trimmed.slice(brandPrefix.length);
+      }
+    }
+
+    setName(cleanVal);
+    setModel(cleanVal);
     if (editingProduct) return;
 
-    const trimmed = val.trim();
     if (!trimmed) {
       return;
     }
@@ -350,6 +432,11 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     );
     if (detectedBrand && !brand) {
       setBrand(detectedBrand);
+      const remainder = trimmed.slice(detectedBrand.length).trim();
+      if (remainder) {
+        setName(remainder);
+        setModel(remainder);
+      }
     } else if (
       category === 'brand_new_phones' || category === 'pre_owned_phones'
     ) {
@@ -375,8 +462,11 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
   // Populate form with an existing registered variant (for restocking or cloning)
   const handleSelectSisterVariant = (v: Product) => {
-    setName(v.name);
-    setBrand(v.brand || '');
+    const targetBrand = v.brand || '';
+    const cleanModel = extractCleanModelName(v.model || v.name, targetBrand) || v.name;
+    setName(cleanModel);
+    setModel(cleanModel);
+    setBrand(targetBrand);
     setCategory(v.category);
     setSubCategory(v.subCategory || '');
     setCondition(v.condition || 'brand_new');
@@ -387,7 +477,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     setCostPrice(v.costPrice || 0);
     setSellingPrice(v.sellingPrice || 0);
     setWarrantyMonths(v.warrantyMonths !== undefined ? v.warrantyMonths : 12);
-    setMinStockAlert(v.minStockAlert || 2);
+    setMinStockAlert(v.minStockAlert !== undefined ? v.minStockAlert : 2);
     setDescription(v.description || '');
     setSku(v.sku);
     setBarcode(v.barcode);
@@ -476,6 +566,12 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       return;
     }
 
+    const cleanModel = extractCleanModelName(model || name, brand);
+    const trimmedBrand = brand.trim();
+    const fullProductName = trimmedBrand && !cleanModel.toLowerCase().startsWith(trimmedBrand.toLowerCase())
+      ? `${trimmedBrand} ${cleanModel}`
+      : (cleanModel || name);
+
     const formattedStorage = isPhone
       ? (ram && ram !== '-' ? `${ram} / ${rom}` : rom)
       : undefined;
@@ -487,13 +583,17 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       if (p.imei2) flattenedImeis.push(p.imei2);
     });
 
+    const finalMinStockAlert = typeof minStockAlert === 'number'
+      ? Math.max(0, minStockAlert)
+      : (minStockAlert === '' ? 0 : Math.max(0, parseInt(String(minStockAlert), 10) || 0));
+
     // 1. If explicit edit mode on an existing product row
     if (editingProduct) {
       const updatedProduct: Product = {
         ...editingProduct,
-        name,
-        brand,
-        model: model || name,
+        name: fullProductName,
+        brand: trimmedBrand,
+        model: cleanModel || name,
         category,
         subCategory: subCategory.trim() || undefined,
         condition,
@@ -502,7 +602,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
         costPrice,
         sellingPrice,
         stock: isPhone && imeiPairs.length > 0 ? imeiPairs.length : stock,
-        minStockAlert,
+        minStockAlert: finalMinStockAlert,
         ram: isPhone ? ram : undefined,
         rom: isPhone ? rom : undefined,
         storage: formattedStorage,
@@ -532,9 +632,13 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
       const updatedVariant: Product = {
         ...matchedExactVariant,
+        name: fullProductName,
+        brand: trimmedBrand,
+        model: cleanModel || name,
         costPrice: costPrice > 0 ? costPrice : matchedExactVariant.costPrice,
         sellingPrice: sellingPrice > 0 ? sellingPrice : matchedExactVariant.sellingPrice,
         stock: isPhone && mergedPairs.length > 0 ? mergedPairs.length : matchedExactVariant.stock + stock,
+        minStockAlert: finalMinStockAlert,
         imeiPairs: isPhone ? mergedPairs : undefined,
         imeiList: isPhone ? Array.from(mergedFlatSet) : undefined,
         imageUrl: imageUrl || matchedExactVariant.imageUrl,
@@ -547,18 +651,18 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     // 3. Otherwise, create a DISTINCT new product variant record
     const newVariant: Product = {
       id: `prod-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      name,
-      brand,
-      model: model || name,
+      name: fullProductName,
+      brand: trimmedBrand,
+      model: cleanModel || name,
       category,
       subCategory: subCategory.trim() || undefined,
       condition,
-      sku: sku || generateVariantSku(brand, name, ram, rom, color),
+      sku: sku || generateVariantSku(trimmedBrand, fullProductName, ram, rom, color),
       barcode: barcode || `${Math.floor(100000000000 + Math.random() * 900000000000)}`,
       costPrice,
       sellingPrice,
       stock: isPhone && imeiPairs.length > 0 ? imeiPairs.length : stock,
-      minStockAlert,
+      minStockAlert: finalMinStockAlert,
       ram: isPhone ? ram : undefined,
       rom: isPhone ? rom : undefined,
       storage: formattedStorage,
@@ -577,7 +681,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   };
 
   return (
-    <div id="new-product-modal-overlay" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto animate-modal-backdrop">
+    <div id="new-product-modal-overlay" className={`fixed inset-0 ${zIndexClass} flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto animate-modal-backdrop`}>
       <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200 animate-modal-content">
         
         {/* Header */}
@@ -588,9 +692,11 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
             </div>
             <div>
               <h2 className="text-lg font-bold text-slate-900">
-                {editingProduct ? 'Edit Inventory Item' : 'Add New Inventory Item / Variant'}
+                {modalTitle || (editingProduct ? 'Edit Inventory Item' : 'Add New Inventory Item / Variant')}
               </h2>
-              <p className="text-xs text-slate-500">Track distinct RAM/ROM variants, IMEI serials, and margins</p>
+              <p className="text-xs text-slate-500">
+                {modalSubtitle || 'Track distinct RAM/ROM variants, IMEI serials, and margins'}
+              </p>
             </div>
           </div>
           <button
@@ -628,7 +734,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
               onClick={() => setIsBoxScannerOpen(true)}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm hover:shadow-md flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
             >
-              <Sparkles className="w-4 h-4" />
+              <Camera className="w-4 h-4" />
               <span>Scan Box Photo</span>
             </button>
           </div>
@@ -896,7 +1002,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                 <div className="flex items-center justify-between bg-indigo-50/80 border border-indigo-200 text-indigo-900 px-3.5 py-2 rounded-xl text-xs">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-bold flex items-center gap-1 text-indigo-700">
-                      <Sparkles className="w-3.5 h-3.5" /> Distinct Variant Configuration:
+                      <Layers className="w-3.5 h-3.5" /> Distinct Variant Configuration:
                     </span>
                     <span className="text-slate-700 font-medium">
                       Saving will register this as a <strong>new distinct variant</strong> with separate stock, pricing, and serial numbers.
@@ -1149,88 +1255,187 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
           )}
 
           {/* Pricing & Stock Numbers */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Cost Price ({settings.currencySymbol})
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="any"
-                required
-                placeholder="0"
-                value={costPrice === 0 ? '' : costPrice}
-                onFocus={(e) => e.target.select()}
-                onClick={(e) => e.currentTarget.select()}
-                onKeyDown={(e) => {
-                  if (['e', 'E', '+', '-'].includes(e.key)) {
-                    e.preventDefault();
-                  }
-                }}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setCostPrice(val === '' ? 0 : Math.max(0, parseFloat(val) || 0));
-                }}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500"
-              />
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+            {/* Action Toolbar Header around Pricing Div */}
+            <div className="flex items-center justify-between flex-wrap gap-2 pb-2.5 border-b border-slate-200">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Calculator className="w-3.5 h-3.5 text-indigo-600" />
+                  Pricing & Stock
+                </span>
+                {costPrice > 0 && sellingPrice > 0 && (
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 ${
+                    sellingPrice >= costPrice
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      : 'bg-rose-100 text-rose-800 border border-rose-200'
+                  }`}>
+                    <TrendingUp className="w-3 h-3" />
+                    {sellingPrice >= costPrice
+                      ? `+${settings.currencySymbol}${(sellingPrice - costPrice).toLocaleString()} (${Math.round(((sellingPrice - costPrice) / sellingPrice) * 100)}% margin)`
+                      : `Loss: -${settings.currencySymbol}${(costPrice - sellingPrice).toLocaleString()}`}
+                  </span>
+                )}
+              </div>
+
+              {/* Price Calculation Tool Action Buttons */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  id="btn-quick-auto-calc-selling-price"
+                  onClick={handleQuickCalculateFormula}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white hover:bg-indigo-50 active:bg-indigo-100 text-indigo-700 hover:text-indigo-900 border border-indigo-200 hover:border-indigo-300 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                  title="Automatically calculate selling price from cost price using the 3-step formula (6% + 20,000 + Surcharge + Rounding)"
+                >
+                  <Calculator className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Auto-Calculate Price</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-open-price-formula-modal"
+                  onClick={() => setIsFormulaCalculatorOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer"
+                  title="Open Formula Price Calculator Tool (Single Calculation, Batch Price List Processor & Rule Settings)"
+                >
+                  <Calculator className="w-3.5 h-3.5 text-indigo-200" />
+                  <span>Price Formula Tool</span>
+                </button>
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Selling Price ({settings.currencySymbol}) *
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="any"
-                required
-                placeholder="0"
-                value={sellingPrice === 0 ? '' : sellingPrice}
-                onFocus={(e) => e.target.select()}
-                onClick={(e) => e.currentTarget.select()}
-                onKeyDown={(e) => {
-                  if (['e', 'E', '+', '-'].includes(e.key)) {
-                    e.preventDefault();
-                  }
-                }}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSellingPrice(val === '' ? 0 : Math.max(0, parseFloat(val) || 0));
-                }}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-black text-emerald-700 bg-white focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
+            {/* Quick Notification Pill */}
+            {autoCalcNotice && (
+              <div className="px-3 py-2 bg-indigo-50/90 border border-indigo-200 rounded-lg text-xs font-semibold text-indigo-900 flex items-center justify-between animate-fadeIn">
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>{autoCalcNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAutoCalcNotice(null)}
+                  className="text-indigo-400 hover:text-indigo-700 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Quantity in Stock</label>
-              <input
-                type="number"
-                min="0"
-                placeholder="0"
-                disabled={isPhone && imeiPairs.length > 0}
-                value={isPhone && imeiPairs.length > 0 ? imeiPairs.length : (stock === 0 ? '' : stock)}
-                onFocus={(e) => e.target.select()}
-                onClick={(e) => e.currentTarget.select()}
-                onChange={(e) => setStock(e.target.value === '' ? 0 : parseInt(e.target.value) || 0)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white disabled:bg-slate-100"
-              />
-            </div>
+            {/* Inputs Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Cost Price ({settings.currencySymbol})
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="any"
+                  required
+                  placeholder="0"
+                  value={costPrice === 0 ? '' : costPrice}
+                  onFocus={(e) => e.target.select()}
+                  onClick={(e) => e.currentTarget.select()}
+                  onKeyDown={(e) => {
+                    if (['e', 'E', '+', '-'].includes(e.key)) {
+                      e.preventDefault();
+                    }
+                  }}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCostPrice(val === '' ? 0 : Math.max(0, parseFloat(val) || 0));
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-0.5 block">Base purchase cost</span>
+              </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Low Stock Alert</label>
-              <input
-                type="number"
-                min="1"
-                placeholder="1"
-                value={minStockAlert === 0 ? '' : minStockAlert}
-                onFocus={(e) => e.target.select()}
-                onClick={(e) => e.currentTarget.select()}
-                onChange={(e) => setMinStockAlert(e.target.value === '' ? 0 : parseInt(e.target.value) || 0)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white"
-              />
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Selling Price ({settings.currencySymbol}) *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleQuickCalculateFormula}
+                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline inline-flex items-center gap-0.5 cursor-pointer"
+                    title="Auto-calculate with 3-step formula"
+                  >
+                    <Calculator className="w-2.5 h-2.5 text-indigo-600" />
+                    <span>Auto</span>
+                  </button>
+                </div>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="any"
+                  required
+                  placeholder="0"
+                  value={sellingPrice === 0 ? '' : sellingPrice}
+                  onFocus={(e) => e.target.select()}
+                  onClick={(e) => e.currentTarget.select()}
+                  onKeyDown={(e) => {
+                    if (['e', 'E', '+', '-'].includes(e.key)) {
+                      e.preventDefault();
+                    }
+                  }}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSellingPrice(val === '' ? 0 : Math.max(0, parseFloat(val) || 0));
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-black text-emerald-700 bg-white focus:ring-2 focus:ring-emerald-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                  Manual or formula-generated
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Quantity in Stock</label>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="0"
+                  disabled={isPhone && imeiPairs.length > 0}
+                  value={isPhone && imeiPairs.length > 0 ? imeiPairs.length : (stock === 0 ? '' : stock)}
+                  onFocus={(e) => e.target.select()}
+                  onClick={(e) => e.currentTarget.select()}
+                  onChange={(e) => setStock(e.target.value === '' ? 0 : parseInt(e.target.value) || 0)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white disabled:bg-slate-100"
+                />
+                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                  {isPhone && imeiPairs.length > 0 ? 'Locked to IMEI count' : 'Available units'}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Low Stock Alert</label>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="0"
+                  value={minStockAlert}
+                  onFocus={(e) => e.target.select()}
+                  onClick={(e) => e.currentTarget.select()}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '') {
+                      setMinStockAlert('');
+                    } else {
+                      const parsed = parseInt(val, 10);
+                      setMinStockAlert(isNaN(parsed) ? 0 : Math.max(0, parsed));
+                    }
+                  }}
+                  onBlur={() => {
+                    if (minStockAlert === '' || isNaN(Number(minStockAlert))) {
+                      setMinStockAlert(0);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-0.5 block">0 = alert only when out of stock</span>
+              </div>
             </div>
           </div>
 
@@ -1312,6 +1517,27 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
           onApplySpecs={handleApplyBoxSpecs}
           targetContextName="Inventory Item / Variant"
         />
+
+        {/* Pricing Formula Tool Modal */}
+        {isFormulaCalculatorOpen && (
+          <PriceFormulaModal
+            initialCost={costPrice}
+            productName={name || model || 'Product Item'}
+            currencySymbol={settings.currencySymbol}
+            zIndexClass="z-[90]"
+            onClose={() => setIsFormulaCalculatorOpen(false)}
+            onApplySellingPrice={(calcPrice, breakdown) => {
+              setSellingPrice(calcPrice);
+              setIsFormulaCalculatorOpen(false);
+              setAutoCalcNotice(
+                `Applied formula price: ${settings.currencySymbol}${calcPrice.toLocaleString()}${
+                  breakdown ? ` (Profit: +${settings.currencySymbol}${breakdown.profit.toLocaleString()}, ${breakdown.marginPercent}% margin)` : ''
+                }`
+              );
+              setTimeout(() => setAutoCalcNotice(null), 4000);
+            }}
+          />
+        )}
 
       </div>
     </div>

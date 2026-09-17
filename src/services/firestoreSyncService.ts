@@ -35,6 +35,7 @@ import {
   ChatMessage,
   CashDrawerRecord,
   RolePermissions,
+  StaffRole,
   PersonalWallet,
   PersonalTransaction,
   PersonalBudget,
@@ -68,6 +69,7 @@ export class FirestoreSyncService {
   private static instance: FirestoreSyncService | null = null;
   private statusListeners: Set<(status: FirestoreSyncStatus) => void> = new Set();
   private unsubscribers: Unsubscribe[] = [];
+  private preAuthUnsubscribers: Unsubscribe[] = [];
   private isProcessingRemoteSnapshot: boolean = false;
   private isSyncPaused: boolean = false;
   private status: FirestoreSyncStatus = {
@@ -101,14 +103,20 @@ export class FirestoreSyncService {
         this.updateStatus({ isConnected: false });
       });
 
+      // Start pre-auth listener for staffUsers and settings so login terminal is always up to date
+      this.startPreAuthSync();
+
       FirebaseAuthService.onAuthChanged((user) => {
-        if (user) {
+        const isAuth = Boolean(user) || FirebaseAuthService.isAuthenticated();
+        if (isAuth) {
+          this.stopPreAuthSync();
           this.updateStatus({ isConnected: true, error: null });
           this.startRealtimeSync();
           // Flush any offline queued activity logs once authenticated
           this.flushPendingAuditLogs();
         } else {
           this.stopRealtimeSync();
+          this.startPreAuthSync();
           this.updateStatus({ isConnected: false });
         }
       });
@@ -330,6 +338,80 @@ export class FirestoreSyncService {
         ? remoteSettings.logoTransparentBg 
         : (current.logoTransparentBg ?? true),
     };
+  }
+
+  /**
+   * Listens to public POS terminal collections (staffUsers and settings/global) before authentication
+   * so that the login screen always has the real store branding and staff accounts from Firestore.
+   */
+  public startPreAuthSync() {
+    this.stopPreAuthSync();
+    try {
+      // 1. Pre-auth Staff Users Listener
+      const unsubStaff = onSnapshot(query(collection(db, 'staffUsers'), limit(500)), (snap) => {
+        if (!snap.empty) {
+          const remoteStaff: StaffUser[] = [];
+          snap.forEach(d => {
+            const data = d.data() as StaffUser;
+            if (data && !isMockStaffUser(data)) {
+              remoteStaff.push({
+                ...data,
+                id: data.id || d.id,
+                active: data.active !== false,
+                password: data.password || data.pin,
+                pin: data.pin || data.password || '1234',
+              });
+            }
+          });
+          if (remoteStaff.length > 0) {
+            this.isProcessingRemoteSnapshot = true;
+            try {
+              const localStaff = StorageService.getStaffUsers();
+              const merged = [...localStaff];
+              remoteStaff.forEach(remote => {
+                const idx = merged.findIndex(l => l.id === remote.id);
+                if (idx >= 0) merged[idx] = { ...merged[idx], ...remote };
+                else merged.push(remote);
+              });
+              const cleanMerged = merged.filter(u => !isMockStaffUser(u));
+              StorageService.saveStaffUsers(cleanMerged, true);
+              this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            } finally {
+              this.isProcessingRemoteSnapshot = false;
+            }
+          }
+        }
+      }, (err) => console.warn('[FirestoreSync] Pre-auth staff listener notice:', err.message));
+      this.preAuthUnsubscribers.push(unsubStaff);
+
+      // 2. Pre-auth Settings Listener
+      const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snap) => {
+        if (snap.exists()) {
+          const remoteSettings = snap.data() as ShopSettings;
+          if (remoteSettings && remoteSettings.shopName) {
+            this.isProcessingRemoteSnapshot = true;
+            try {
+              const current = StorageService.getSettings();
+              const merged = this.mergeSettingsSafely(current, remoteSettings);
+              StorageService.saveSettings(merged, true);
+              this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            } finally {
+              this.isProcessingRemoteSnapshot = false;
+            }
+          }
+        }
+      }, (err) => console.warn('[FirestoreSync] Pre-auth settings listener notice:', err.message));
+      this.preAuthUnsubscribers.push(unsubSettings);
+    } catch (err) {
+      console.warn('[FirestoreSync] startPreAuthSync notice:', err);
+    }
+  }
+
+  public stopPreAuthSync() {
+    this.preAuthUnsubscribers.forEach(unsub => {
+      try { unsub(); } catch {}
+    });
+    this.preAuthUnsubscribers = [];
   }
 
   /**
@@ -967,6 +1049,125 @@ export class FirestoreSyncService {
   public async syncStaffUsers(staff: StaffUser[]): Promise<void> {
     const cleanStaff = staff.filter(u => !isMockStaffUser(u));
     await this.batchWriteCollection('staffUsers', cleanStaff, u => u.id);
+  }
+
+  /**
+   * Fetches all registered staff users directly from Firestore /staffUsers
+   * and merges them into local StorageService.
+   */
+  public async fetchStaffUsersFromFirestore(): Promise<StaffUser[]> {
+    try {
+      const snap = await getDocs(collection(db, 'staffUsers'));
+      const remoteStaff: StaffUser[] = [];
+      snap.forEach(d => {
+        const data = d.data() as StaffUser;
+        if (data && !isMockStaffUser(data)) {
+          remoteStaff.push({
+            ...data,
+            id: data.id || d.id,
+            active: data.active !== false,
+            password: data.password || data.pin,
+            pin: data.pin || data.password || '1234',
+          });
+        }
+      });
+      if (remoteStaff.length > 0) {
+        const local = StorageService.getStaffUsers();
+        const merged = [...local];
+        remoteStaff.forEach(r => {
+          const idx = merged.findIndex(m => m.id === r.id);
+          if (idx >= 0) merged[idx] = { ...merged[idx], ...r };
+          else merged.push(r);
+        });
+        const cleanMerged = merged.filter(u => !isMockStaffUser(u));
+        StorageService.saveStaffUsers(cleanMerged, true);
+        return cleanMerged;
+      }
+    } catch (err: any) {
+      console.warn('[FirestoreSync] fetchStaffUsersFromFirestore notice:', err?.message || err);
+    }
+    return StorageService.getStaffUsers();
+  }
+
+  /**
+   * Looks up a staff user in Firestore by username, email, phone number, or document ID.
+   */
+  public async findStaffUserInFirestore(identifier: string): Promise<StaffUser | null> {
+    const cleanId = (identifier || '').trim().toLowerCase();
+    if (!cleanId) return null;
+    const cleanDigits = cleanId.replace(/\D/g, '');
+
+    try {
+      const snap = await getDocs(collection(db, 'staffUsers'));
+      for (const d of snap.docs) {
+        const u = d.data() as StaffUser;
+        if (!u || isMockStaffUser(u)) continue;
+
+        const docId = (d.id || '').trim().toLowerCase();
+        const uId = (u.id || '').trim().toLowerCase();
+        const uName = (u.username || '').trim().toLowerCase();
+        const fullName = (u.name || '').trim().toLowerCase();
+        const uEmail = (u.email || '').trim().toLowerCase();
+        const uPhoneDigits = (u.phone || '').replace(/\D/g, '');
+
+        if (
+          docId === cleanId ||
+          uId === cleanId ||
+          uName === cleanId ||
+          fullName === cleanId ||
+          uEmail === cleanId ||
+          (cleanDigits.length >= 6 && uPhoneDigits.endsWith(cleanDigits))
+        ) {
+          const userObj: StaffUser = {
+            id: u.id || d.id,
+            username: u.username || (cleanId.includes('@') ? cleanId.split('@')[0] : cleanId),
+            name: u.name || 'Store Staff',
+            role: (u.role as StaffRole) || 'Cashier',
+            phone: u.phone || '',
+            email: u.email || (cleanId.includes('@') ? cleanId : undefined),
+            pin: u.pin || u.password || '1234',
+            password: u.password || u.pin || '1234',
+            active: u.active !== false,
+            avatarColor: u.avatarColor || (u.role === 'Owner' ? 'bg-purple-600' : 'bg-emerald-600'),
+            customPermissions: u.customPermissions,
+            restrictWorkingHours: u.role === 'Owner' ? false : Boolean(u.restrictWorkingHours),
+            workStartTime: u.workStartTime,
+            workEndTime: u.workEndTime,
+          };
+          return userObj;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[FirestoreSync] findStaffUserInFirestore notice:', err?.message || err);
+    }
+    return null;
+  }
+
+  /**
+   * Fetches fresh, real-time staff document from Firestore by document ID
+   * to ensure credentials and PIN are 100% current.
+   */
+  public async getFreshStaffUser(userId: string): Promise<StaffUser | null> {
+    if (!userId) return null;
+    try {
+      const docRef = doc(db, 'staffUsers', userId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const u = snap.data() as StaffUser;
+        if (u && !isMockStaffUser(u)) {
+          return {
+            ...u,
+            id: u.id || snap.id,
+            active: u.active !== false,
+            password: u.password || u.pin,
+            pin: u.pin || u.password || '1234',
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[FirestoreSync] getFreshStaffUser notice:', err?.message || err);
+    }
+    return null;
   }
 
   public async purgeMockStaffUsersFromFirestore(): Promise<void> {

@@ -241,9 +241,10 @@ export const MostSoldItemsReport: React.FC<MostSoldItemsReportProps> = ({
         row.push(item.profitMarginPercent.toFixed(1) + '%');
       }
       if (visibleColumns.remaining_stock !== false) {
+        const isLow = (item.minStockAlert || 0) > 0 && item.currentStock <= item.minStockAlert;
         row.push(
           item.currentStock,
-          item.currentStock <= 0 ? 'Out of Stock' : item.currentStock <= item.minStockAlert ? 'Low Stock' : 'In Stock'
+          item.currentStock <= 0 ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock'
         );
       }
 
@@ -651,7 +652,7 @@ export const MostSoldItemsReport: React.FC<MostSoldItemsReportProps> = ({
                   const isGold = idx === 0;
                   const isSilver = idx === 1;
                   const isBronze = idx === 2;
-                  const isLowStock = item.currentStock <= item.minStockAlert;
+                  const isLowStock = (item.minStockAlert || 0) > 0 && item.currentStock <= item.minStockAlert;
                   const isOutOfStock = item.currentStock <= 0;
 
                   return (

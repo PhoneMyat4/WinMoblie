@@ -194,7 +194,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
             <div className="text-right">
               <span className="text-xs text-slate-500 font-medium">Projected New Stock</span>
               <div className={`text-2xl font-black mt-0.5 ${
-                projectedStock < product.minStockAlert ? 'text-amber-600' : 'text-indigo-600'
+                (product.minStockAlert > 0 ? projectedStock <= product.minStockAlert : projectedStock <= 0) ? 'text-amber-600' : 'text-indigo-600'
               }`}>
                 {projectedStock} <span className="text-xs font-semibold text-slate-500">units</span>
               </div>

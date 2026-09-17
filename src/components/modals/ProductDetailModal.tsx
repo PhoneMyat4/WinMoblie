@@ -68,7 +68,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     ? Math.round((marginAmt / product.sellingPrice) * 100) 
     : 0;
   
-  const isLowStock = product.stock <= product.minStockAlert;
+  const isLowStock = product.minStockAlert > 0 ? product.stock <= product.minStockAlert : product.stock <= 0;
   const totalStockCostValuation = product.costPrice * product.stock;
   const totalStockRetailValuation = product.sellingPrice * product.stock;
 
@@ -347,7 +347,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 {product.stock} Units
               </p>
               <p className={`text-[10px] font-semibold mt-0.5 ${isLowStock ? 'text-rose-600' : 'text-emerald-700'}`}>
-                {isLowStock ? `⚠️ Low stock! (Min: ${product.minStockAlert})` : `Healthy stock (Alert: ${product.minStockAlert})`}
+                {product.minStockAlert === 0
+                  ? (product.stock <= 0 ? '⚠️ Out of stock! (Alert: 0)' : 'Healthy stock (Alert: 0 / Disabled)')
+                  : (isLowStock ? `⚠️ Low stock! (Min: ${product.minStockAlert})` : `Healthy stock (Alert: ${product.minStockAlert})`)}
               </p>
             </div>
 

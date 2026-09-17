@@ -212,7 +212,7 @@ export const PriceListReport: React.FC<PriceListReportProps> = ({
       // Stock Status
       if (stockStatusFilter === 'in_stock' && product.stock <= 0) return false;
       if (stockStatusFilter === 'out_of_stock' && product.stock > 0) return false;
-      if (stockStatusFilter === 'low_stock' && (product.stock <= 0 || product.stock > product.minStockAlert)) return false;
+      if (stockStatusFilter === 'low_stock' && (product.stock <= 0 || product.minStockAlert <= 0 || product.stock > product.minStockAlert)) return false;
 
       // Price Tiers
       if (priceTierFilter !== 'all') {

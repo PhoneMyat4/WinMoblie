@@ -1232,7 +1232,7 @@ export const StorageService = {
           if (item.color && !targetProduct.color) targetProduct.color = item.color;
           if (item.warrantyMonths !== undefined) targetProduct.warrantyMonths = item.warrantyMonths;
           if (item.description) targetProduct.description = item.description;
-          if (item.minStockAlert) targetProduct.minStockAlert = item.minStockAlert;
+          if (item.minStockAlert !== undefined) targetProduct.minStockAlert = item.minStockAlert;
           
           // Merge IMEIs without duplicates
           if (item.imeiPairs && item.imeiPairs.length > 0) {
@@ -1292,7 +1292,7 @@ export const StorageService = {
             costPrice: item.unitCost,
             sellingPrice: item.sellingPrice,
             stock: item.quantity,
-            minStockAlert: item.minStockAlert || 2,
+            minStockAlert: item.minStockAlert !== undefined ? item.minStockAlert : 2,
             warrantyMonths: item.warrantyMonths !== undefined ? item.warrantyMonths : 12,
             description: item.description || '',
             ram: item.ram,

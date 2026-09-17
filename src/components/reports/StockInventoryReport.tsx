@@ -169,7 +169,7 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
       totalRetailValuation += p.sellingPrice * p.stock;
       if (p.stock <= 0) {
         outOfStockCount++;
-      } else if (p.stock <= p.minStockAlert) {
+      } else if (p.minStockAlert > 0 && p.stock <= p.minStockAlert) {
         lowStockCount++;
       }
       if (p.imeiList && p.imeiList.length > 0) {
@@ -206,9 +206,10 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
 
       if (brandFilter !== 'all' && p.brand !== brandFilter) return false;
 
-      if (healthFilter === 'low_stock' && (p.stock > p.minStockAlert || p.stock <= 0)) return false;
+      const isLow = p.minStockAlert > 0 && p.stock <= p.minStockAlert && p.stock > 0;
+      if (healthFilter === 'low_stock' && !isLow) return false;
       if (healthFilter === 'out_of_stock' && p.stock > 0) return false;
-      if (healthFilter === 'healthy' && p.stock <= p.minStockAlert) return false;
+      if (healthFilter === 'healthy' && (isLow || p.stock <= 0)) return false;
       if (healthFilter === 'serialized' && (!p.imeiList || p.imeiList.length === 0)) return false;
 
       if (!searchQuery.trim()) return true;
@@ -311,7 +312,7 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
         row.push(
           p.stock,
           p.minStockAlert,
-          p.stock <= 0 ? 'Out of Stock' : p.stock <= p.minStockAlert ? 'Low Stock' : 'Healthy'
+          p.stock <= 0 ? 'Out of Stock' : (p.minStockAlert > 0 && p.stock <= p.minStockAlert) ? 'Low Stock' : 'Healthy'
         );
       }
       if (visibleColumns.cost_price !== false) {
@@ -783,7 +784,7 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
                       const costVal = p.costPrice * p.stock;
                       const retailVal = p.sellingPrice * p.stock;
                       const isOutOfStock = p.stock <= 0;
-                      const isLowStock = p.stock <= p.minStockAlert;
+                      const isLowStock = p.minStockAlert > 0 && p.stock <= p.minStockAlert;
                       const hasImeis = p.imeiList && p.imeiList.length > 0;
 
                       return (

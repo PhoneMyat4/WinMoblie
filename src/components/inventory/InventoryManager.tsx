@@ -265,7 +265,11 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   const totalCostValuation = safeProducts.reduce((s, p) => s + ((Number(p.costPrice) || 0) * (Number(p.stock) || 0)), 0);
   const totalRetailValuation = safeProducts.reduce((s, p) => s + ((Number(p.sellingPrice) || 0) * (Number(p.stock) || 0)), 0);
   const projectedGrossProfit = totalRetailValuation - totalCostValuation;
-  const lowStockItems = safeProducts.filter(p => (Number(p.stock) || 0) <= (Number(p.minStockAlert) || 0));
+  const lowStockItems = safeProducts.filter(p => {
+    const min = typeof p.minStockAlert === 'number' ? p.minStockAlert : 2;
+    const stock = Number(p.stock) || 0;
+    return min > 0 ? stock <= min : stock <= 0;
+  });
 
   // Available Brands for current category selection
   const availableBrands = useMemo(() => {
@@ -444,7 +448,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       const matchesColor = selectedColor === 'all' ||
         (p.color && p.color.toLowerCase() === selectedColor.toLowerCase());
 
-      const matchesLowStock = !showLowStockOnly || p.stock <= p.minStockAlert;
+      const minAlert = typeof p.minStockAlert === 'number' ? p.minStockAlert : 2;
+      const matchesLowStock = !showLowStockOnly || (minAlert > 0 ? p.stock <= minAlert : p.stock <= 0);
 
       if (!matchesCat || !matchesSubCat || !matchesBrand || !matchesRam || !matchesRom || !matchesColor || !matchesLowStock) {
         return false;
@@ -571,7 +576,9 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         row.push(margin, profit);
       }
       if (visibleColumns.stock_level !== false) {
-        const status = p.stock <= 0 ? 'Out of Stock' : p.stock <= p.minStockAlert ? 'Low Stock' : 'In Stock';
+        const minAlert = typeof p.minStockAlert === 'number' ? p.minStockAlert : 2;
+        const isLow = minAlert > 0 ? p.stock <= minAlert : false;
+        const status = p.stock <= 0 ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
         row.push(p.stock, p.minStockAlert, status);
       }
       if (visibleColumns.imei_serials !== false) {
@@ -1483,7 +1490,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                   const marginPct = product.sellingPrice > 0 
                     ? Math.round(((product.sellingPrice - product.costPrice) / product.sellingPrice) * 100)
                     : 0;
-                  const isLowStock = product.stock <= product.minStockAlert;
+                  const minAlert = typeof product.minStockAlert === 'number' ? product.minStockAlert : 2;
+                  const isLowStock = minAlert > 0 ? product.stock <= minAlert : product.stock <= 0;
                   const isExactBarcodeMatch = searchQuery && (
                     product.barcode.toLowerCase() === searchQuery.toLowerCase().trim() ||
                     product.sku.toLowerCase() === searchQuery.toLowerCase().trim() ||

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Lock, 
   ShieldCheck, 
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { StaffUser, ShopSettings } from '../../types';
 import { FirebaseAuthService } from '../../services/firebaseAuthService';
+import { FirestoreSyncService } from '../../services/firestoreSyncService';
 import { checkStaffWorkingHoursAccess } from '../../utils/workingHours';
 import { StorageService } from '../../utils/storage';
 
@@ -51,6 +52,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   // Filter active staff accounts
   const activeStaff = staffUsers.filter(u => u.active !== false);
 
+  // Proactively synchronize registered staff users from Firestore whenever the login screen mounts
+  useEffect(() => {
+    FirestoreSyncService.getInstance().fetchStaffUsersFromFirestore().catch(() => {});
+  }, []);
+
   const triggerShake = () => {
     setIsShaking(true);
     setTimeout(() => setIsShaking(false), 500);
@@ -74,9 +80,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     }
 
     setIsSubmitting(true);
+    setErrorMsg('');
 
-    // Find matching registered staff user by username, email, phone, or exact name
-    let matchedUser = activeStaff.find((u) => {
+    // 1. Gather all local registered staff accounts (from props and StorageService cache)
+    const localCachedStaff = StorageService.getStaffUsers();
+    const combinedStaff = localCachedStaff.length > 0 ? localCachedStaff : staffUsers;
+    const activeStaffPool = combinedStaff.filter(u => u.active !== false);
+
+    // Match registered staff user by username, email, phone, ID, or full name
+    let matchedUser = activeStaffPool.find((u) => {
+      const uId = (u.id || '').trim().toLowerCase();
       const uName = (u.username || '').trim().toLowerCase();
       const fullName = (u.name || '').trim().toLowerCase();
       const phoneDigits = (u.phone || '').replace(/\D/g, '');
@@ -84,15 +97,30 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       const email = (u.email || '').trim().toLowerCase();
 
       return (
+        uId === cleanUsername ||
         uName === cleanUsername ||
         fullName === cleanUsername ||
-        (inputDigits.length >= 7 && phoneDigits.endsWith(inputDigits)) ||
+        (inputDigits.length >= 6 && phoneDigits.endsWith(inputDigits)) ||
         (cleanUsername.includes('@') && email === cleanUsername)
       );
     });
 
-    // If all mock accounts were removed and no staff accounts exist yet, bootstrap the Owner account
-    if (!matchedUser && activeStaff.length === 0) {
+    // 2. If user is not yet in local cache, query Firestore directly for the live account
+    if (!matchedUser) {
+      try {
+        const remoteUser = await FirestoreSyncService.getInstance().findStaffUserInFirestore(cleanUsername);
+        if (remoteUser) {
+          matchedUser = remoteUser;
+          // Cache locally for offline resilience and fast subsequent loads
+          StorageService.saveStaffUser(remoteUser, false);
+        }
+      } catch (lookupErr) {
+        console.warn('Direct Firestore staff lookup failed:', lookupErr);
+      }
+    }
+
+    // 3. Fallback: If no accounts exist at all in an empty database, allow bootstrap owner creation
+    if (!matchedUser && activeStaffPool.length === 0) {
       const isOwnerEmail = cleanUsername === 'phonemyatpaing950@gmail.com' || cleanUsername.includes('@');
       const ownerUsername = isOwnerEmail ? cleanUsername.split('@')[0] : (cleanUsername || 'owner');
       const ownerAccount: StaffUser = {
@@ -118,25 +146,43 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       return;
     }
 
-    // Track effective user object in case password updates
+    // Track effective user object in case credentials update
     let effectiveUser = matchedUser;
 
-    // Verify password:
-    // 1. Check local password/PIN/emergency credentials
+    // 4. Verify password:
+    // Check local password/PIN/emergency credentials
     let isValidPassword = 
-      (matchedUser.password && matchedUser.password === cleanPassword) ||
-      (matchedUser.pin && matchedUser.pin === cleanPassword) ||
+      (matchedUser.password && matchedUser.password.trim() === cleanPassword) ||
+      (matchedUser.pin && matchedUser.pin.trim() === cleanPassword) ||
       cleanPassword === '1234' ||
       cleanPassword === 'password123';
 
-    // 2. If local check fails, verify directly with Firebase Authentication
-    // (This handles the case where the user or admin updated password in Firebase console)
+    // 5. If local password check fails, fetch the latest document directly from Firestore
+    // (Handles when passwords or PINs are updated directly in the Firebase Console)
+    if (!isValidPassword && matchedUser.id) {
+      try {
+        const freshUser = await FirestoreSyncService.getInstance().getFreshStaffUser(matchedUser.id);
+        if (freshUser) {
+          const freshMatches = 
+            (freshUser.password && freshUser.password.trim() === cleanPassword) ||
+            (freshUser.pin && freshUser.pin.trim() === cleanPassword);
+          if (freshMatches) {
+            isValidPassword = true;
+            effectiveUser = { ...matchedUser, ...freshUser };
+            StorageService.saveStaffUser(effectiveUser, false);
+          }
+        }
+      } catch (freshErr) {
+        console.warn('Fresh Firestore credential verification warning:', freshErr);
+      }
+    }
+
+    // 6. If still not valid, verify directly with Firebase Authentication
     if (!isValidPassword) {
       try {
         const fbResult = await FirebaseAuthService.verifyFirebaseCredentials(matchedUser, cleanPassword);
         if (fbResult.verified) {
           isValidPassword = true;
-          // Synchronize the new password locally so future logins and offline access succeed seamlessly
           effectiveUser = {
             ...matchedUser,
             password: cleanPassword,
@@ -157,8 +203,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       return;
     }
 
-    // Enforce time-based working hours restriction (Staff with role 'Owner' is always exempt)
-    const hoursCheck = checkStaffWorkingHoursAccess(matchedUser);
+    // 7. Enforce time-based working hours restriction (Staff with role 'Owner' is always exempt)
+    const hoursCheck = checkStaffWorkingHoursAccess(effectiveUser);
     if (!hoursCheck.allowed) {
       setErrorMsg(hoursCheck.reason || 'Access denied: Login is not permitted outside authorized working hours. Please contact the store administrator.');
       triggerShake();
@@ -167,14 +213,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       return;
     }
 
-    // Authenticate with Firebase Auth and sync user session to Firestore
+    // 8. Authenticate with Firebase Auth and sync user session to Firestore
     try {
       await FirebaseAuthService.loginStaffWithFirebase(effectiveUser, cleanPassword);
     } catch (fbErr) {
       console.warn('Firebase auth connection notice:', fbErr);
     }
 
-    // Remember username preference
+    // 9. Remember username preference
     try {
       if (rememberUsername) {
         localStorage.setItem('mobileshop_remembered_username', cleanUsername);

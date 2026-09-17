@@ -15,7 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
-  Sparkles,
+  Bot,
   AlertTriangle,
   BarChart3,
   Lock,
@@ -451,7 +451,7 @@ export const Navigation: React.FC<NavigationProps> = ({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-lg bg-indigo-500 text-white flex items-center justify-center shadow-xs">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300 group-hover:rotate-12 transition-transform" />
+                    <Bot className="w-3.5 h-3.5 text-white group-hover:scale-110 transition-transform" />
                   </div>
                   <div>
                     <span className="text-xs font-bold text-white leading-none block">AI Copilot</span>
@@ -469,9 +469,9 @@ export const Navigation: React.FC<NavigationProps> = ({
               id="sidebar-ai-copilot-icon"
               onClick={onOpenAiAssistant}
               title="Open AI Store Copilot (Voice & Reports)"
-              className="w-10 h-10 mx-auto rounded-xl bg-indigo-900/60 hover:bg-indigo-800 border border-indigo-500/40 text-amber-300 flex items-center justify-center transition-colors cursor-pointer group"
+              className="w-10 h-10 mx-auto rounded-xl bg-indigo-900/60 hover:bg-indigo-800 border border-indigo-500/40 text-indigo-200 flex items-center justify-center transition-colors cursor-pointer group"
             >
-              <Sparkles className="w-4 h-4 group-hover:scale-110 transition-transform" />
+              <Bot className="w-4 h-4 group-hover:scale-110 transition-transform" />
             </button>
           )}
         </div>

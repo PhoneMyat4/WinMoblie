@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   X, 
   Truck, 
@@ -31,15 +31,18 @@ import {
   Paperclip,
   Eye,
   ExternalLink,
-  Lock
+  Lock,
+  Package
 } from 'lucide-react';
-import { PurchaseRecord, PurchaseItem, ShopSettings, StaffRole, ImeiPair, PreOrder } from '../../types';
+import { PurchaseRecord, PurchaseItem, Product, ShopSettings, StaffRole, ImeiPair, PreOrder } from '../../types';
 import { formatCurrency, formatDate, formatImei } from '../../utils/formatters';
 import { exportGoodsReceiptNotePdf } from '../../utils/purchasePdfExport';
 import { BoxScannerModal } from '../modals/BoxScannerModal';
+import { NewProductModal } from '../modals/NewProductModal';
 import { ExtractedBoxSpecs } from '../../utils/boxScannerService';
 import { StorageService } from '../../utils/storage';
 import { isPhoneCategory, canonicalCategory } from '../../data/categoryTaxonomy';
+import { findExactVariantMatch } from '../../utils/variantUtils';
 
 export const isPhoneItem = (item: {
   category?: string;
@@ -157,6 +160,134 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
 
   // AI Box Scanner state for receiving stage
   const [scanningItemIdx, setScanningItemIdx] = useState<number | null>(null);
+
+  // Catalog products for linking and editing in product form
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>(() => StorageService.getProducts());
+  // Active item index for opening product form modal to complete details
+  const [activeProductFormItemIndex, setActiveProductFormItemIndex] = useState<number | null>(null);
+  const [productDetailsSavedFeedback, setProductDetailsSavedFeedback] = useState<string | null>(null);
+
+  // Memoized product object to pass to NewProductModal for the selected item
+  const productForModal = useMemo<Product | null>(() => {
+    if (activeProductFormItemIndex === null) return null;
+    const targetItem = items[activeProductFormItemIndex];
+    if (!targetItem) return null;
+
+    // 1. Direct match by productId or exact variant in catalog
+    const existing = catalogProducts.find(p => p.id === targetItem.productId) ||
+                     findExactVariantMatch(catalogProducts, targetItem) ||
+                     catalogProducts.find(p => 
+                       canonicalCategory(p.category) === canonicalCategory(targetItem.category) &&
+                       p.brand.toLowerCase() === (targetItem.brand || '').toLowerCase() &&
+                       (p.name.toLowerCase() === targetItem.name.toLowerCase() || (p.model && p.model.toLowerCase() === targetItem.name.toLowerCase()))
+                     );
+
+    if (existing) {
+      return {
+        ...existing,
+        name: targetItem.name || existing.name,
+        brand: targetItem.brand || existing.brand,
+        model: targetItem.model || existing.model || targetItem.name,
+        category: canonicalCategory(targetItem.category || existing.category),
+        subCategory: targetItem.subCategory !== undefined ? targetItem.subCategory : existing.subCategory,
+        condition: targetItem.condition || existing.condition || 'brand_new',
+        ram: targetItem.ram !== undefined ? targetItem.ram : existing.ram,
+        rom: targetItem.rom !== undefined ? targetItem.rom : existing.rom,
+        color: targetItem.color !== undefined ? targetItem.color : existing.color,
+        costPrice: targetItem.unitCost > 0 ? targetItem.unitCost : existing.costPrice,
+        sellingPrice: targetItem.sellingPrice > 0 ? targetItem.sellingPrice : existing.sellingPrice,
+        stock: existing.stock,
+        warrantyMonths: targetItem.warrantyMonths !== undefined ? targetItem.warrantyMonths : (existing.warrantyMonths ?? 12),
+        description: targetItem.description !== undefined ? targetItem.description : (existing.description || ''),
+        barcode: targetItem.barcode || existing.barcode,
+        sku: targetItem.sku || existing.sku,
+        minStockAlert: targetItem.minStockAlert !== undefined ? targetItem.minStockAlert : (existing.minStockAlert !== undefined ? existing.minStockAlert : 2),
+        imeiPairs: (targetItem.imeiPairs && targetItem.imeiPairs.length > 0) ? targetItem.imeiPairs : existing.imeiPairs,
+        dualImei: targetItem.dualImei ?? existing.dualImei ?? true,
+        supplierId: purchase.supplierId || existing.supplierId,
+        supplierName: purchase.supplierName || existing.supplierName,
+      };
+    }
+
+    // 2. Fresh product specification crafted from PurchaseItem
+    return {
+      id: targetItem.productId && !targetItem.productId.startsWith('prod-draft-')
+        ? targetItem.productId
+        : `prod-${Date.now()}-${activeProductFormItemIndex}`,
+      name: targetItem.name,
+      brand: targetItem.brand,
+      model: targetItem.model || targetItem.name,
+      category: canonicalCategory(targetItem.category || 'brand_new_phones'),
+      subCategory: targetItem.subCategory || '',
+      condition: targetItem.condition || 'brand_new',
+      sku: targetItem.sku || '',
+      barcode: targetItem.barcode || '',
+      costPrice: targetItem.unitCost || 0,
+      sellingPrice: targetItem.sellingPrice > 0 ? targetItem.sellingPrice : Math.round((targetItem.unitCost || 0) * 1.2),
+      stock: targetItem.quantity || 1,
+      minStockAlert: targetItem.minStockAlert !== undefined ? targetItem.minStockAlert : 2,
+      warrantyMonths: targetItem.warrantyMonths ?? 12,
+      ram: targetItem.ram,
+      rom: targetItem.rom,
+      color: targetItem.color,
+      description: targetItem.description || '',
+      imeiPairs: targetItem.imeiPairs || [],
+      dualImei: targetItem.dualImei ?? true,
+      supplierId: purchase.supplierId,
+      supplierName: purchase.supplierName,
+    };
+  }, [activeProductFormItemIndex, items, catalogProducts, purchase.supplierId, purchase.supplierName]);
+
+  // Handle saving completed product details from NewProductModal
+  const handleSaveProductFromModal = (savedProduct: Product) => {
+    if (activeProductFormItemIndex === null) return;
+    const targetIdx = activeProductFormItemIndex;
+
+    // Save product to inventory catalog
+    StorageService.saveProduct(savedProduct);
+    const freshProducts = StorageService.getProducts();
+    setCatalogProducts(freshProducts);
+
+    // Update purchase item in Stage 3 intake
+    setItems(prev => {
+      const next = [...prev];
+      const cur = next[targetIdx];
+      const newUnitCost = savedProduct.costPrice > 0 ? savedProduct.costPrice : cur.unitCost;
+      const newSellingPrice = savedProduct.sellingPrice > 0 ? savedProduct.sellingPrice : cur.sellingPrice;
+
+      next[targetIdx] = {
+        ...cur,
+        productId: savedProduct.id,
+        name: savedProduct.name,
+        brand: savedProduct.brand,
+        model: savedProduct.model || savedProduct.name,
+        category: savedProduct.category,
+        subCategory: savedProduct.subCategory,
+        condition: savedProduct.condition,
+        ram: savedProduct.ram,
+        rom: savedProduct.rom,
+        color: savedProduct.color,
+        warrantyMonths: savedProduct.warrantyMonths,
+        description: savedProduct.description,
+        barcode: savedProduct.barcode,
+        sku: savedProduct.sku,
+        minStockAlert: savedProduct.minStockAlert,
+        unitCost: newUnitCost,
+        totalCost: newUnitCost * cur.quantity,
+        sellingPrice: newSellingPrice,
+        imeiPairs: (savedProduct.imeiPairs && savedProduct.imeiPairs.length > 0) ? savedProduct.imeiPairs : cur.imeiPairs,
+        dualImei: savedProduct.dualImei ?? cur.dualImei ?? true,
+      };
+      return next;
+    });
+
+    setProductDetailsSavedFeedback(`Product "${savedProduct.name}" details completed & linked.`);
+    setTimeout(() => {
+      setProductDetailsSavedFeedback(null);
+    }, 4000);
+
+    setActiveProductFormItemIndex(null);
+  };
 
   // Landed Cost Calculations
   const baseSubtotal = items.reduce((acc, item) => acc + item.totalCost, 0);
@@ -420,6 +551,23 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
           </span>
         </div>
 
+        {/* Product Details Saved Feedback Banner */}
+        {productDetailsSavedFeedback && (
+          <div className="mx-6 mt-3 px-4 py-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-semibold flex items-center justify-between shadow-2xs animate-fade-in">
+            <div className="flex items-center space-x-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{productDetailsSavedFeedback}</span>
+            </div>
+            <button 
+              type="button" 
+              onClick={() => setProductDetailsSavedFeedback(null)}
+              className="text-emerald-700 hover:text-emerald-900 text-xs font-bold px-1.5 py-0.5 rounded cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* Lock Warning if not yet confirmed */}
         {!isUnlocked && (
           <div className="px-6 py-3 bg-amber-50 border-b border-amber-200 text-amber-900 text-xs flex items-center space-x-2">
@@ -564,7 +712,7 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                           {idx + 1}
                         </div>
                         <div>
-                          <div className="flex items-center space-x-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
                             <span className="font-bold text-slate-900 text-xs">{item.name}</span>
                             <span className="px-1.5 py-0.5 bg-slate-200 text-slate-700 rounded text-[10px] font-bold">
                               {item.brand}
@@ -577,6 +725,21 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                             {item.color && (
                               <span className="px-1.5 py-0.5 bg-slate-100 border border-slate-300 text-slate-700 rounded text-[10px]">
                                 {item.color}
+                              </span>
+                            )}
+                            {item.warrantyMonths !== undefined && (
+                              <span className="px-1.5 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 rounded text-[10px] font-semibold">
+                                {item.warrantyMonths}M Warranty
+                              </span>
+                            )}
+                            {item.condition && item.condition !== 'brand_new' && (
+                              <span className="px-1.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 rounded text-[10px] font-semibold capitalize">
+                                {item.condition.replace(/_/g, ' ')}
+                              </span>
+                            )}
+                            {item.barcode && (
+                              <span className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 text-slate-600 rounded text-[10px] font-mono">
+                                Barcode: {item.barcode}
                               </span>
                             )}
                           </div>
@@ -636,7 +799,22 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center space-x-3">
+                      <div className="flex items-center space-x-2.5">
+                        {/* Complete Product Details button to open NewProductModal */}
+                        <button
+                          type="button"
+                          id={`stage3-open-product-form-btn-${idx}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveProductFormItemIndex(idx);
+                          }}
+                          className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-800 border border-emerald-300 hover:border-emerald-400 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer group"
+                          title="Open product form to complete catalog specifications, warranty, barcode, description, and margins upon receiving"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5 text-emerald-600 group-hover:scale-110 transition-transform shrink-0" />
+                          <span>Complete Product Details</span>
+                        </button>
+
                         {isPhone ? (
                           <div className="flex items-center space-x-1.5" onClick={(e) => e.stopPropagation()}>
                             <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center space-x-1 ${
@@ -681,6 +859,27 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                     {/* Expandable IMEI Intake Body */}
                     {isExpanded && isPhone && (
                       <div className="p-4 border-t border-slate-200 bg-emerald-50/20 space-y-3">
+                        {/* Complete product details callout bar */}
+                        <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-emerald-200 text-xs">
+                          <div className="flex items-center space-x-2 text-slate-700">
+                            <Package className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>
+                              Catalog Specifications: <strong className="text-slate-900">{item.name}</strong> ({item.brand})
+                              {item.warrantyMonths !== undefined ? ` • ${item.warrantyMonths}M Warranty` : ''}
+                              {item.barcode ? ` • Barcode: ${item.barcode}` : ''}
+                              {item.condition ? ` • ${item.condition.replace(/_/g, ' ')}` : ''}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setActiveProductFormItemIndex(idx)}
+                            className="inline-flex items-center space-x-1 text-emerald-700 hover:text-emerald-900 font-bold hover:underline cursor-pointer ml-2 shrink-0"
+                          >
+                            <span>Edit in Product Form</span>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center space-x-2">
                             <span className="font-bold text-slate-800 text-xs">
@@ -1042,7 +1241,28 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
 
                     {/* Non-Phone Items Pre-Order Allocation */}
                     {isExpanded && !isPhone && (
-                      <div className="p-4 border-t border-slate-200 bg-slate-50/50 space-y-2">
+                      <div className="p-4 border-t border-slate-200 bg-slate-50/50 space-y-3">
+                        {/* Complete product details callout bar */}
+                        <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-200 text-xs">
+                          <div className="flex items-center space-x-2 text-slate-700">
+                            <Package className="w-4 h-4 text-slate-600 shrink-0" />
+                            <span>
+                              Catalog Specifications: <strong className="text-slate-900">{item.name}</strong> ({item.brand})
+                              {item.category ? ` • ${item.category}` : ''}
+                              {item.barcode ? ` • Barcode: ${item.barcode}` : ''}
+                              {item.warrantyMonths !== undefined ? ` • ${item.warrantyMonths}M Warranty` : ''}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setActiveProductFormItemIndex(idx)}
+                            className="inline-flex items-center space-x-1 text-emerald-700 hover:text-emerald-900 font-bold hover:underline cursor-pointer ml-2 shrink-0"
+                          >
+                            <span>Edit in Product Form</span>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-bold text-slate-800">
                             Allocate Batch to Pre-Order (Optional)
@@ -1463,6 +1683,20 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
           isOpen={true}
           onClose={() => setScanningItemIdx(null)}
           onApplySpecs={handleApplyBoxSpecsToItem}
+        />
+      )}
+
+      {/* Product Form Modal to Complete / Edit Product Details Upon Receiving */}
+      {activeProductFormItemIndex !== null && productForModal && (
+        <NewProductModal
+          settings={settings}
+          editingProduct={productForModal}
+          products={catalogProducts}
+          zIndexClass="z-[70]"
+          modalTitle={`Complete Product Details: ${items[activeProductFormItemIndex]?.name || 'Item'}`}
+          modalSubtitle="Specify warranty, barcode, category, condition, specs, and retail margins for this received product"
+          onClose={() => setActiveProductFormItemIndex(null)}
+          onSave={handleSaveProductFromModal}
         />
       )}
     </div>

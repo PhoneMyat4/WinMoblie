@@ -2065,7 +2065,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                         )}
                         <div className="flex items-center gap-1.5">
                           <div className="flex items-center gap-1 text-[10px] font-bold">
-                            <span className={sellableStock <= product.minStockAlert ? 'text-rose-600' : 'text-slate-500'}>
+                            <span className={(product.minStockAlert > 0 ? sellableStock <= product.minStockAlert : sellableStock <= 0) ? 'text-rose-600' : 'text-slate-500'}>
                               {sellableStock} sellable
                             </span>
                             {product.quarantinedStock && product.quarantinedStock > 0 ? (

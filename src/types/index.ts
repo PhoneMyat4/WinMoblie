@@ -579,6 +579,7 @@ export interface PurchaseItem {
   productId: string;
   name: string;
   brand: string;
+  model?: string;
   category: ProductCategory;
   subCategory?: string;
   condition?: DeviceCondition;

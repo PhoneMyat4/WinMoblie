@@ -232,7 +232,12 @@ export default function App() {
   // Compute live badges
   const lowStockCount = useMemo(() => {
     if (!Array.isArray(products)) return 0;
-    return products.filter(p => p && (Number(p.stock) || 0) <= (Number(p.minStockAlert) || 0)).length;
+    return products.filter(p => {
+      if (!p) return false;
+      const stock = Number(p.stock) || 0;
+      const min = typeof p.minStockAlert === 'number' ? p.minStockAlert : 2;
+      return min > 0 ? stock <= min : stock <= 0;
+    }).length;
   }, [products]);
 
   const quarantinedCount = useMemo(() => {

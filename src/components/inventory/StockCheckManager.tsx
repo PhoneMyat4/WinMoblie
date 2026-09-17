@@ -141,7 +141,7 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
     } else if (auditScope === 'brand' && selectedBrand !== 'all') {
       targetProducts = targetProducts.filter(p => p.brand === selectedBrand);
     } else if (auditScope === 'low_stock') {
-      targetProducts = targetProducts.filter(p => p.stock <= p.minStockAlert);
+      targetProducts = targetProducts.filter(p => (p.minStockAlert > 0 ? p.stock <= p.minStockAlert : p.stock <= 0));
     }
 
     if (targetProducts.length === 0) {
