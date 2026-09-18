@@ -266,7 +266,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   const totalRetailValuation = safeProducts.reduce((s, p) => s + ((Number(p.sellingPrice) || 0) * (Number(p.stock) || 0)), 0);
   const projectedGrossProfit = totalRetailValuation - totalCostValuation;
   const lowStockItems = safeProducts.filter(p => {
-    const min = typeof p.minStockAlert === 'number' ? p.minStockAlert : 2;
+    const min = typeof p.minStockAlert === 'number' ? p.minStockAlert : 0;
     const stock = Number(p.stock) || 0;
     return min > 0 ? stock <= min : stock <= 0;
   });
@@ -448,7 +448,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       const matchesColor = selectedColor === 'all' ||
         (p.color && p.color.toLowerCase() === selectedColor.toLowerCase());
 
-      const minAlert = typeof p.minStockAlert === 'number' ? p.minStockAlert : 2;
+      const minAlert = typeof p.minStockAlert === 'number' ? p.minStockAlert : 0;
       const matchesLowStock = !showLowStockOnly || (minAlert > 0 ? p.stock <= minAlert : p.stock <= 0);
 
       if (!matchesCat || !matchesSubCat || !matchesBrand || !matchesRam || !matchesRom || !matchesColor || !matchesLowStock) {
@@ -576,7 +576,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         row.push(margin, profit);
       }
       if (visibleColumns.stock_level !== false) {
-        const minAlert = typeof p.minStockAlert === 'number' ? p.minStockAlert : 2;
+        const minAlert = typeof p.minStockAlert === 'number' ? p.minStockAlert : 0;
         const isLow = minAlert > 0 ? p.stock <= minAlert : false;
         const status = p.stock <= 0 ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
         row.push(p.stock, p.minStockAlert, status);
@@ -1490,7 +1490,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                   const marginPct = product.sellingPrice > 0 
                     ? Math.round(((product.sellingPrice - product.costPrice) / product.sellingPrice) * 100)
                     : 0;
-                  const minAlert = typeof product.minStockAlert === 'number' ? product.minStockAlert : 2;
+                  const minAlert = typeof product.minStockAlert === 'number' ? product.minStockAlert : 0;
                   const isLowStock = minAlert > 0 ? product.stock <= minAlert : product.stock <= 0;
                   const isExactBarcodeMatch = searchQuery && (
                     product.barcode.toLowerCase() === searchQuery.toLowerCase().trim() ||

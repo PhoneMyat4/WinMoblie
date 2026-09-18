@@ -913,6 +913,7 @@ export interface SocialMarketingState {
   trainingFileName: string;
   promptInstruction: string;
   aiTone: 'exciting_retail' | 'professional_tech' | 'urgent_discount' | 'bilingual_burmese_english';
+  selectedModel?: string;
   isGeneratingCopy: boolean;
   
   // 4. Draft & Preview Console

@@ -85,7 +85,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Inventory stats
   const lowStockProducts = products.filter(p => {
-    const min = typeof p.minStockAlert === 'number' ? p.minStockAlert : 2;
+    const min = typeof p.minStockAlert === 'number' ? p.minStockAlert : 0;
     return min > 0 ? p.stock <= min : p.stock <= 0;
   });
   const totalStockCount = products.reduce((acc, p) => acc + p.stock, 0);

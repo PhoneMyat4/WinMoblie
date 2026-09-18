@@ -283,8 +283,10 @@ Looking for genuine quality? The ${product.name} is officially available at ${st
   try {
     const aiResult = await generateTextWithAiFallback({
       userPrompt: prompt,
-      systemPrompt: 'You write viral, high-converting social media promotional product posts for retail tech electronics stores. You never hallucinate phone specs on accessory items.',
+      systemPrompt:
+        'You are a professional bilingual (Burmese & English) retail tech marketing specialist and senior copywriter. You write viral, high-converting social media promotional product posts for retail tech electronics stores. You never hallucinate phone specs on accessory items.',
       preferProvider: 'openai',
+      enableWebSearch: true,
       temperature: 0.7,
       fallbackGenerator: deterministicFallback,
     });

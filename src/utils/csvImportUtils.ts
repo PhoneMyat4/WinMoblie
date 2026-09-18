@@ -461,7 +461,7 @@ export function parseBulkCsvProducts(
       stock = 0;
     }
 
-    const minStockAlert = parseCleanNumber(getVal('minStockAlert'), 2);
+    const minStockAlert = parseCleanNumber(getVal('minStockAlert'), 0);
     const warrantyMonths = parseCleanNumber(getVal('warranty'), isPhone ? (category === 'new_phones' ? 12 : 1) : 6);
     const description = getVal('description') || undefined;
 

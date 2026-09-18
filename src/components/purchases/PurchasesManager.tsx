@@ -211,7 +211,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   const [itemBarcode, setItemBarcode] = useState<string>(`${Math.floor(100000000000 + Math.random() * 900000000000)}`);
   const [itemSku, setItemSku] = useState<string>(`SKU-${Date.now().toString().slice(-6)}`);
   const [itemWarrantyMonths, setItemWarrantyMonths] = useState<number>(12);
-  const [itemMinStockAlert, setItemMinStockAlert] = useState<number>(2);
+  const [itemMinStockAlert, setItemMinStockAlert] = useState<number>(0);
   const [itemDescription, setItemDescription] = useState<string>('');
   const [itemQty, setItemQty] = useState<number>(1);
   const [itemUnitCost, setItemUnitCost] = useState<number>(0);
@@ -726,7 +726,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       setItemBarcode(prod.barcode);
       setItemSku(prod.sku);
       setItemWarrantyMonths(prod.warrantyMonths !== undefined ? prod.warrantyMonths : 12);
-      setItemMinStockAlert(prod.minStockAlert !== undefined ? prod.minStockAlert : 2);
+      setItemMinStockAlert(prod.minStockAlert !== undefined ? prod.minStockAlert : 0);
       setItemDescription(prod.description || '');
       setItemUnitCost(prod.costPrice);
       setItemSellingPrice(prod.sellingPrice);

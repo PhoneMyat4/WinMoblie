@@ -90,6 +90,7 @@ const DEFAULT_SOCIAL_STATE: SocialMarketingState = {
   trainingFileName: '',
   promptInstruction: 'Make it sound exciting and mention a Thingyan festival discount with free tempered glass and 1-year warranty.',
   aiTone: 'exciting_retail',
+  selectedModel: 'gpt-4o-mini',
   isGeneratingCopy: false,
 
   // Step 4: Draft & Preview Console
@@ -582,6 +583,7 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
           trainingText: socialState.trainingText,
           promptInstruction: socialState.promptInstruction,
           tone: socialState.aiTone,
+          model: socialState.selectedModel || 'gpt-4o-mini',
           settings,
         }),
       });
@@ -595,7 +597,7 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
           draftCaption: data.caption,
           lastEditedAt: new Date().toISOString(),
         }));
-        showToast('success', 'Generated high-converting ad copy!');
+        showToast('success', `Generated high-converting ad copy with ${data.model || socialState.selectedModel || 'gpt-4o-mini'}!`);
       } else {
         throw new Error(data.error || 'Failed to generate ad copy.');
       }
@@ -1464,6 +1466,103 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
                       'No .txt reference loaded yet (optional)'
                     )}
                   </div>
+                </div>
+              </div>
+
+              {/* AI Model Selection */}
+              <div className="mb-3.5 p-3 rounded-xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/70">
+                <div className="flex items-center justify-between mb-2">
+                  <label htmlFor="ai-model-select" className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>AI Model Selection</span>
+                  </label>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-blue-100/80 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                    Responses API
+                  </span>
+                </div>
+
+                {/* Radio Cards for Models */}
+                <div className="grid grid-cols-2 gap-2 mb-2.5">
+                  <label
+                    htmlFor="model-radio-gpt-4o-mini"
+                    className={`relative p-2.5 rounded-xl border cursor-pointer transition-all ${
+                      (socialState.selectedModel || 'gpt-4o-mini') === 'gpt-4o-mini'
+                        ? 'bg-blue-50/90 dark:bg-blue-950/60 border-blue-500 shadow-xs ring-1 ring-blue-500/50'
+                        : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          id="model-radio-gpt-4o-mini"
+                          type="radio"
+                          name="ai-model-selection"
+                          value="gpt-4o-mini"
+                          checked={(socialState.selectedModel || 'gpt-4o-mini') === 'gpt-4o-mini'}
+                          onChange={() => setSocialState(prev => ({ ...prev, selectedModel: 'gpt-4o-mini' }))}
+                          className="w-3.5 h-3.5 text-blue-600 border-slate-300 focus:ring-blue-500"
+                        />
+                        <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1">
+                          <Zap className="w-3 h-3 text-amber-500" />
+                          gpt-4o-mini
+                        </span>
+                      </div>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                        Fast / Budget
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-5 leading-tight">
+                      Instant response, budget-friendly, built-in live web search.
+                    </p>
+                  </label>
+
+                  <label
+                    htmlFor="model-radio-gpt-5"
+                    className={`relative p-2.5 rounded-xl border cursor-pointer transition-all ${
+                      socialState.selectedModel === 'gpt-5'
+                        ? 'bg-indigo-50/90 dark:bg-indigo-950/60 border-indigo-500 shadow-xs ring-1 ring-indigo-500/50'
+                        : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          id="model-radio-gpt-5"
+                          type="radio"
+                          name="ai-model-selection"
+                          value="gpt-5"
+                          checked={socialState.selectedModel === 'gpt-5'}
+                          onChange={() => setSocialState(prev => ({ ...prev, selectedModel: 'gpt-5' }))}
+                          className="w-3.5 h-3.5 text-indigo-600 border-slate-300 focus:ring-indigo-500"
+                        />
+                        <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-indigo-500" />
+                          gpt-5
+                        </span>
+                      </div>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
+                        Pro / High-Quality
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-5 leading-tight">
+                      Deep reasoning, high-converting persuasive hooks & viral phrasing.
+                    </p>
+                  </label>
+                </div>
+
+                {/* Dropdown Select Option */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">Dropdown Select:</span>
+                  <select
+                    id="ai-model-select"
+                    value={socialState.selectedModel || 'gpt-4o-mini'}
+                    onChange={(e) => setSocialState(prev => ({ ...prev, selectedModel: e.target.value }))}
+                    className="flex-1 px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="gpt-4o-mini">gpt-4o-mini — Fast / Budget (Speed & High Volume)</option>
+                    <option value="gpt-5">gpt-5 — Pro / High-Quality (Deep Reasoning & Copywriting)</option>
+                    <option value="gpt-4o">gpt-4o — Balanced Flagship (Creative Vision)</option>
+                  </select>
                 </div>
               </div>
 

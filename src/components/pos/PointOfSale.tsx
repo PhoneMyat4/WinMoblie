@@ -772,7 +772,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
       costPrice: Math.round((itemUnitPrice || (order.depositAmount / orderQty) * 2) * 0.82),
       sellingPrice: itemUnitPrice,
       stock: orderQty,
-      minStockAlert: 1,
+      minStockAlert: 0,
       ram: order.ram,
       rom: order.rom,
       color: order.color,

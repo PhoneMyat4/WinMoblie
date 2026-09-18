@@ -23,7 +23,7 @@ import {
 } from './server/facebookPostService';
 import { FacebookAdPostRecord } from './src/types';
 import { detectProductKind, isPhoneProduct, buildProductVisualPrompt } from './src/data/categoryTaxonomy';
-import { generateTextWithAiFallback } from './server/aiFallbackWrapper';
+import { generateTextWithAiFallback, formatResponsesOutput, executeOpenAiResponseAgenticLoop } from './server/aiFallbackWrapper';
 import {
   handleTelegramWebhook,
   handleSetupTelegramWebhook,
@@ -905,11 +905,15 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
   // Step 3: AI Copywriting with Few-Shot Competitor Training & Custom Prompts
   app.post('/api/social-marketing/generate-copy', async (req, res) => {
     try {
-      const { product, trainingText, promptInstruction, tone = 'exciting_retail', settings } = req.body;
+      const { product, trainingText, promptInstruction, tone = 'exciting_retail', model, settings } = req.body;
 
       if (!product) {
         return res.status(400).json({ success: false, error: 'Product details are required for ad copywriting.' });
       }
+
+      // Dynamic model selection with fallback default
+      const requestedModel = (typeof model === 'string' && model.trim()) ? model.trim() : 'gpt-4o-mini';
+      let activeModel = requestedModel;
 
       const storeName = settings?.shopName || 'Golden Star Mobile';
       const currency = settings?.currencySymbol || 'MMK';
@@ -1039,39 +1043,55 @@ Only write about charging wattage, speed, reliability, build quality, safety, an
           break;
       }
 
-      // Construct system instruction with Few-Shot competitor training context
-      let prompt = `${persona}
+      // Adapt the professional bilingual tech marketer persona into the Responses API system instructions
+      const responsesInstructions = `You are a professional bilingual (Burmese & English) retail tech marketing specialist and senior copywriter for "${storeName}".
+${persona}
+You specialize in viral, persuasive, high-converting social media promotional product posts for retail tech electronics stores.
+You write engaging bilingual copy (Burmese and English) that resonates with shoppers on Facebook, highlighting competitive value, verified hardware specifications, official warranty, and urgent call-to-action.
+${negativeRule ? `\n${negativeRule}` : ''}`;
 
-PRODUCT SPECS & DETAILS:
-- Brand & Model: ${product.brand} ${product.model}
-- Category: ${categoryLabel}
-${specsLines.join('\n')}
+      // User prompt requesting live competitor price/specs research with built-in web_search tool
+      let promptInput = `Please search the internet using your built-in web_search tool for the latest competitor prices, current market retail pricing, and key hardware specifications for: "${product.brand} ${product.model || product.name}".
+
+OUR STORE INVENTORY DETAILS:
 - Store Name: ${storeName}
-- Store Contact / Hotline: ${hotline}
+- Product Category: ${categoryLabel}
+- Brand & Model: ${product.brand} ${product.model}
+- Full Name: ${product.name}
+${specsLines.join('\n')}
+- Our Official Selling Price: ${formattedPrice}
+- Condition: ${(product.condition || 'brand_new').replace(/_/g, ' ')}
+- Warranty: ${product.warrantyMonths ? `${product.warrantyMonths} Months Official Store Warranty` : 'Store Warranty Included'}
+- Hotline / Contact: ${hotline}
 - Store Address: ${address}
 
 KEY HIGHLIGHTS TO FOCUS ON:
 ${featureGuidance}
-${negativeRule}
 `;
 
       if (trainingText && trainingText.trim()) {
-        prompt += `\n\nCOMPETITOR & REFERENCE FEW-SHOT EXAMPLES (Mirror this tone, persuasive structure, and formatting rhythm closely):\n"""\n${trainingText.trim().substring(0, 4000)}\n"""\n`;
+        promptInput += `\n\nCOMPETITOR & REFERENCE FEW-SHOT EXAMPLES (Mirror this tone, persuasive structure, and formatting rhythm closely):\n"""\n${trainingText.trim().substring(0, 4000)}\n"""\n`;
       }
 
       if (promptInstruction && promptInstruction.trim()) {
-        prompt += `\n\nSPECIFIC CAMPAIGN INSTRUCTIONS FROM STORE OPERATOR:\n"${promptInstruction.trim()}"\n`;
+        promptInput += `\n\nSPECIFIC CAMPAIGN INSTRUCTIONS FROM STORE OPERATOR:\n"${promptInstruction.trim()}"\n`;
       }
 
-      prompt += `\nDESIRED TONE: ${tone}
+      promptInput += `\nDESIRED TONE: ${tone}
+
+AGENTIC TASK INSTRUCTIONS:
+1. USE BUILT-IN WEB SEARCH: Look up current retail market pricing, competitor rates, and technical specs for "${product.brand} ${product.model || product.name}".
+2. Compare competitor prices with our store's selling price (${formattedPrice}) to formulate an irresistible, high-value deal.
+3. Write an engaging, high-converting Facebook promotional advertisement post.
+
 FORMAT REQUIREMENTS:
 1. Catchy headline hook with emojis relevant to this product (${headlineEmojis}).
-2. Highlight 3-4 key product advantages matching the verified specs.
+2. Highlight 3-4 key product advantages matching the verified specs and market edge.
 3. Clear price callout (${formattedPrice}) with any special offer or discount.
-4. Urgency or value callout (limited stock, fast delivery, genuine warranty).
+4. Urgency or value callout (limited stock, fast delivery, genuine warranty guarantee).
 5. Clear Call to Action (Call ${hotline}, visit store at ${address}, or Send Message on Facebook).
-6. 4-6 trending retail hashtags (e.g., #${product.brand.replace(/\s+/g, '')} #${product.model.replace(/[^a-zA-Z0-9]/g, '')} #MyanmarShop #${storeName.replace(/\s+/g, '')}).
-Write directly in engaging bilingual (Burmese & English) or fluent English suited for Facebook newsfeed engagement. Do NOT include markdown code blocks or conversational chatter; output only the final advertisement copy.`;
+6. 4-6 trending retail hashtags (e.g., #${product.brand.replace(/\s+/g, '')} #${(product.model || '').replace(/[^a-zA-Z0-9]/g, '')} #MyanmarShop #${storeName.replace(/\s+/g, '')}).
+Write directly in engaging bilingual (Burmese & English) or fluent English suited for Facebook newsfeed engagement. Do NOT include markdown citation links like ([source](url)), citation footnotes, or conversational chatter; output only the final cleanly formatted advertisement copy.`;
 
       const deterministicFallback = () => {
         if (kind === 'charger') {
@@ -1111,22 +1131,64 @@ Write directly in engaging bilingual (Burmese & English) or fluent English suite
       };
 
       let generatedCopy = '';
-      try {
-        const aiResult = await generateTextWithAiFallback({
-          userPrompt: prompt,
-          systemPrompt: 'You write viral, high-converting social media promotional product posts for retail tech electronics stores.',
-          preferProvider: 'openai',
-          temperature: 0.7,
-          fallbackGenerator: deterministicFallback,
-        });
-        generatedCopy = aiResult.text;
-      } catch {
-        generatedCopy = deterministicFallback();
+
+      // 1. Primary execution via new OpenAI client.responses.create() with web_search & multi-step agentic loop
+      if (process.env.OPENAI_API_KEY) {
+        const openai = getOpenAI();
+        try {
+          generatedCopy = await executeOpenAiResponseAgenticLoop({
+            client: openai,
+            model: activeModel,
+            instructions: responsesInstructions,
+            input: promptInput,
+            enableWebSearch: true,
+            temperature: 0.7,
+            maxTokens: 1500,
+          });
+        } catch (openAiErr: any) {
+          console.warn(`[Social Marketing] OpenAI Responses API failed with model ${activeModel} (${openAiErr?.message || openAiErr}). Attempting default fallback...`);
+          // If a specific high-tier model like gpt-5 fails or lacks access, retry with standard gpt-4o-mini
+          if (activeModel !== 'gpt-4o-mini') {
+            try {
+              activeModel = 'gpt-4o-mini';
+              generatedCopy = await executeOpenAiResponseAgenticLoop({
+                client: openai,
+                model: activeModel,
+                instructions: responsesInstructions,
+                input: promptInput,
+                enableWebSearch: true,
+                temperature: 0.7,
+                maxTokens: 1500,
+              });
+            } catch (retryErr: any) {
+              console.warn('[Social Marketing] Fallback to gpt-4o-mini failed:', retryErr?.message || retryErr);
+            }
+          }
+        }
+      }
+
+      // 2. Secondary fallback via centralized wrapper or deterministic rule engine
+      if (!generatedCopy) {
+        try {
+          const aiResult = await generateTextWithAiFallback({
+            userPrompt: promptInput,
+            systemPrompt: responsesInstructions,
+            preferProvider: 'openai',
+            model: activeModel,
+            enableWebSearch: true,
+            temperature: 0.7,
+            fallbackGenerator: deterministicFallback,
+          });
+          generatedCopy = aiResult.text;
+        } catch {
+          generatedCopy = deterministicFallback();
+        }
       }
 
       return res.json({
         success: true,
         caption: generatedCopy.trim(),
+        model: activeModel,
       });
     } catch (err: any) {
       console.error('Error in /api/social-marketing/generate-copy:', err);
@@ -1557,17 +1619,17 @@ Output a JSON response with:
       }
       const client = new OpenAI({ apiKey: targetKey });
       const startTime = Date.now();
-      const completion = await client.chat.completions.create({
+      const response = await client.responses.create({
         model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: 'Ping' }],
-        max_tokens: 5,
+        input: 'Ping',
+        max_output_tokens: 10,
       });
       const latencyMs = Date.now() - startTime;
       return res.json({
         success: true,
         latencyMs,
-        model: completion.model || 'gpt-4o-mini',
-        message: 'OpenAI API key validated successfully from server environment!',
+        model: response.model || 'gpt-4o-mini',
+        message: 'OpenAI Responses API validated successfully from server environment!',
       });
     } catch (err: any) {
       return res.status(400).json({

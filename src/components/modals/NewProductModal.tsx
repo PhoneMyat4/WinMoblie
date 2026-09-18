@@ -84,7 +84,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   const [sellingPrice, setSellingPrice] = useState<number>(editingProduct?.sellingPrice || 0);
   const [stock, setStock] = useState<number>(editingProduct?.stock || 1);
   const [minStockAlert, setMinStockAlert] = useState<number | string>(
-    editingProduct?.minStockAlert !== undefined ? editingProduct.minStockAlert : 2
+    editingProduct?.minStockAlert !== undefined ? editingProduct.minStockAlert : 0
   );
   const [warrantyMonths, setWarrantyMonths] = useState<number>(editingProduct?.warrantyMonths ?? 12);
   const [description, setDescription] = useState<string>(editingProduct?.description || '');
@@ -477,7 +477,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     setCostPrice(v.costPrice || 0);
     setSellingPrice(v.sellingPrice || 0);
     setWarrantyMonths(v.warrantyMonths !== undefined ? v.warrantyMonths : 12);
-    setMinStockAlert(v.minStockAlert !== undefined ? v.minStockAlert : 2);
+    setMinStockAlert(v.minStockAlert !== undefined ? v.minStockAlert : 0);
     setDescription(v.description || '');
     setSku(v.sku);
     setBarcode(v.barcode);

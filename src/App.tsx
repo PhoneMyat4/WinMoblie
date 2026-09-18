@@ -235,7 +235,7 @@ export default function App() {
     return products.filter(p => {
       if (!p) return false;
       const stock = Number(p.stock) || 0;
-      const min = typeof p.minStockAlert === 'number' ? p.minStockAlert : 2;
+      const min = typeof p.minStockAlert === 'number' ? p.minStockAlert : 0;
       return min > 0 ? stock <= min : stock <= 0;
     }).length;
   }, [products]);

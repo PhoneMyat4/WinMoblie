@@ -41,6 +41,8 @@ export interface TextGenerationOptions {
   temperature?: number;
   maxTokens?: number;
   preferProvider?: 'openai' | 'gemini';
+  enableWebSearch?: boolean;
+  model?: string;
   fallbackGenerator?: () => string;
 }
 
@@ -51,7 +53,110 @@ export interface TextGenerationResult {
 }
 
 /**
- * Centralized AI Text Generation with automatic fallback between OpenAI and Gemini.
+ * Strips citation artifacts, code fences, and conversational preamble from generated copy.
+ */
+export function formatResponsesOutput(rawText: string): string {
+  if (!rawText) return '';
+  let cleaned = rawText;
+
+  // 1. Strip markdown web search citation links: ([domain.com](url)), [domain.com](url), ([domain.com])
+  cleaned = cleaned.replace(/\(\[.*?\]\(https?:\/\/[^\s)]+\)\)/g, '');
+  cleaned = cleaned.replace(/\[.*?\]\(https?:\/\/[^\s)]+\)/g, '');
+  cleaned = cleaned.replace(/\(\[.*?\]\)/g, '');
+  cleaned = cleaned.replace(/\[\d+\]/g, ''); // Numeric footnote citations like [1]
+
+  // 2. Remove markdown code fences if wrapped
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '');
+  }
+
+  // 3. Remove conversational preamble like "Here is the Facebook post:"
+  cleaned = cleaned.replace(
+    /^(?:Here (?:is|are) (?:the|a) (?:Facebook|social media|promotional|ad) (?:post|copy|caption):?|Sure!? Here(?:'s| is) (?:your|the) (?:Facebook|ad|copy|post):?)\s*\n+/i,
+    ''
+  );
+
+  // 4. Normalize spacing and remove trailing whitespaces
+  cleaned = cleaned
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n');
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+  return cleaned.trim();
+}
+
+/**
+ * Handles the multi-step agentic loop for OpenAI Responses API with built-in tools like web_search.
+ */
+export async function executeOpenAiResponseAgenticLoop(params: {
+  client: OpenAI;
+  model?: string;
+  instructions?: string;
+  input: string;
+  enableWebSearch?: boolean;
+  temperature?: number;
+  maxTokens?: number;
+}): Promise<string> {
+  const {
+    client,
+    model = 'gpt-4o-mini',
+    instructions = 'You are an intelligent retail point-of-sale business assistant.',
+    input,
+    enableWebSearch = false,
+    temperature = 0.7,
+    maxTokens = 1500,
+  } = params;
+
+  const tools: OpenAI.Responses.Tool[] = [];
+  if (enableWebSearch) {
+    tools.push({ type: 'web_search' });
+  }
+
+  // Step 1: Initial call with client.responses.create()
+  let response = await client.responses.create({
+    model,
+    instructions,
+    input,
+    tools: tools.length > 0 ? tools : undefined,
+    temperature,
+    max_output_tokens: maxTokens,
+  });
+
+  // Step 2: Multi-step agentic loop if status is in_progress
+  let loopCount = 0;
+  const maxLoops = 8;
+  while (response.status === 'in_progress' && loopCount < maxLoops) {
+    loopCount++;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    response = await client.responses.retrieve(response.id);
+  }
+
+  // Step 3: Extract clean text from output_text or message output items
+  let extractedText = response.output_text?.trim() || '';
+  if (!extractedText && Array.isArray(response.output)) {
+    for (const item of response.output) {
+      if ((item as any).type === 'message' && Array.isArray((item as any).content)) {
+        for (const part of (item as any).content) {
+          if (part.type === 'output_text' && part.text) {
+            extractedText += part.text;
+          } else if (typeof part.text === 'string') {
+            extractedText += part.text;
+          }
+        }
+      }
+    }
+  }
+
+  if (!extractedText && response.error) {
+    throw new Error(response.error.message || `OpenAI Responses API error: ${response.status}`);
+  }
+
+  return formatResponsesOutput(extractedText);
+}
+
+/**
+ * Centralized AI Text Generation with automatic fallback between OpenAI (Responses API) and Gemini.
  */
 export async function generateTextWithAiFallback(
   options: TextGenerationOptions
@@ -60,31 +165,38 @@ export async function generateTextWithAiFallback(
     userPrompt,
     systemPrompt = 'You are an intelligent retail point-of-sale business assistant.',
     temperature = 0.7,
-    maxTokens = 600,
+    maxTokens = 1200,
     preferProvider = 'openai',
+    enableWebSearch = false,
     fallbackGenerator,
   } = options;
 
   const tryOpenAI = async (): Promise<TextGenerationResult | null> => {
     if (!process.env.OPENAI_API_KEY) return null;
+    const targetModel = options.model?.trim() || 'gpt-4o-mini';
     try {
       const client = getServerOpenAI();
-      const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ];
-      const completion = await client.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages,
+      const text = await executeOpenAiResponseAgenticLoop({
+        client,
+        model: targetModel,
+        instructions: systemPrompt,
+        input: userPrompt,
+        enableWebSearch,
         temperature,
-        max_tokens: maxTokens,
+        maxTokens,
       });
-      const text = completion.choices?.[0]?.message?.content?.trim();
+
       if (text) {
-        return { text, engine: 'OpenAI GPT-4o-mini', provider: 'openai' };
+        return {
+          text,
+          engine: enableWebSearch
+            ? `OpenAI Responses API (${targetModel} + Web Search)`
+            : `OpenAI Responses API (${targetModel})`,
+          provider: 'openai',
+        };
       }
     } catch (err: any) {
-      console.warn(`[AIFallback] OpenAI call failed (${err?.message || err}). Falling back...`);
+      console.warn(`[AIFallback] OpenAI Responses API failed for model ${targetModel} (${err?.message || err}). Falling back...`);
     }
     return null;
   };
