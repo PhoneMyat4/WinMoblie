@@ -250,29 +250,29 @@ export const FacebookPostPreview: React.FC<FacebookPostPreviewProps> = ({
         <button
           type="button"
           onClick={handleLikeToggle}
-          className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+          className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
             isLiked 
               ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40' 
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          <ThumbsUp className={`w-4 h-4 ${isLiked ? 'fill-blue-600 dark:fill-blue-400' : ''}`} />
+          <ThumbsUp className={`w-4 h-4 shrink-0 ${isLiked ? 'fill-blue-600 dark:fill-blue-400' : ''}`} />
           <span>Like</span>
         </button>
 
         <button
           type="button"
-          className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
         >
-          <MessageCircle className="w-4 h-4" />
+          <MessageCircle className="w-4 h-4 shrink-0" />
           <span>Comment</span>
         </button>
 
         <button
           type="button"
-          className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
         >
-          <Share2 className="w-4 h-4" />
+          <Share2 className="w-4 h-4 shrink-0" />
           <span>Share</span>
         </button>
       </div>
