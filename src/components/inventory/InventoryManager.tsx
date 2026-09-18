@@ -662,14 +662,12 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
       </div>
 
-      {/* Action Bar & Search Controls */}
-      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
-        
-        {/* Search & Barcode Scanner Input */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1 max-w-2xl">
-          <div className="relative flex-1">
+      {/* Standalone Product Search & Barcode Scanner Row */}
+      <div id="inventory-search-row" className="w-full bg-white p-3 sm:p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full">
+          <div className="relative flex-1 w-full min-w-0">
             <div className="absolute left-3.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-slate-400 pointer-events-none">
-              <Barcode className="w-4 h-4 text-indigo-600" />
+              <Barcode className="w-4 h-4 text-indigo-600 shrink-0" />
             </div>
             <input
               ref={searchInputRef}
@@ -700,7 +698,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 }
               }}
               placeholder="Scan barcode / IMEI or search SKU, model, brand..."
-              className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 focus:outline-hidden shadow-2xs transition-all font-medium"
+              className="w-full pl-10 pr-10 py-3 bg-slate-50/70 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 focus:outline-hidden shadow-2xs transition-all font-mono font-medium tracking-wide"
             />
             {searchQuery && (
               <button
@@ -715,26 +713,28 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           </div>
 
           {/* Scanner Status Indicator */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setIsScannerActive(!isScannerActive)}
-              className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-2xs whitespace-nowrap ${
+              className={`inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-2xs whitespace-nowrap w-full sm:w-auto ${
                 isScannerActive 
                   ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100' 
                   : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
               }`}
               title={isScannerActive ? "Real-time hardware scanner is active" : "Scanner listener paused"}
             >
-              <span className={`w-2 h-2 rounded-full ${isScannerActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-              <ScanLine className="w-3.5 h-3.5" />
+              <span className={`w-2 h-2 rounded-full shrink-0 ${isScannerActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+              <ScanLine className="w-3.5 h-3.5 shrink-0" />
               <span>{isScannerActive ? 'Scanner Active' : 'Scanner Paused'}</span>
             </button>
           </div>
         </div>
+      </div>
 
-        {/* Add Product & Stock Check Buttons */}
-        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+      {/* Action Toolbar Row (Add Product, Damage Report, Quarantine, Bulk Import, etc.) */}
+      <div id="inventory-action-toolbar" className="flex flex-wrap items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             id="open-report-damage-btn"
             type="button"
@@ -742,10 +742,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               setSelectedProductForQuarantine(null);
               setIsQuarantineReportOpen(true);
             }}
-            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-950 font-bold text-xs rounded-xl border border-amber-200 shadow-2xs transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-950 font-bold text-xs rounded-xl border border-amber-200 shadow-2xs transition-all cursor-pointer"
             title="Phase 1: Report damage and immediately isolate item from sellable POS inventory"
           >
-            <AlertTriangle className="w-4 h-4 text-amber-600" />
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
             <span>Report Damage</span>
           </button>
 
@@ -759,10 +759,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 setIsQuarantineManagerOpen(true);
               }
             }}
-            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-2xs transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-2xs transition-all cursor-pointer"
             title="Phase 2 & 3: Manager Assessment & Final Disposition Hub (RMA, Write-Off, B-Stock)"
           >
-            <ShieldAlert className="w-4 h-4 text-amber-400" />
+            <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
             <span>Quarantine & RMA</span>
             {quarantinedCount > 0 && (
               <span className="px-1.5 py-0.2 bg-rose-500 text-white font-black text-[10px] rounded-full">
@@ -775,10 +775,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             id="open-bulk-import-btn"
             type="button"
             onClick={() => setIsBulkImportOpen(true)}
-            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 font-bold text-xs rounded-xl border border-emerald-200 shadow-2xs transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 font-bold text-xs rounded-xl border border-emerald-200 shadow-2xs transition-all cursor-pointer"
             title="Bulk import products from CSV template or spreadsheet paste"
           >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>Bulk Import</span>
           </button>
 
@@ -791,22 +791,24 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                   onClearAllProducts();
                 }
               }}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 shadow-2xs transition-all cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 shadow-2xs transition-all cursor-pointer"
               title="Remove all products from inventory"
             >
-              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+              <Trash2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
               <span>Clear Products</span>
             </button>
           )}
+        </div>
 
+        <div className="flex items-center gap-2 flex-wrap ml-auto">
           {onOpenStockCheck && (
             <button
               id="open-stock-check-btn"
               type="button"
               onClick={onOpenStockCheck}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-indigo-950 font-bold text-xs rounded-xl border border-slate-200 shadow-2xs transition-all cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-indigo-950 font-bold text-xs rounded-xl border border-slate-200 shadow-2xs transition-all cursor-pointer"
             >
-              <ClipboardCheck className="w-4 h-4 text-indigo-600" />
+              <ClipboardCheck className="w-4 h-4 text-indigo-600 shrink-0" />
               <span>Stock Audit</span>
             </button>
           )}
@@ -815,13 +817,12 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             id="open-add-product-btn"
             type="button"
             onClick={handleOpenAdd}
-            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             <span>+ Add Item</span>
           </button>
         </div>
-
       </div>
 
       {/* Real-Time Scan Feedback Banner */}
