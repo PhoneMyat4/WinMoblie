@@ -80,6 +80,7 @@ const DEFAULT_SOCIAL_STATE: SocialMarketingState = {
   // Step 2: Media Management
   mediaGallery: [],
   aiImagePrompt: '',
+  selectedImageModel: 'dall-e-3',
   isGeneratingAiImage: false,
   referenceImageUrl: null,
   referenceImageName: null,
@@ -493,6 +494,7 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
         body: JSON.stringify({
           product: selectedProduct,
           prompt: socialState.aiImagePrompt,
+          model: socialState.selectedImageModel || 'dall-e-3',
           settings,
           referenceImageUrl: socialState.referenceImageUrl,
         }),
@@ -518,8 +520,8 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
         showToast(
           'success', 
           data.referenceUsed 
-            ? `Generated visual referencing your uploaded photo using ${data.engine || 'AI Visual Generator'}!` 
-            : `Generated commercial studio visual with ${data.engine || 'AI Visual Generator'}!`
+            ? `Generated visual referencing your uploaded photo using ${data.model || data.engine || socialState.selectedImageModel || 'DALL-E 3'}!` 
+            : `Generated commercial studio visual with ${data.model || data.engine || socialState.selectedImageModel || 'DALL-E 3'}!`
         );
       } else {
         throw new Error(data.error || 'Failed to generate AI visual.');
@@ -1197,6 +1199,103 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
                     <ImagePlus className="w-3.5 h-3.5" />
                     <span>{socialState.referenceImageUrl ? 'Change Reference Photo' : 'Upload Reference Photo'}</span>
                   </button>
+                </div>
+
+                {/* AI Model Selection for Media Management */}
+                <div className="mb-3 p-3 rounded-xl bg-white/80 dark:bg-slate-900/60 border border-indigo-200/80 dark:border-indigo-800/70 shadow-2xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <label htmlFor="ai-image-model-select" className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <Cpu className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>AI Model Selection</span>
+                    </label>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-indigo-100/80 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
+                      Images API
+                    </span>
+                  </div>
+
+                  {/* Radio Cards for Models */}
+                  <div className="grid grid-cols-2 gap-2 mb-2.5">
+                    <label
+                      htmlFor="image-model-radio-dalle3"
+                      className={`relative p-2.5 rounded-xl border cursor-pointer transition-all ${
+                        (socialState.selectedImageModel || 'dall-e-3') === 'dall-e-3'
+                          ? 'bg-indigo-50/90 dark:bg-indigo-950/60 border-indigo-500 shadow-xs ring-1 ring-indigo-500/50'
+                          : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            id="image-model-radio-dalle3"
+                            type="radio"
+                            name="ai-image-model-selection"
+                            value="dall-e-3"
+                            checked={(socialState.selectedImageModel || 'dall-e-3') === 'dall-e-3'}
+                            onChange={() => setSocialState(prev => ({ ...prev, selectedImageModel: 'dall-e-3' }))}
+                            className="w-3.5 h-3.5 text-indigo-600 border-slate-300 focus:ring-indigo-500"
+                          />
+                          <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-indigo-500" />
+                            dall-e-3
+                          </span>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
+                          Pro / High-Quality
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-5 leading-tight">
+                        Ultra-detailed studio rendering, HD textures & photorealistic lighting.
+                      </p>
+                    </label>
+
+                    <label
+                      htmlFor="image-model-radio-dalle2"
+                      className={`relative p-2.5 rounded-xl border cursor-pointer transition-all ${
+                        socialState.selectedImageModel === 'dall-e-2'
+                          ? 'bg-blue-50/90 dark:bg-blue-950/60 border-blue-500 shadow-xs ring-1 ring-blue-500/50'
+                          : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            id="image-model-radio-dalle2"
+                            type="radio"
+                            name="ai-image-model-selection"
+                            value="dall-e-2"
+                            checked={socialState.selectedImageModel === 'dall-e-2'}
+                            onChange={() => setSocialState(prev => ({ ...prev, selectedImageModel: 'dall-e-2' }))}
+                            className="w-3.5 h-3.5 text-blue-600 border-slate-300 focus:ring-blue-500"
+                          />
+                          <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1">
+                            <Zap className="w-3 h-3 text-amber-500" />
+                            dall-e-2
+                          </span>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                          Fast / Budget
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-5 leading-tight">
+                        Rapid visual generation, lower latency & cost-efficient commercial ads.
+                      </p>
+                    </label>
+                  </div>
+
+                  {/* Dropdown Select Option */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">Dropdown Select:</span>
+                    <select
+                      id="ai-image-model-select"
+                      value={socialState.selectedImageModel || 'dall-e-3'}
+                      onChange={(e) => setSocialState(prev => ({ ...prev, selectedImageModel: e.target.value }))}
+                      className="flex-1 px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="dall-e-3">dall-e-3 — Pro / High-Quality (Ultra-detailed 1024x1024 Commercial)</option>
+                      <option value="dall-e-2">dall-e-2 — Fast / Budget (Standard 1024x1024 Commercial)</option>
+                      <option value="flux-turbo">flux-turbo — Real-Time / Instant (Ultra-Fast Studio Photography)</option>
+                    </select>
+                  </div>
                 </div>
 
                 {/* Prompt Row */}

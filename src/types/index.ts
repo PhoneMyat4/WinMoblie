@@ -903,6 +903,7 @@ export interface SocialMarketingState {
   // 2. Media Management
   mediaGallery: SocialMarketingMediaItem[];
   aiImagePrompt: string;
+  selectedImageModel?: string;
   isGeneratingAiImage: boolean;
   referenceImageUrl?: string | null;
   referenceImageName?: string | null;

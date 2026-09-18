@@ -1281,11 +1281,15 @@ Output a JSON response with:
   // Step 2: Media Management - AI Image Generation (DALL-E / Studio Visual with Reference Support)
   app.post('/api/social-marketing/generate-image', async (req, res) => {
     try {
-      const { product, prompt: customPrompt, settings, referenceImageUrl } = req.body;
+      const { product, prompt: customPrompt, settings, referenceImageUrl, model } = req.body;
 
       if (!product) {
         return res.status(400).json({ success: false, error: 'Product details required for AI image generation.' });
       }
+
+      // Dynamic image model selection with fallback default
+      const requestedModel = (typeof model === 'string' && model.trim()) ? model.trim() : 'dall-e-3';
+      let activeImageModel = requestedModel;
 
       const targetOpenAiKey = process.env.OPENAI_API_KEY;
       let openai: OpenAI | null = null;
@@ -1335,26 +1339,9 @@ Output a JSON response with:
       let source: string = 'curated_studio';
       let engine: string = 'Commercial Studio';
 
-      // Tier 1 & 2: OpenAI DALL-E Generation (Attempt DALL-E 3, then DALL-E 2 if key lacks dall-e-3 access)
-      if (openai) {
-        try {
-          const imgRes = await openai.images.generate({
-            model: 'dall-e-3',
-            prompt: effectivePrompt,
-            n: 1,
-            size: '1024x1024',
-            quality: 'standard',
-          });
-          if (imgRes.data?.[0]?.url) {
-            generatedImageUrl = imgRes.data[0].url;
-            source = 'ai_generated';
-            engine = 'DALL-E 3';
-          }
-        } catch (dalle3Err: any) {
-          const errMsg = dalle3Err?.message || '';
-          console.log(`[SocialMarketing] Notice: DALL-E 3 not provisioned on current OpenAI key (${errMsg}). Seamlessly attempting DALL-E 2 / Flux AI Studio visual generator.`);
-
-          // Fallback to DALL-E 2
+      // Tier 1 & 2: OpenAI DALL-E Generation (Honors selected model: dall-e-3 or dall-e-2)
+      if (openai && activeImageModel !== 'flux-turbo') {
+        if (activeImageModel === 'dall-e-2') {
           try {
             const imgRes2 = await openai.images.generate({
               model: 'dall-e-2',
@@ -1368,7 +1355,44 @@ Output a JSON response with:
               engine = 'DALL-E 2';
             }
           } catch (dalle2Err: any) {
-            console.log(`[SocialMarketing] Notice: DALL-E 2 not available (${dalle2Err?.message || 'skipped'}). Using Flux AI Studio generator.`);
+            console.log(`[SocialMarketing] DALL-E 2 error (${dalle2Err?.message || 'failed'}). Attempting fallback.`);
+          }
+        } else {
+          // Default or explicit dall-e-3
+          try {
+            const imgRes = await openai.images.generate({
+              model: 'dall-e-3',
+              prompt: effectivePrompt,
+              n: 1,
+              size: '1024x1024',
+              quality: 'standard',
+            });
+            if (imgRes.data?.[0]?.url) {
+              generatedImageUrl = imgRes.data[0].url;
+              source = 'ai_generated';
+              engine = 'DALL-E 3';
+            }
+          } catch (dalle3Err: any) {
+            const errMsg = dalle3Err?.message || '';
+            console.log(`[SocialMarketing] Notice: DALL-E 3 unavailable (${errMsg}). Attempting DALL-E 2.`);
+
+            // Fallback to DALL-E 2
+            try {
+              const imgRes2 = await openai.images.generate({
+                model: 'dall-e-2',
+                prompt: effectivePrompt.slice(0, 950),
+                n: 1,
+                size: '1024x1024',
+              });
+              if (imgRes2.data?.[0]?.url) {
+                generatedImageUrl = imgRes2.data[0].url;
+                source = 'ai_generated';
+                engine = 'DALL-E 2';
+                activeImageModel = 'dall-e-2';
+              }
+            } catch (dalle2Err: any) {
+              console.log(`[SocialMarketing] DALL-E 2 fallback failed (${dalle2Err?.message || 'skipped'}).`);
+            }
           }
         }
       }
@@ -1414,6 +1438,7 @@ Output a JSON response with:
         imageUrl: generatedImageUrl,
         source,
         engine,
+        model: activeImageModel,
         promptUsed: effectivePrompt,
         referenceUsed: !!referenceImageUrl,
       });
