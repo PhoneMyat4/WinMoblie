@@ -458,117 +458,236 @@ export class FirestoreSyncService {
       }, (err) => console.warn('[FirestoreSync] Settings listener:', err.message));
       this.unsubscribers.push(unsubSettings);
 
-      // 2. Products Listener
-      const unsubProducts = onSnapshot(query(collection(db, 'products'), limit(500)), (snap) => {
-        if (!snap.empty) {
+      // 2. Products Listener - strictly replaces local state and handles 'removed' changes
+      const unsubProducts = onSnapshot(collection(db, 'products'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as Product | undefined;
+              if (data?.id) removedIds.add(data.id);
+            }
+          });
+
+          if (snap.empty) {
+            StorageService.saveProducts([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
+          }
+
           const remoteProducts: Product[] = [];
           snap.forEach(d => {
             const data = d.data() as Product;
             if (data && isMockProduct(data)) {
               deleteDoc(doc(db, 'products', d.id)).catch(() => {});
-            } else if (data) {
-              remoteProducts.push(data);
+            } else if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteProducts.push({
+                ...data,
+                id: data.id || d.id,
+              });
             }
           });
-          if (remoteProducts.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.bulkSaveProducts(remoteProducts, true, false);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
-            }
-          }
+
+          // Strictly replace the local state with authoritative Firestore products list
+          StorageService.saveProducts(remoteProducts);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Products listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Products listener:', err.message));
       this.unsubscribers.push(unsubProducts);
 
-      // 3. Sales Listener
-      const unsubSales = onSnapshot(query(collection(db, 'sales'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remoteSales: Sale[] = [];
-          snap.forEach(d => remoteSales.push(d.data() as Sale));
-          if (remoteSales.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.bulkSaveSales(remoteSales, false);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 3. Sales Listener - strictly replaces local state and handles 'removed' changes
+      const unsubSales = onSnapshot(collection(db, 'sales'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as Sale | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.saveSales([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remoteSales: Sale[] = [];
+          snap.forEach(d => {
+            const data = d.data() as Sale;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteSales.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          remoteSales.sort((a, b) => {
+            const timeA = new Date(a.date || (a as any).createdAt || 0).getTime();
+            const timeB = new Date(b.date || (b as any).createdAt || 0).getTime();
+            return timeB - timeA;
+          });
+
+          StorageService.saveSales(remoteSales);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Sales listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Sales listener:', err.message));
       this.unsubscribers.push(unsubSales);
 
-      // 4. Credit Sales Listener
-      const unsubCreditSales = onSnapshot(query(collection(db, 'creditSales'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remoteCreditSales: CreditSaleRecord[] = [];
-          snap.forEach(d => remoteCreditSales.push(d.data() as CreditSaleRecord));
-          if (remoteCreditSales.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.saveCreditSales(remoteCreditSales);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 4. Credit Sales Listener - strictly replaces local state and handles 'removed' changes
+      const unsubCreditSales = onSnapshot(collection(db, 'creditSales'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as CreditSaleRecord | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.saveCreditSales([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remoteCreditSales: CreditSaleRecord[] = [];
+          snap.forEach(d => {
+            const data = d.data() as CreditSaleRecord;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteCreditSales.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.saveCreditSales(remoteCreditSales);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Credit sales listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Credit sales listener:', err.message));
       this.unsubscribers.push(unsubCreditSales);
 
-      // 5. Purchases Listener
-      const unsubPurchases = onSnapshot(query(collection(db, 'purchases'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remotePurchases: PurchaseRecord[] = [];
-          snap.forEach(d => remotePurchases.push(d.data() as PurchaseRecord));
-          if (remotePurchases.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.bulkSavePurchases(remotePurchases, false);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 5. Purchases Listener - strictly replaces local state and handles 'removed' changes
+      const unsubPurchases = onSnapshot(collection(db, 'purchases'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as PurchaseRecord | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.savePurchases([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remotePurchases: PurchaseRecord[] = [];
+          snap.forEach(d => {
+            const data = d.data() as PurchaseRecord;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remotePurchases.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.savePurchases(remotePurchases);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Purchases listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Purchases listener:', err.message));
       this.unsubscribers.push(unsubPurchases);
 
-      // 6. Customers Listener
-      const unsubCustomers = onSnapshot(query(collection(db, 'customers'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remoteCustomers: Customer[] = [];
-          snap.forEach(d => remoteCustomers.push(d.data() as Customer));
-          if (remoteCustomers.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.bulkSaveCustomers(remoteCustomers, false);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 6. Customers Listener - strictly replaces local state and handles 'removed' changes
+      const unsubCustomers = onSnapshot(collection(db, 'customers'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as Customer | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.saveCustomers([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remoteCustomers: Customer[] = [];
+          snap.forEach(d => {
+            const data = d.data() as Customer;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteCustomers.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.saveCustomers(remoteCustomers);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Customers listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Customers listener:', err.message));
       this.unsubscribers.push(unsubCustomers);
 
-      // 7. Expenses Listener
-      const unsubExpenses = onSnapshot(query(collection(db, 'expenses'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remoteExpenses: ExpenseRecord[] = [];
-          snap.forEach(d => remoteExpenses.push(d.data() as ExpenseRecord));
-          if (remoteExpenses.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.bulkSaveExpenses(remoteExpenses, false);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 7. Expenses Listener - strictly replaces local state and handles 'removed' changes
+      const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as ExpenseRecord | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.saveExpenses([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remoteExpenses: ExpenseRecord[] = [];
+          snap.forEach(d => {
+            const data = d.data() as ExpenseRecord;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteExpenses.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.saveExpenses(remoteExpenses);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Expenses listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Expenses listener:', err.message));
       this.unsubscribers.push(unsubExpenses);
@@ -590,51 +709,77 @@ export class FirestoreSyncService {
       }, (err) => console.warn('[FirestoreSync] Expense categories listener:', err.message));
       this.unsubscribers.push(unsubExpenseCategories);
 
-      // 9. Suppliers Listener
-      const unsubSuppliers = onSnapshot(query(collection(db, 'suppliers'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remoteSuppliers: Supplier[] = [];
-          snap.forEach(d => remoteSuppliers.push(d.data() as Supplier));
-          if (remoteSuppliers.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.bulkSaveSuppliers(remoteSuppliers, false);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 9. Suppliers Listener - strictly replaces local state and handles 'removed' changes
+      const unsubSuppliers = onSnapshot(collection(db, 'suppliers'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as Supplier | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.saveSuppliers([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remoteSuppliers: Supplier[] = [];
+          snap.forEach(d => {
+            const data = d.data() as Supplier;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteSuppliers.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.saveSuppliers(remoteSuppliers);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Suppliers listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Suppliers listener:', err.message));
       this.unsubscribers.push(unsubSuppliers);
 
-      // 10. Staff Users Listener
-      const unsubStaff = onSnapshot(query(collection(db, 'staffUsers'), limit(500)), (snap) => {
-        if (!snap.empty) {
+      // 10. Staff Users Listener - strictly replaces local state and handles 'removed' changes
+      const unsubStaff = onSnapshot(collection(db, 'staffUsers'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as StaffUser | undefined;
+              if (data?.id) removedIds.add(data.id);
+            }
+          });
+
           const remoteStaff: StaffUser[] = [];
           snap.forEach(d => {
             const data = d.data() as StaffUser;
-            if (!isMockStaffUser(data)) {
-              remoteStaff.push(data);
-            } else {
+            if (data && !isMockStaffUser(data) && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteStaff.push({
+                ...data,
+                id: data.id || d.id,
+              });
+            } else if (data && isMockStaffUser(data)) {
               deleteDoc(d.ref).catch(() => {});
             }
           });
-          this.isProcessingRemoteSnapshot = true;
-          try {
-            const localStaff = StorageService.getStaffUsers();
-            const merged = [...localStaff];
-            remoteStaff.forEach(remote => {
-              const idx = merged.findIndex(l => l.id === remote.id);
-              if (idx >= 0) merged[idx] = { ...merged[idx], ...remote };
-              else merged.push(remote);
-            });
-            const cleanMerged = merged.filter(u => !isMockStaffUser(u));
-            StorageService.saveStaffUsers(cleanMerged);
+
+          if (remoteStaff.length > 0) {
+            StorageService.saveStaffUsers(remoteStaff);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
-          } finally {
-            this.isProcessingRemoteSnapshot = false;
           }
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Staff listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Staff listener:', err.message));
       this.unsubscribers.push(unsubStaff);
@@ -673,146 +818,298 @@ export class FirestoreSyncService {
       }, (err) => console.warn('[FirestoreSync] Cash drawer listener:', err.message));
       this.unsubscribers.push(unsubCashDrawer);
 
-      // 13. Pre-Orders Listener
-      const unsubPreOrders = onSnapshot(query(collection(db, 'preOrders'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remotePreOrders: PreOrder[] = [];
-          snap.forEach(d => remotePreOrders.push(d.data() as PreOrder));
-          if (remotePreOrders.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.savePreOrders(remotePreOrders);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 13. Pre-Orders Listener - strictly replaces local state and handles 'removed' changes
+      const unsubPreOrders = onSnapshot(collection(db, 'preOrders'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as PreOrder | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.savePreOrders([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remotePreOrders: PreOrder[] = [];
+          snap.forEach(d => {
+            const data = d.data() as PreOrder;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remotePreOrders.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.savePreOrders(remotePreOrders);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Pre-orders listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Pre-orders listener:', err.message));
       this.unsubscribers.push(unsubPreOrders);
 
-      // 14. Stock Adjustments Listener
-      const unsubAdjustments = onSnapshot(query(collection(db, 'stockAdjustments'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remoteAdjs: StockAdjustment[] = [];
-          snap.forEach(d => remoteAdjs.push(d.data() as StockAdjustment));
-          if (remoteAdjs.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.saveStockAdjustments(remoteAdjs);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 14. Stock Adjustments Listener - strictly replaces local state and handles 'removed' changes
+      const unsubAdjustments = onSnapshot(collection(db, 'stockAdjustments'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as StockAdjustment | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.saveStockAdjustments([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remoteAdjs: StockAdjustment[] = [];
+          snap.forEach(d => {
+            const data = d.data() as StockAdjustment;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteAdjs.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.saveStockAdjustments(remoteAdjs);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Stock adjustments listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Stock adjustments listener:', err.message));
       this.unsubscribers.push(unsubAdjustments);
 
-      // 15. Price Changes Listener
-      const unsubPriceChanges = onSnapshot(query(collection(db, 'priceChanges'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remotePcs: PriceChangeRecord[] = [];
-          snap.forEach(d => remotePcs.push(d.data() as PriceChangeRecord));
-          if (remotePcs.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.savePriceChanges(remotePcs);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 15. Price Changes Listener - strictly replaces local state and handles 'removed' changes
+      const unsubPriceChanges = onSnapshot(collection(db, 'priceChanges'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as PriceChangeRecord | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.savePriceChanges([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remotePcs: PriceChangeRecord[] = [];
+          snap.forEach(d => {
+            const data = d.data() as PriceChangeRecord;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remotePcs.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.savePriceChanges(remotePcs);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Price changes listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Price changes listener:', err.message));
       this.unsubscribers.push(unsubPriceChanges);
 
-      // 16. Stock Audits Listener
-      const unsubAudits = onSnapshot(query(collection(db, 'stockAudits'), limit(200)), (snap) => {
-        if (!snap.empty) {
-          const remoteAudits: StockAuditSession[] = [];
-          snap.forEach(d => remoteAudits.push(d.data() as StockAuditSession));
-          if (remoteAudits.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.saveStockAudits(remoteAudits);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 16. Stock Audits Listener - strictly replaces local state and handles 'removed' changes
+      const unsubAudits = onSnapshot(collection(db, 'stockAudits'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as StockAuditSession | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.saveStockAudits([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remoteAudits: StockAuditSession[] = [];
+          snap.forEach(d => {
+            const data = d.data() as StockAuditSession;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteAudits.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.saveStockAudits(remoteAudits);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Stock audits listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Stock audits listener:', err.message));
       this.unsubscribers.push(unsubAudits);
 
-      // 17. Damage Logs Listener
-      const unsubDamage = onSnapshot(query(collection(db, 'damageLogs'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remoteDamage: DamageLog[] = [];
-          snap.forEach(d => remoteDamage.push(d.data() as DamageLog));
-          if (remoteDamage.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.saveDamageLogs(remoteDamage);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 17. Damage Logs Listener - strictly replaces local state and handles 'removed' changes
+      const unsubDamage = onSnapshot(collection(db, 'damageLogs'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as DamageLog | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.saveDamageLogs([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remoteDamage: DamageLog[] = [];
+          snap.forEach(d => {
+            const data = d.data() as DamageLog;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteDamage.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.saveDamageLogs(remoteDamage);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Damage logs listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Damage logs listener:', err.message));
       this.unsubscribers.push(unsubDamage);
 
-      // 18. Announcements Listener
-      const unsubAnnounce = onSnapshot(query(collection(db, 'announcements'), limit(200)), (snap) => {
-        if (!snap.empty) {
-          const remoteAnnounce: Announcement[] = [];
-          snap.forEach(d => remoteAnnounce.push(d.data() as Announcement));
-          if (remoteAnnounce.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.saveAnnouncements(remoteAnnounce);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 18. Announcements Listener - strictly replaces local state and handles 'removed' changes
+      const unsubAnnounce = onSnapshot(collection(db, 'announcements'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as Announcement | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.saveAnnouncements([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remoteAnnounce: Announcement[] = [];
+          snap.forEach(d => {
+            const data = d.data() as Announcement;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteAnnounce.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.saveAnnouncements(remoteAnnounce);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Announcements listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Announcements listener:', err.message));
       this.unsubscribers.push(unsubAnnounce);
 
-      // 19. Chat Messages Listener
-      const unsubChat = onSnapshot(query(collection(db, 'chatMessages'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remoteChat: ChatMessage[] = [];
-          snap.forEach(d => remoteChat.push(d.data() as ChatMessage));
-          if (remoteChat.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.saveChatMessages(remoteChat);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 19. Chat Messages Listener - strictly replaces local state and handles 'removed' changes
+      const unsubChat = onSnapshot(collection(db, 'chatMessages'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as ChatMessage | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.saveChatMessages([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remoteChat: ChatMessage[] = [];
+          snap.forEach(d => {
+            const data = d.data() as ChatMessage;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteChat.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.saveChatMessages(remoteChat);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Chat messages listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Chat messages listener:', err.message));
       this.unsubscribers.push(unsubChat);
 
-      // 20. Audit Logs Listener
-      const unsubAudit = onSnapshot(query(collection(db, 'auditLogs'), limit(500)), (snap) => {
-        if (!snap.empty) {
-          const remoteLogs: AuditLogEntry[] = [];
-          snap.forEach(d => remoteLogs.push(d.data() as AuditLogEntry));
-          if (remoteLogs.length > 0) {
-            this.isProcessingRemoteSnapshot = true;
-            try {
-              StorageService.saveAuditLogs(remoteLogs);
-              this.updateStatus({ lastSyncedAt: new Date(), error: null });
-            } finally {
-              this.isProcessingRemoteSnapshot = false;
+      // 20. Audit Logs Listener - strictly replaces local state and handles 'removed' changes
+      const unsubAudit = onSnapshot(collection(db, 'auditLogs'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+              const data = change.doc.data() as AuditLogEntry | undefined;
+              if (data?.id) removedIds.add(data.id);
             }
+          });
+
+          if (snap.empty) {
+            StorageService.saveAuditLogs([]);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+            return;
           }
+
+          const remoteLogs: AuditLogEntry[] = [];
+          snap.forEach(d => {
+            const data = d.data() as AuditLogEntry;
+            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteLogs.push({ ...data, id: data.id || d.id });
+            }
+          });
+
+          StorageService.saveAuditLogs(remoteLogs);
+          this.updateStatus({ lastSyncedAt: new Date(), error: null });
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Audit logs listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
         }
       }, (err) => console.warn('[FirestoreSync] Audit logs listener:', err.message));
       this.unsubscribers.push(unsubAudit);
@@ -1839,46 +2136,49 @@ export class FirestoreSyncService {
         console.warn('[FirestoreSync] Cash drawer pull:', err);
       }
 
-      // Helper for collection pulls
+      // Helper for collection pulls - strictly replaces local state
       const pullCollection = async <T>(
         colName: string, 
         saver: (items: T[]) => void
       ) => {
         try {
           const snap = await getDocs(collection(db, colName));
+          const items: T[] = [];
           if (!snap.empty) {
-            const items: T[] = [];
-            snap.forEach(d => items.push(d.data() as T));
-            if (items.length > 0) {
-              saver(items);
-              count += items.length;
-            }
+            snap.forEach(d => {
+              const data = d.data() as T;
+              if (data) {
+                if (typeof data === 'object' && !(data as any).id) {
+                  (data as any).id = d.id;
+                }
+                items.push(data);
+              }
+            });
           }
+          // Strictly replace local state with items (even if empty [])
+          saver(items);
+          count += items.length;
         } catch (err) {
           console.warn(`[FirestoreSync] ${colName} pull:`, err);
         }
       };
 
-      // Pull all remaining collections
+      // Pull all remaining collections - strictly replacing local state with fetched data
       await pullCollection<Product>('products', items => {
         const filtered = items.filter(p => !isMockProduct(p));
-        StorageService.bulkSaveProducts(filtered, true, false);
+        StorageService.saveProducts(filtered);
       });
-      await pullCollection<Sale>('sales', items => StorageService.bulkSaveSales(items, false));
+      await pullCollection<Sale>('sales', items => StorageService.saveSales(items));
       await pullCollection<CreditSaleRecord>('creditSales', items => StorageService.saveCreditSales(items));
-      await pullCollection<PurchaseRecord>('purchases', items => StorageService.bulkSavePurchases(items, false));
-      await pullCollection<Customer>('customers', items => StorageService.bulkSaveCustomers(items, false));
-      await pullCollection<ExpenseRecord>('expenses', items => StorageService.bulkSaveExpenses(items, false));
-      await pullCollection<Supplier>('suppliers', items => StorageService.bulkSaveSuppliers(items, false));
+      await pullCollection<PurchaseRecord>('purchases', items => StorageService.savePurchases(items));
+      await pullCollection<Customer>('customers', items => StorageService.saveCustomers(items));
+      await pullCollection<ExpenseRecord>('expenses', items => StorageService.saveExpenses(items));
+      await pullCollection<Supplier>('suppliers', items => StorageService.saveSuppliers(items));
       await pullCollection<StaffUser>('staffUsers', items => {
-        const local = StorageService.getStaffUsers();
-        const merged = [...local];
-        items.forEach(remote => {
-          const idx = merged.findIndex(l => l.id === remote.id);
-          if (idx >= 0) merged[idx] = { ...merged[idx], ...remote };
-          else merged.push(remote);
-        });
-        StorageService.saveStaffUsers(merged);
+        const clean = items.filter(u => !isMockStaffUser(u));
+        if (clean.length > 0) {
+          StorageService.saveStaffUsers(clean);
+        }
       });
       await pullCollection<PreOrder>('preOrders', items => StorageService.savePreOrders(items));
       await pullCollection<StockAdjustment>('stockAdjustments', items => StorageService.saveStockAdjustments(items));

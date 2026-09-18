@@ -141,7 +141,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     setFbSyncMessage(null);
     const res = await firestoreSync.pullAllFromFirestore();
     if (res.success) {
-      setFbSyncMessage({ type: 'success', text: `Successfully pulled and merged ${res.count} records from Firestore!` });
+      setFbSyncMessage({ type: 'success', text: `Successfully pulled and synchronized ${res.count} records from Firestore (local state replaced)!` });
     } else {
       setFbSyncMessage({ type: 'error', text: 'Could not fetch records from Firestore.' });
     }

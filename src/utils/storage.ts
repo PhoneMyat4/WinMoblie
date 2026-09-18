@@ -2688,25 +2688,25 @@ export const StorageService = {
       if (data.staffUsers) localStorage.setItem(STORAGE_KEYS.STAFF_USERS, JSON.stringify(data.staffUsers));
       if (data.rolePermissions) localStorage.setItem(STORAGE_KEYS.ROLE_PERMISSIONS, JSON.stringify(data.rolePermissions));
 
-      // If user initialized fresh database and remote data has mock/demo data, do not overwrite empty collections
+      // If user initialized fresh database and remote data has mock/demo data, do not overwrite empty collections with mock data
       if (data.products) {
-        if (!isFresh || (Array.isArray(data.products) && data.products.length > 0 && !data.products[0]?.id?.startsWith('prod-'))) {
+        if (!isFresh || (Array.isArray(data.products) && (data.products.length === 0 || !data.products[0]?.id?.startsWith('prod-')))) {
           localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(data.products));
         }
       }
       if (data.sales) {
-        if (!isFresh || (Array.isArray(data.sales) && data.sales.length > 0 && !data.sales[0]?.id?.startsWith('sale-'))) {
+        if (!isFresh || (Array.isArray(data.sales) && (data.sales.length === 0 || !data.sales[0]?.id?.startsWith('sale-')))) {
           localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(data.sales));
         }
       }
       if (data.creditSales) localStorage.setItem(STORAGE_KEYS.CREDIT_SALES, JSON.stringify(data.creditSales));
       if (data.purchases) {
-        if (!isFresh || (Array.isArray(data.purchases) && data.purchases.length > 0 && !data.purchases[0]?.id?.startsWith('purch-'))) {
+        if (!isFresh || (Array.isArray(data.purchases) && (data.purchases.length === 0 || !data.purchases[0]?.id?.startsWith('purch-')))) {
           localStorage.setItem(STORAGE_KEYS.PURCHASES, JSON.stringify(data.purchases));
         }
       }
       if (data.expenses) {
-        if (!isFresh || (Array.isArray(data.expenses) && data.expenses.length > 0 && !data.expenses[0]?.id?.startsWith('exp-'))) {
+        if (!isFresh || (Array.isArray(data.expenses) && (data.expenses.length === 0 || !data.expenses[0]?.id?.startsWith('exp-')))) {
           localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(data.expenses));
         }
       }
@@ -2715,7 +2715,7 @@ export const StorageService = {
       if (data.priceChanges) localStorage.setItem(STORAGE_KEYS.PRICE_CHANGES, JSON.stringify(data.priceChanges));
       if (data.stockAudits) localStorage.setItem(STORAGE_KEYS.STOCK_AUDITS, JSON.stringify(data.stockAudits));
       if (data.customers) {
-        if (!isFresh || (Array.isArray(data.customers) && data.customers.length > 0 && !data.customers[0]?.id?.startsWith('cust-'))) {
+        if (!isFresh || (Array.isArray(data.customers) && (data.customers.length === 0 || !data.customers[0]?.id?.startsWith('cust-')))) {
           localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(data.customers));
         }
       }
