@@ -280,7 +280,7 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
                 {SAMPLE_CSV_TEMPLATES.map((tmpl) => (
                   <div
                     key={tmpl.id}
@@ -354,9 +354,9 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
               <textarea
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
-                placeholder="Paste CSV rows here... e.g.:&#10;Name,Brand,Category,CostPrice,SellingPrice,Stock,RAM,ROM,Color,IMEIs&#10;Apple iPhone 15 Pro,Apple,new_phones,3400000,3750000,1,8GB,256GB,Natural Titanium,358765123456789 / 358765123456790"
+                placeholder="Paste CSV rows here... e.g.:&#10;Name,Brand,Category,SubCategory,Condition,CostPrice,SellingPrice,Stock,Warranty,IMEIs&#10;Apple iPhone 15 Pro,Apple,new_phones,,brand_new,3400000,3750000,1,12,358765123456789 / 358765123456790&#10;Apple 20W USB-C Fast Adapter,Apple,accessories,Fast Chargers & Adapters,brand_new,65000,85000,30,6,&#10;Samsung Galaxy Buds2 Pro,Samsung,gadgets,Wireless Earbuds,brand_new,380000,450000,10,6,"
                 rows={10}
-                className="w-full p-3.5 bg-slate-900 text-emerald-400 font-mono text-xs rounded-xl border border-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden leading-relaxed resize-y placeholder:text-slate-600"
+                className="w-full p-3.5 bg-slate-900 text-[#ebedf2] font-mono text-xs rounded-xl border border-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden leading-relaxed resize-y placeholder:text-slate-600"
               />
             </div>
 
@@ -728,6 +728,13 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                       <td className="py-2 px-3 text-slate-600">Defaults to new_phones or accessories based on title.</td>
                     </tr>
                     <tr>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">SubCategory</td>
+                      <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
+                      <td className="py-2 px-3 font-mono text-slate-500">sub_category, subcat, item_type</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">Fast Chargers, Power Banks, Earbuds, Smartwatches</td>
+                      <td className="py-2 px-3 text-slate-600">Subcategory for accessories and smart gadgets.</td>
+                    </tr>
+                    <tr>
                       <td className="py-2 px-3 font-mono font-bold text-indigo-900">CostPrice</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
                       <td className="py-2 px-3 font-mono text-slate-500">cost, cost_price, buy_price, purchase_cost</td>
@@ -753,22 +760,22 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
                       <td className="py-2 px-3 font-mono text-slate-500">ram, rom, storage, memory</td>
                       <td className="py-2 px-3 font-semibold text-slate-800">8GB, 256GB</td>
-                      <td className="py-2 px-3 text-slate-600">Memory & Storage specifications.</td>
+                      <td className="py-2 px-3 text-slate-600">Memory & Storage specifications (phones).</td>
                     </tr>
                     <tr>
                       <td className="py-2 px-3 font-mono font-bold text-indigo-900">Color</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
                       <td className="py-2 px-3 font-mono text-slate-500">color, colour, finish</td>
-                      <td className="py-2 px-3 font-semibold text-slate-800">Natural Titanium, Midnight</td>
-                      <td className="py-2 px-3 text-slate-600">Device casing finish color.</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">Natural Titanium, Midnight, White</td>
+                      <td className="py-2 px-3 text-slate-600">Product finish color.</td>
                     </tr>
                     <tr>
                       <td className="py-2 px-3 font-mono font-bold text-indigo-900">IMEIs</td>
-                      <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
+                      <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Phones Only</span></td>
                       <td className="py-2 px-3 font-mono text-slate-500">imei, imeis, serials, imei_list</td>
                       <td className="py-2 px-3 font-mono text-slate-800">358765.../358765...; 35999...</td>
                       <td className="py-2 px-3 text-slate-600">
-                        Dual IMEIs separated by <code className="bg-slate-100 px-1 rounded">/</code> and multiple units separated by <code className="bg-slate-100 px-1 rounded">;</code>
+                        Dual IMEIs separated by <code className="bg-slate-100 px-1 rounded">/</code> and multiple units separated by <code className="bg-slate-100 px-1 rounded">;</code> (Omit or leave blank for accessories & gadgets).
                       </td>
                     </tr>
                   </tbody>
@@ -777,19 +784,47 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
             </div>
 
             {/* Quick Template Download Actions */}
-            <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+            <div className="flex flex-col md:flex-row md:items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-200 gap-3">
               <div>
                 <h5 className="font-bold text-slate-900 text-xs">Ready-to-use CSV Templates</h5>
-                <p className="text-[11px] text-slate-500">Download formatted blank templates for Excel or Google Sheets</p>
+                <p className="text-[11px] text-slate-500">Download formatted blank sample templates for Excel or Google Sheets</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES[0])}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-lg border border-slate-200 transition-all cursor-pointer shadow-2xs text-[11px]"
+                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'smartphones_imei') || SAMPLE_CSV_TEMPLATES[0])}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-lg border border-slate-200 transition-all cursor-pointer shadow-2xs text-[11px]"
+                  title="Download Phones CSV Template with IMEI columns"
                 >
-                  <Download className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Download Phone CSV Template</span>
+                  <Download className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span>Phones (IMEI)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'accessories') || SAMPLE_CSV_TEMPLATES[1])}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-900 font-bold rounded-lg border border-emerald-200 transition-all cursor-pointer shadow-2xs text-[11px]"
+                  title="Download Accessories CSV Template (Chargers, Cables, Cases, Power Banks)"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Accessories</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'gadgets') || SAMPLE_CSV_TEMPLATES[2])}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-amber-50 text-amber-900 font-bold rounded-lg border border-amber-200 transition-all cursor-pointer shadow-2xs text-[11px]"
+                  title="Download Smart Gadgets CSV Template (Smartwatches, TWS Earbuds, Audio)"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>Smart Gadgets</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'simple_quick') || SAMPLE_CSV_TEMPLATES[3])}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-lg border border-slate-200 transition-all cursor-pointer shadow-2xs text-[11px]"
+                  title="Download Simple Minimal CSV Template"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                  <span>Simple Quick</span>
                 </button>
               </div>
             </div>

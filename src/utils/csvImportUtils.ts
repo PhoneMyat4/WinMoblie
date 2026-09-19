@@ -558,8 +558,8 @@ export function parseBulkCsvProducts(
 export const SAMPLE_CSV_TEMPLATES: CsvTemplatePreset[] = [
   {
     id: 'smartphones_imei',
-    name: 'Smartphones with Dual IMEIs (Recommended)',
-    description: 'Complete phone catalogue template with Brand, RAM, ROM, Color, Cost, Selling Price and Serialized Dual IMEIs.',
+    name: 'Smartphones with Dual IMEIs',
+    description: 'Complete phone catalogue with Brand, RAM, ROM, Color, Cost, Selling Price and Serialized Dual IMEIs.',
     csvContent: `Name,Brand,Category,Condition,CostPrice,SellingPrice,Stock,RAM,ROM,Color,IMEIs,Warranty
 Apple iPhone 15 Pro,Apple,new_phones,brand_new,3400000,3750000,2,8GB,256GB,Natural Titanium,358765123456789 / 358765123456790; 358765123456791 / 358765123456792,12
 Samsung Galaxy S24 Ultra,Samsung,new_phones,brand_new,3800000,4200000,2,12GB,512GB,Titanium Gray,351234098765432 / 351234098765433; 351234098765434 / 351234098765435,12
@@ -567,25 +567,36 @@ Xiaomi Redmi Note 13 Pro 5G,Xiaomi,new_phones,brand_new,950000,1050000,3,8GB,256
 Apple iPhone 13 Pro Max (Pre-Owned),Apple,used_phones,used_grade_a,1950000,2250000,1,6GB,128GB,Sierra Blue,359998877665544,1`
   },
   {
-    id: 'accessories_gadgets',
-    name: 'Accessories & Smart Gadgets (Non-IMEI)',
-    description: 'Bulk accessories, original fast chargers, earbuds, cables, power banks and screen protectors.',
+    id: 'accessories',
+    name: 'Phone Accessories (Chargers, Cables, Cases)',
+    description: 'Bulk accessories without IMEIs: original fast chargers, heavy-duty cables, screen protectors, cases, and power banks.',
     csvContent: `Name,Brand,Category,SubCategory,Condition,CostPrice,SellingPrice,Stock,MinAlert,Warranty,Description
-Apple 20W USB-C Fast Power Adapter,Apple,accessories,Fast Chargers & Adapters,brand_new,65000,85000,25,5,6,Original Apple 20W Power Adapter with official seal
-Anker 737 Power Bank (PowerCore 24K),Anker,accessories,Power Banks,brand_new,260000,320000,10,2,12,140W fast output 24000mAh portable charger with smart digital display
-Baseus 100W PD 5A Type-C Cable 1.5m,Baseus,accessories,Cables & Connectors,brand_new,12000,18000,40,10,3,High durability braided fast charging cable
-Samsung Galaxy Buds2 Pro,Samsung,gadgets,Wireless Earbuds,brand_new,380000,450000,8,2,6,Active Noise Cancelling 24-bit Hi-Fi sound earbuds
-Remax 9D King Kong Tempered Glass (iPhone 15),Remax,accessories,Screen Protectors,brand_new,6000,12000,50,15,0,Full coverage privacy screen protector`
+Apple 20W USB-C Fast Power Adapter,Apple,accessories,Fast Chargers & Adapters,brand_new,65000,85000,30,5,6,Original Apple 20W USB-C fast power adapter
+Anker 737 Power Bank (PowerCore 24K),Anker,accessories,Power Banks,brand_new,260000,320000,12,2,12,140W fast output 24000mAh portable charger with smart digital display
+Baseus 100W PD 5A Type-C Cable 1.5m,Baseus,accessories,Cables & Connectors,brand_new,12000,18000,50,10,3,High durability braided fast charging cable
+Remax 9D King Kong Tempered Glass (iPhone 15 Pro),Remax,accessories,Screen Protectors,brand_new,6000,12000,60,15,0,Full coverage privacy tempered glass screen protector
+UAG Monarch Rugged Case (Samsung S24 Ultra),UAG,accessories,Cases & Covers,brand_new,85000,125000,15,3,12,5-layer heavy duty drop-tested protective case`
+  },
+  {
+    id: 'gadgets',
+    name: 'Smart Gadgets (Smartwatches & Audio)',
+    description: 'Smart wearable devices, wireless Bluetooth earbuds, portable audio speakers, and lifestyle gadgets.',
+    csvContent: `Name,Brand,Category,SubCategory,Condition,CostPrice,SellingPrice,Stock,MinAlert,Warranty,Description
+Samsung Galaxy Buds2 Pro,Samsung,gadgets,Wireless Earbuds,brand_new,380000,450000,10,2,6,Active Noise Cancelling 24-bit Hi-Fi sound wireless earbuds
+Apple AirPods Pro 2 (USB-C),Apple,gadgets,Wireless Earbuds,brand_new,620000,695000,8,2,12,H2 chip with Adaptive Audio and MagSafe USB-C case
+Xiaomi Smart Band 8 Pro,Xiaomi,gadgets,Smartwatches & Bands,brand_new,165000,195000,15,3,6,1.74 inch AMOLED 60Hz display with GNSS and 14-day battery
+Haylou Solar Plus RT3 Smartwatch,Haylou,gadgets,Smartwatches & Bands,brand_new,95000,125000,12,3,3,1.43 inch AMOLED Bluetooth phone call smartwatch
+JBL Flip 6 Portable Bluetooth Speaker,JBL,gadgets,Bluetooth Speakers,brand_new,290000,350000,6,2,12,2-way speaker system IP67 waterproof and dustproof`
   },
   {
     id: 'simple_quick',
     name: 'Simple Fast Inventory (Minimal Columns)',
     description: 'Quickest copy-paste format: Name, Brand, SellingPrice, CostPrice, Stock, Color.',
     csvContent: `Name,Brand,SellingPrice,CostPrice,Stock,Color
-Apple iPhone 14 128GB Midnight,Apple,2100000,1850000,4,Midnight
-Xiaomi Redmi 13C 6/128GB Navy Blue,Xiaomi,450000,390000,8,Navy Blue
-OPPO Reno 11 5G 12/256GB Wave Green,OPPO,1250000,1100000,3,Wave Green
-Remax RPP-296 20000mAh Power Bank,Remax,45000,32000,20,White
-Joyroom JR-T03S Pro TWS Earbuds,Joyroom,65000,45000,15,White`
+Apple 20W USB-C Power Adapter,Apple,85000,65000,30,White
+Samsung Galaxy Buds2 Pro,Samsung,450000,380000,10,Graphite
+Remax RPP-296 20000mAh Power Bank,Remax,45000,32000,20,Black
+Baseus 100W PD 5A Type-C Cable,Baseus,18000,12000,40,Black
+Apple iPhone 15 Pro 256GB Natural Titanium,Apple,3750000,3400000,2,Natural Titanium`
   }
 ];
