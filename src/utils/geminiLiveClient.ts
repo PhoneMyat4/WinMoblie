@@ -15,7 +15,7 @@ export interface LiveClientCallbacks {
     updatedProduct?: any;
     pdfReport?: any;
   }) => void;
-  onError?: (error: string) => void;
+  onError?: (error: string, isConnectionError?: boolean) => void;
   onClose?: (reason?: string) => void;
 }
 
@@ -26,6 +26,7 @@ export class GeminiLiveClient {
   private callbacks: LiveClientCallbacks = {};
   private isConnected: boolean = false;
   private volumePollInterval: any = null;
+  private connectionTimeout: any = null;
 
   constructor(callbacks: LiveClientCallbacks) {
     this.callbacks = callbacks;
@@ -34,86 +35,135 @@ export class GeminiLiveClient {
   public async start(context: PosDataContext): Promise<void> {
     if (this.isConnected) return;
 
-    // 1. Initialize audio player (24kHz Web Audio API)
-    this.player = new GeminiLiveAudioPlayer();
-    await this.player.resume();
+    return new Promise(async (resolve, reject) => {
+      let isSettled = false;
 
-    // 2. Build WebSocket URL matching current protocol & host
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/api/live`;
-
-    console.log('[GeminiLiveClient] Connecting to WebSocket:', wsUrl);
-
-    this.ws = new WebSocket(wsUrl);
-
-    this.ws.onopen = () => {
-      console.log('[GeminiLiveClient] WebSocket open, sending init context...');
-      this.ws?.send(
-        JSON.stringify({
-          type: 'init',
-          context,
-        })
-      );
-    };
-
-    this.ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-
-        if (message.type === 'ready') {
-          console.log('[GeminiLiveClient] Session ready with model:', message.model);
-          this.isConnected = true;
-          this.callbacks.onReady?.(message.model);
-
-          // Start recording microphone audio after session is confirmed ready
-          this.startRecording();
-        } else if (message.type === 'audio') {
-          // Model output audio chunk (24kHz PCM)
-          if (message.data) {
-            this.callbacks.onAiSpeaking?.(true);
-            this.player?.playChunk(message.data);
-          }
-        } else if (message.type === 'transcript') {
-          this.callbacks.onTranscript?.(message.text, message.role || 'assistant');
-        } else if (message.type === 'interrupted') {
-          console.log('[GeminiLiveClient] Interrupted received from server');
-          this.player?.interrupt();
-          this.callbacks.onAiSpeaking?.(false);
-          this.callbacks.onInterrupted?.();
-        } else if (message.type === 'turnComplete') {
-          // Give audio a brief moment to finish playing buffered chunks
-          setTimeout(() => {
-            if (!this.player?.isPlaying()) {
-              this.callbacks.onAiSpeaking?.(false);
-            }
-          }, 350);
-        } else if (message.type === 'toolExecuted') {
-          console.log('[GeminiLiveClient] Tool executed:', message.name);
-          this.callbacks.onToolExecuted?.(message);
-        } else if (message.type === 'error') {
-          console.error('[GeminiLiveClient] Server error:', message.error);
-          this.callbacks.onError?.(message.error);
-        } else if (message.type === 'closed') {
+      // 4.5s connection timeout safeguard
+      this.connectionTimeout = setTimeout(() => {
+        if (!isSettled && !this.isConnected) {
+          isSettled = true;
           this.stop();
-          this.callbacks.onClose?.(message.reason);
+          const errMessage = 'Connection to Live Voice server timed out (WebSocket unavailable).';
+          this.callbacks.onError?.(errMessage, true);
+          reject(new Error(errMessage));
         }
-      } catch (e) {
-        console.error('[GeminiLiveClient] Failed to parse message:', e);
+      }, 4500);
+
+      try {
+        // 1. Initialize audio player (24kHz Web Audio API)
+        this.player = new GeminiLiveAudioPlayer();
+        await this.player.resume();
+
+        // 2. Build WebSocket URL matching current protocol & host
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        const wsUrl = `${protocol}//${host}/api/live`;
+
+        console.log('[GeminiLiveClient] Connecting to WebSocket:', wsUrl);
+
+        this.ws = new WebSocket(wsUrl);
+
+        this.ws.onopen = () => {
+          console.log('[GeminiLiveClient] WebSocket open, sending init context...');
+          this.ws?.send(
+            JSON.stringify({
+              type: 'init',
+              context,
+            })
+          );
+        };
+
+        this.ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+
+            if (message.type === 'ready') {
+              console.log('[GeminiLiveClient] Session ready with model:', message.model);
+              this.isConnected = true;
+              if (this.connectionTimeout) {
+                clearTimeout(this.connectionTimeout);
+                this.connectionTimeout = null;
+              }
+              if (!isSettled) {
+                isSettled = true;
+                resolve();
+              }
+              this.callbacks.onReady?.(message.model);
+
+              // Start recording microphone audio after session is confirmed ready
+              this.startRecording();
+            } else if (message.type === 'audio') {
+              // Model output audio chunk (24kHz PCM)
+              if (message.data) {
+                this.callbacks.onAiSpeaking?.(true);
+                this.player?.playChunk(message.data);
+              }
+            } else if (message.type === 'transcript') {
+              this.callbacks.onTranscript?.(message.text, message.role || 'assistant');
+            } else if (message.type === 'interrupted') {
+              console.log('[GeminiLiveClient] Interrupted received from server');
+              this.player?.interrupt();
+              this.callbacks.onAiSpeaking?.(false);
+              this.callbacks.onInterrupted?.();
+            } else if (message.type === 'turnComplete') {
+              // Give audio a brief moment to finish playing buffered chunks
+              setTimeout(() => {
+                if (!this.player?.isPlaying()) {
+                  this.callbacks.onAiSpeaking?.(false);
+                }
+              }, 350);
+            } else if (message.type === 'toolExecuted') {
+              console.log('[GeminiLiveClient] Tool executed:', message.name);
+              this.callbacks.onToolExecuted?.(message);
+            } else if (message.type === 'error') {
+              console.error('[GeminiLiveClient] Server error:', message.error);
+              if (!isSettled) {
+                isSettled = true;
+                reject(new Error(message.error));
+              }
+              this.callbacks.onError?.(message.error, false);
+            } else if (message.type === 'closed') {
+              this.stop();
+              this.callbacks.onClose?.(message.reason);
+            }
+          } catch (e) {
+            console.error('[GeminiLiveClient] Failed to parse message:', e);
+          }
+        };
+
+        this.ws.onerror = (err) => {
+          console.error('[GeminiLiveClient] WebSocket error:', err);
+          if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
+          }
+          this.stop();
+          const errMessage = 'Failed to connect to Live Voice server (WebSocket error).';
+          if (!isSettled) {
+            isSettled = true;
+            reject(new Error(errMessage));
+          }
+          this.callbacks.onError?.(errMessage, true);
+        };
+
+        this.ws.onclose = (ev) => {
+          console.log('[GeminiLiveClient] WebSocket closed:', ev.reason);
+          this.stop();
+          this.callbacks.onClose?.(ev.reason);
+        };
+      } catch (err: any) {
+        if (this.connectionTimeout) {
+          clearTimeout(this.connectionTimeout);
+          this.connectionTimeout = null;
+        }
+        this.stop();
+        if (!isSettled) {
+          isSettled = true;
+          reject(err);
+        }
+        this.callbacks.onError?.(err?.message || 'Failed to start Live Voice client.', true);
       }
-    };
-
-    this.ws.onerror = (err) => {
-      console.error('[GeminiLiveClient] WebSocket error:', err);
-      this.callbacks.onError?.('Failed to connect to Live Voice server.');
-      this.stop();
-    };
-
-    this.ws.onclose = (ev) => {
-      console.log('[GeminiLiveClient] WebSocket closed:', ev.reason);
-      this.stop();
-      this.callbacks.onClose?.(ev.reason);
-    };
+    });
   }
 
   private async startRecording() {

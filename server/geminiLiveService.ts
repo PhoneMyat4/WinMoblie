@@ -137,11 +137,18 @@ export function setupGeminiLiveWebSocket(server: http.Server) {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (request, socket, head) => {
-    const url = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
-    if (url.pathname === '/api/live') {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request);
-      });
+    try {
+      const rawUrl = request.url || '';
+      // Support /api/live, /api/live/, /live, /live/, and tolerate query parameters / hashes
+      const pathname = rawUrl.split('?')[0].split('#')[0].replace(/\/+$/, '');
+      if (pathname === '/api/live' || pathname === '/live') {
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          wss.emit('connection', ws, request);
+        });
+        return;
+      }
+    } catch (err) {
+      console.error('[Gemini Live WS Upgrade Error]:', err);
     }
   });
 

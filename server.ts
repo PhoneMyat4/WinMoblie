@@ -53,9 +53,11 @@ async function startServer() {
   );
 
   app.use('/api', (req, res, next) => {
-    // Whitelist health check and direct Telegram webhook integration endpoints
+    // Whitelist health check, live voice endpoint, and direct Telegram webhook integration endpoints
     if (
       req.path === '/health' ||
+      req.path === '/live' ||
+      req.path === '/live/status' ||
       req.path === '/webhook/telegram' ||
       req.path === '/setup-telegram-webhook' ||
       req.path === '/telegram-webhook-info'
@@ -117,6 +119,17 @@ async function startServer() {
       time: new Date().toISOString(),
       hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
       hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+    });
+  });
+
+  // Live Voice API info & HTTP probe endpoint
+  app.get(['/api/live', '/api/live/status'], (req, res) => {
+    res.json({
+      status: 'ok',
+      service: 'gemini-3.8-live',
+      websocketPath: '/api/live',
+      hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+      time: new Date().toISOString(),
     });
   });
 

@@ -229,7 +229,8 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     for (const file of files) {
       try {
         if (file.size > 15 * 1024 * 1024) {
-          alert(`File "${file.name}" exceeds the 15MB size limit. Please choose a smaller file.`);
+          setLiveStatus(`File "${file.name}" exceeds 15MB size limit.`);
+          setTimeout(() => setLiveStatus(''), 4000);
           continue;
         }
 
@@ -340,8 +341,112 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     }
   }, [isOpen, messages, isLoading]);
 
-  // Gemini Live Voice Session Management (gemini-3.8-live)
+  // Browser Speech Synthesis (Text-to-Speech) for voice assistant mode
+  const speakText = (text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const cleanText = text
+        .replace(/[*#_`~\[\]]/g, '')
+        .replace(/\bhttps?:\/\/\S+/gi, '')
+        .slice(0, 320);
+      if (!cleanText.trim()) return;
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.rate = 1.05;
+      utterance.pitch = 1.0;
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.warn('Speech synthesis error:', e);
+    }
+  };
+
+  // Browser Speech Recognition Fallback (hands-free voice input)
+  const startSpeechRecognitionFallback = () => {
+    const SpeechRecognitionClass =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition ||
+      null;
+
+    if (!SpeechRecognitionClass) {
+      setLiveStatus('Voice input not supported in this browser. Please type your message.');
+      setTimeout(() => setLiveStatus(''), 4000);
+      return;
+    }
+
+    try {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+
+      const recognition = new SpeechRecognitionClass();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setLiveStatus('Listening to your voice command... (Speak now)');
+      };
+
+      recognition.onresult = (event: any) => {
+        let finalTranscript = '';
+        let interimTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const item = event.results[i];
+          if (item.isFinal) {
+            finalTranscript += item[0].transcript;
+          } else {
+            interimTranscript += item[0].transcript;
+          }
+        }
+        const currentText = (finalTranscript || interimTranscript).trim();
+        if (currentText) {
+          setInputQuery(currentText);
+          setSpeechTranscript(currentText);
+          setLiveStatus(`Hearing: "${currentText}"`);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn('[SpeechRecognition Error]:', event.error);
+        setIsListening(false);
+        if (event.error !== 'no-speech') {
+          setLiveStatus(`Voice notice: ${event.error}`);
+          setTimeout(() => setLiveStatus(''), 3500);
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        const textToSubmit = inputRef.current?.value || speechTranscript;
+        if (textToSubmit && textToSubmit.trim()) {
+          setLiveStatus('Processing your voice request...');
+          handleSendMessage(textToSubmit);
+        } else {
+          setLiveStatus('');
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err: any) {
+      console.warn('[SpeechRecognition Start Error]:', err);
+      setIsListening(false);
+      setLiveStatus('Could not access microphone.');
+      setTimeout(() => setLiveStatus(''), 3000);
+    }
+  };
+
+  // Gemini Live Voice Session Management (gemini-3.8-live) with Automatic Voice Fallback
   const toggleVoiceRecording = async () => {
+    // Stop any active text-to-speech
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+
     // If active or connecting, cleanly stop session
     if (isLiveVoiceActive || isLiveConnecting) {
       if (liveClientRef.current) {
@@ -352,8 +457,23 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       setIsLiveConnecting(false);
       setIsAiSpeaking(false);
       setAudioVolume(0);
-      setLiveStatus('Live voice session ended');
-      setTimeout(() => setLiveStatus(''), 2500);
+      setLiveStatus('Voice session ended');
+      setTimeout(() => setLiveStatus(''), 2000);
+      return;
+    }
+
+    // If Speech Recognition is currently listening, stop it
+    if (isListening) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+      setIsListening(false);
+      if (speechTranscript || inputQuery) {
+        handleSendMessage(speechTranscript || inputQuery);
+      }
+      setLiveStatus('');
       return;
     }
 
@@ -425,13 +545,21 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           };
           setMessages((prev) => [...prev, toolMsg]);
         },
-        onError: (err) => {
-          console.error('[Gemini Live Error]:', err);
-          alert(err || 'Failed to connect to Gemini Live Voice API.');
+        onError: (err, isConnectionError) => {
+          console.warn('[Gemini Live Error / Fallback]:', err);
           setIsLiveVoiceActive(false);
           setIsLiveConnecting(false);
           setIsAiSpeaking(false);
-          setLiveStatus('');
+          setAudioVolume(0);
+
+          if (isConnectionError) {
+            // WebSocket blocked or unavailable on this domain/host -> seamless fallback to Browser Voice!
+            setLiveStatus('Live WebSocket unavailable — switched to Voice Assistant');
+            startSpeechRecognitionFallback();
+          } else {
+            setLiveStatus(err || 'Live voice session ended');
+            setTimeout(() => setLiveStatus(''), 4000);
+          }
         },
         onClose: (reason) => {
           console.log('[Gemini Live Closed]:', reason);
@@ -455,22 +583,31 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
         settings,
       });
     } catch (err: any) {
-      console.error('Failed to start Live Voice session:', err);
-      alert(err?.message || 'Failed to access microphone or connect to Gemini Live API.');
+      console.warn('Live voice startup error, falling back to Web Speech:', err);
       setIsLiveVoiceActive(false);
       setIsLiveConnecting(false);
-      setLiveStatus('');
+      setLiveStatus('Live WebSocket unavailable — switched to Voice Assistant');
+      startSpeechRecognitionFallback();
     }
   };
 
-  // Clean up Gemini Live Voice session when widget is closed or unmounted
+  // Clean up Gemini Live Voice session and Speech Recognition when widget is closed or unmounted
   useEffect(() => {
-    if (!isOpen && liveClientRef.current) {
-      liveClientRef.current.stop();
-      liveClientRef.current = null;
+    if (!isOpen) {
+      if (liveClientRef.current) {
+        liveClientRef.current.stop();
+        liveClientRef.current = null;
+      }
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
       setIsLiveVoiceActive(false);
       setIsLiveConnecting(false);
       setIsAiSpeaking(false);
+      setIsListening(false);
       setAudioVolume(0);
     }
   }, [isOpen]);
@@ -480,6 +617,12 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       if (liveClientRef.current) {
         liveClientRef.current.stop();
         liveClientRef.current = null;
+      }
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
       }
     };
   }, []);
@@ -781,6 +924,12 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       };
 
       setMessages((prev) => [...prev, assistantMsgItem]);
+
+      // If user prompted with speech, read back answer naturally
+      if (speechTranscript || isListening) {
+        speakText(data.reply);
+        setSpeechTranscript('');
+      }
     } catch (err: any) {
       console.error('Chat error:', err);
       const errorMsgItem: ChatMessageItem = {
