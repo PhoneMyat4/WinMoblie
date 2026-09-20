@@ -1,9 +1,11 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import OpenAI from 'openai';
+import { setupGeminiLiveWebSocket } from './server/geminiLiveService';
 import { 
   openAiAssistantTools, 
   AI_SYSTEM_INSTRUCTION, 
@@ -629,10 +631,13 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
       const requestedModel = typeof model === 'string' ? model.trim() : '';
       const settingsModel = (context?.settings as any)?.secrets?.chatAssistantModel;
       const serverEnvModel = process.env.CHAT_ASSISTANT_MODEL;
-      const candidateModel = requestedModel || settingsModel || serverEnvModel || 'gpt-4o-mini';
+      const candidateModel = requestedModel || settingsModel || serverEnvModel || 'gpt-5.6-luna';
 
-      const supportedModels = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1', 'o3-mini', 'o1-mini'];
-      const activeModel = supportedModels.includes(candidateModel) ? candidateModel : 'gpt-4o-mini';
+      // Accept any valid model string (including gpt-5.6-luna, gpt-5.6-terra, gpt-5.6, gpt-5, o3-mini, etc.)
+      const activeModel =
+        typeof candidateModel === 'string' && /^[a-zA-Z0-9_.-]+$/.test(candidateModel)
+          ? candidateModel
+          : 'gpt-5.6-luna';
 
       const openai = getOpenAI();
 
@@ -1899,7 +1904,10 @@ Output a JSON response with:
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = http.createServer(app);
+  setupGeminiLiveWebSocket(server);
+
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`Mobile Shop POS server running at http://0.0.0.0:${PORT}`);
   });
 }

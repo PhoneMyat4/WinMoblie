@@ -3,7 +3,7 @@ import { StaffRole, RolePermissions, StaffUser, AppTab } from '../types';
 export interface PermissionDefinition {
   key: keyof RolePermissions;
   label: string;
-  category: 'pos' | 'inventory' | 'purchases' | 'financials' | 'crm' | 'system';
+  category: 'pos' | 'inventory' | 'purchases' | 'financials' | 'payroll' | 'crm' | 'system';
   categoryLabel: string;
   desc: string;
   riskLevel: 'critical' | 'moderate' | 'standard';
@@ -37,6 +37,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canAccessAiCopilot: true,
     canViewAuditLogs: true,
     canExportAuditLogs: true,
+    canManagePayroll: true,
+    canManageKpiSettings: true,
+    canViewPayroll: true,
   },
   Manager: {
     canAccessPos: true,
@@ -65,6 +68,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canAccessAiCopilot: true,
     canViewAuditLogs: true,
     canExportAuditLogs: true,
+    canManagePayroll: true,
+    canManageKpiSettings: true,
+    canViewPayroll: true,
   },
   Cashier: {
     canAccessPos: true,
@@ -93,6 +99,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canAccessAiCopilot: false,
     canViewAuditLogs: false,
     canExportAuditLogs: false,
+    canManagePayroll: false,
+    canManageKpiSettings: false,
+    canViewPayroll: false,
   },
   Inventory_Staff: {
     canAccessPos: false,
@@ -121,6 +130,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canAccessAiCopilot: false,
     canViewAuditLogs: false,
     canExportAuditLogs: false,
+    canManagePayroll: false,
+    canManageKpiSettings: false,
+    canViewPayroll: false,
   },
 };
 
@@ -129,6 +141,7 @@ export const PERMISSION_CATEGORIES: { id: PermissionDefinition['category']; labe
   { id: 'inventory', label: 'Inventory & Catalog', iconName: 'Package' },
   { id: 'purchases', label: 'Purchases & Suppliers', iconName: 'Truck' },
   { id: 'financials', label: 'Financials & Reports', iconName: 'DollarSign' },
+  { id: 'payroll', label: 'Staff Payroll & KPI', iconName: 'Award' },
   { id: 'crm', label: 'CRM & Customer Database', iconName: 'Users' },
   { id: 'system', label: 'Security & Configuration', iconName: 'ShieldCheck' },
 ];
@@ -268,6 +281,32 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
     categoryLabel: 'Financials & Reports',
     desc: 'View sales trends, profit breakdown analytics, top-selling phone statistics, and export PDF/Excel reports.',
     riskLevel: 'critical',
+  },
+
+  // Staff Payroll & KPI
+  {
+    key: 'canManagePayroll',
+    label: 'Process Staff Payroll & Disburse Pay',
+    category: 'payroll',
+    categoryLabel: 'Staff Payroll & KPI',
+    desc: 'Draft monthly salary records, calculate attendance bonuses, apply fines or deductions, review feedback, and mark salaries as paid.',
+    riskLevel: 'critical',
+  },
+  {
+    key: 'canManageKpiSettings',
+    label: 'Configure Monthly Category KPIs',
+    category: 'payroll',
+    categoryLabel: 'Staff Payroll & KPI',
+    desc: 'Set monthly sales target incentives, category commission rates, and activate KPI bonus criteria across inventory tiers.',
+    riskLevel: 'moderate',
+  },
+  {
+    key: 'canViewPayroll',
+    label: 'View Payroll & KPI Records',
+    category: 'payroll',
+    categoryLabel: 'Staff Payroll & KPI',
+    desc: 'Inspect monthly staff salary history, attendance records, compensation breakdowns, and performance KPI achievements.',
+    riskLevel: 'standard',
   },
 
   // CRM
@@ -455,6 +494,15 @@ export function isTabAccessibleForUser(
       return Boolean(user.role === 'Owner' || user.role === 'Manager' || perms.canAccessAiCopilot || perms.canAccessPos);
     case 'audit_logs':
       return Boolean(user.role === 'Owner' || user.role === 'Manager' || perms.canViewAuditLogs);
+    case 'staff_payroll':
+      return Boolean(
+        perms.canManagePayroll ||
+        perms.canViewPayroll ||
+        perms.canManageKpiSettings ||
+        perms.canManageStaff ||
+        user.role === 'Owner' ||
+        user.role === 'Manager'
+      );
     default:
       return true;
   }
@@ -588,6 +636,13 @@ export function getTabRequiredPermissionInfo(tab: AppTab): {
         title: 'User Activity & Audit Log History',
         requiredPermissionLabel: 'Audit Log & Security History (canViewAuditLogs)',
         description: 'Inspecting live staff activity, transaction history, and chronological audit trails is restricted to store owners and managers.',
+      };
+    case 'staff_payroll':
+      return {
+        permissionKey: 'canManagePayroll',
+        title: 'Staff Payroll & KPI Management',
+        requiredPermissionLabel: 'Staff Payroll & KPI (canManagePayroll / canViewPayroll)',
+        description: 'Your staff account is restricted from viewing or processing staff compensation, monthly KPI bonuses, and payroll records.',
       };
     default:
       return {

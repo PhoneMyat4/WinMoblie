@@ -83,6 +83,10 @@ export interface RolePermissions {
   canAccessAiCopilot?: boolean;
   canViewAuditLogs?: boolean;
   canExportAuditLogs?: boolean;
+  // Staff Payroll & KPI Functional Scope
+  canManagePayroll?: boolean;
+  canManageKpiSettings?: boolean;
+  canViewPayroll?: boolean;
 }
 
 export interface StaffUser {

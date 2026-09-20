@@ -34,7 +34,10 @@ import {
   Download,
   UploadCloud,
   FileUp,
-  Cpu
+  Cpu,
+  FileDown,
+  Radio,
+  Sparkles
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Product, Sale, ExpenseRecord, PurchaseRecord, CashDrawerRecord, StockAdjustment, ShopSettings, StaffUser, StaffRole, RolePermissions, FacebookAdPostRecord } from '../../types';
@@ -42,6 +45,7 @@ import { StorageService } from '../../utils/storage';
 import { formatCurrency, getRoleBadgeClass } from '../../utils/formatters';
 import { compressImageForOcr } from '../../utils/boxScannerService';
 import { authenticatedFetch } from '../../utils/apiClient';
+import { GeminiLiveClient } from '../../utils/geminiLiveClient';
 import confetti from 'canvas-confetti';
 import { 
   exportDailyProfitDossierPdf, 
@@ -53,6 +57,7 @@ import {
   exportAnnualProfitDossierPdf 
 } from '../../utils/annualProfitPdfExport';
 import { exportReportToPdf } from '../../utils/pdfExportUtils';
+import { exportGptCostComparisonPdf } from '../../utils/gptCostPdfExport';
 
 export interface CopilotModelOption {
   id: string;
@@ -62,11 +67,15 @@ export interface CopilotModelOption {
 }
 
 export const COPILOT_MODELS: CopilotModelOption[] = [
-  { id: 'gpt-4o-mini', name: 'GPT-4o mini', badge: 'Fast & Light', description: 'Recommended default: high speed, responsive' },
-  { id: 'gpt-4o', name: 'GPT-4o', badge: 'Flagship Omni', description: 'Multimodal vision, complex reasoning & intelligence' },
-  { id: 'gpt-4.1-mini', name: 'GPT-4.1 mini', badge: 'Fast Mini', description: 'Next-generation high-efficiency flagship' },
-  { id: 'gpt-4.1', name: 'GPT-4.1', badge: 'Flagship', description: 'Next-gen comprehensive store intelligence' },
+  { id: 'gemini-3.8-live', name: 'Gemini 3.8 Live', badge: 'Live Voice & Tools', description: 'Real-time 16k/24k PCM audio streaming & instant POS tool calling' },
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', badge: 'GPT-5.6 Flagship', description: 'Fastest & most cost-efficient GPT-5.6 for store operations' },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', badge: 'GPT-5.6', description: 'Balanced speed & depth for POS inventory & sales execution' },
+  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', badge: 'Frontier', description: 'Frontier intelligence flagship with comprehensive deep reasoning' },
+  { id: 'gpt-5.6', name: 'GPT-5.6 Frontier', badge: 'Frontier', description: 'OpenAI GPT-5.6 frontier intelligence scaling' },
+  { id: 'gpt-5', name: 'GPT-5 Flagship', badge: 'GPT-5', description: 'OpenAI GPT-5 foundational intelligence model' },
   { id: 'o3-mini', name: 'o3-mini', badge: 'Deep Reasoning', description: 'Intricate POS calculation & inventory auditing' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o mini', badge: 'Fast & Light', description: 'High-speed legacy model, responsive & economical' },
+  { id: 'gpt-4o', name: 'GPT-4o', badge: 'Omni Flagship', description: 'Multimodal vision, complex reasoning & intelligence' },
 ];
 
 interface AiChatWidgetProps {
@@ -168,15 +177,24 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const [copiedCaption, setCopiedCaption] = useState<string | null>(null);
   const [apiKeyWarning, setApiKeyWarning] = useState<string | null>(null);
 
+  // Gemini Live Voice State (gemini-3.8-live)
+  const [isLiveVoiceActive, setIsLiveVoiceActive] = useState(false);
+  const [isLiveConnecting, setIsLiveConnecting] = useState(false);
+  const [isAiSpeaking, setIsAiSpeaking] = useState(false);
+  const [audioVolume, setAudioVolume] = useState(0);
+  const [liveStatus, setLiveStatus] = useState<string>('');
+  const liveClientRef = useRef<GeminiLiveClient | null>(null);
+
   // Model Selection State for In-App Copilot
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
       const cached = localStorage.getItem('mobileshop_copilot_model');
-      if (cached && COPILOT_MODELS.some((m) => m.id === cached)) return cached;
+      if (cached && typeof cached === 'string') return cached;
     } catch {}
-    return settings?.secrets?.chatAssistantModel || 'gpt-4o-mini';
+    return settings?.secrets?.chatAssistantModel || 'gpt-5.6-luna';
   });
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [customModelInput, setCustomModelInput] = useState('');
 
   // Synchronize with settings if default changes and user hasn't set manual override
   useEffect(() => {
@@ -322,70 +340,165 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     }
   }, [isOpen, messages, isLoading]);
 
-  // Web Speech API Initialization
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        setSpeechTranscript('');
-      };
-
-      recognition.onresult = (event: any) => {
-        let currentTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          currentTranscript += event.results[i][0].transcript;
-        }
-        setSpeechTranscript(currentTranscript);
-        setInputQuery(currentTranscript);
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn('Speech recognition error:', event.error);
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-        // If transcript was captured, user can review or auto-send
-      };
-
-      recognitionRef.current = recognition;
+  // Gemini Live Voice Session Management (gemini-3.8-live)
+  const toggleVoiceRecording = async () => {
+    // If active or connecting, cleanly stop session
+    if (isLiveVoiceActive || isLiveConnecting) {
+      if (liveClientRef.current) {
+        liveClientRef.current.stop();
+        liveClientRef.current = null;
+      }
+      setIsLiveVoiceActive(false);
+      setIsLiveConnecting(false);
+      setIsAiSpeaking(false);
+      setAudioVolume(0);
+      setLiveStatus('Live voice session ended');
+      setTimeout(() => setLiveStatus(''), 2500);
+      return;
     }
 
+    try {
+      setIsLiveConnecting(true);
+      setLiveStatus('Connecting to Gemini 3.8 Live API...');
+
+      const client = new GeminiLiveClient({
+        onReady: (model) => {
+          setIsLiveConnecting(false);
+          setIsLiveVoiceActive(true);
+          setLiveStatus(`Live Voice Connected (${model}) — Speak anytime`);
+        },
+        onAiSpeaking: (speaking) => {
+          setIsAiSpeaking(speaking);
+          if (speaking) {
+            setLiveStatus('Aura Copilot is speaking...');
+          } else {
+            setLiveStatus('Listening in real-time... (Barge-in ready)');
+          }
+        },
+        onUserSpeaking: (vol) => {
+          setAudioVolume(vol);
+        },
+        onTranscript: (text, role) => {
+          if (text) {
+            setLiveStatus(role === 'assistant' ? `Aura: "${text.slice(0, 75)}"` : `You: "${text.slice(0, 75)}"`);
+          }
+        },
+        onInterrupted: () => {
+          setIsAiSpeaking(false);
+          setLiveStatus('Interrupted — Listening to you...');
+        },
+        onToolExecuted: (toolData) => {
+          const { name, args, result, createdProduct, updatedProduct, pdfReport } = toolData;
+          setLiveStatus(`Tool executed: ${name}`);
+
+          if (createdProduct) {
+            StorageService.saveProducts([createdProduct, ...products]);
+            confetti({ particleCount: 35, spread: 60, origin: { y: 0.8 } });
+          }
+          if (updatedProduct) {
+            const updatedList = products.map((p) => (p.id === updatedProduct.id ? updatedProduct : p));
+            StorageService.saveProducts(updatedList);
+          }
+          if (pdfReport) {
+            triggerClientPdfExport(pdfReport);
+          }
+
+          const toolMsg: ChatMessageItem = {
+            id: `live_tool_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            role: 'assistant',
+            content: `⚡ **Live Voice Tool Action: \`${name}\`**\n\n${
+              typeof result?.message === 'string'
+                ? result.message
+                : typeof result?.output?.message === 'string'
+                ? result.output.message
+                : `Executed tool \`${name}\` successfully via Gemini Live Voice.`
+            }`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            toolExecuted: {
+              name,
+              args,
+              result,
+            },
+            createdProduct,
+            updatedProduct,
+            pdfReport,
+          };
+          setMessages((prev) => [...prev, toolMsg]);
+        },
+        onError: (err) => {
+          console.error('[Gemini Live Error]:', err);
+          alert(err || 'Failed to connect to Gemini Live Voice API.');
+          setIsLiveVoiceActive(false);
+          setIsLiveConnecting(false);
+          setIsAiSpeaking(false);
+          setLiveStatus('');
+        },
+        onClose: (reason) => {
+          console.log('[Gemini Live Closed]:', reason);
+          setIsLiveVoiceActive(false);
+          setIsLiveConnecting(false);
+          setIsAiSpeaking(false);
+          setLiveStatus('');
+        },
+      });
+
+      liveClientRef.current = client;
+
+      await client.start({
+        products,
+        sales,
+        expenses,
+        purchases,
+        cashDrawer,
+        stockAdjustments,
+        currencySymbol: settings.currencySymbol,
+        settings,
+      });
+    } catch (err: any) {
+      console.error('Failed to start Live Voice session:', err);
+      alert(err?.message || 'Failed to access microphone or connect to Gemini Live API.');
+      setIsLiveVoiceActive(false);
+      setIsLiveConnecting(false);
+      setLiveStatus('');
+    }
+  };
+
+  // Clean up Gemini Live Voice session when widget is closed or unmounted
+  useEffect(() => {
+    if (!isOpen && liveClientRef.current) {
+      liveClientRef.current.stop();
+      liveClientRef.current = null;
+      setIsLiveVoiceActive(false);
+      setIsLiveConnecting(false);
+      setIsAiSpeaking(false);
+      setAudioVolume(0);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
     return () => {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // ignore
-        }
+      if (liveClientRef.current) {
+        liveClientRef.current.stop();
+        liveClientRef.current = null;
       }
     };
   }, []);
 
-  const toggleVoiceRecording = () => {
-    if (!recognitionRef.current) {
-      alert('Voice recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
-      return;
+  // Update POS context inside active Live Voice session when store state changes
+  useEffect(() => {
+    if (isLiveVoiceActive && liveClientRef.current) {
+      liveClientRef.current.updateContext({
+        products,
+        sales,
+        expenses,
+        purchases,
+        cashDrawer,
+        stockAdjustments,
+        currencySymbol: settings.currencySymbol,
+        settings,
+      });
     }
-
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-    } else {
-      try {
-        recognitionRef.current.start();
-      } catch (err) {
-        console.error('Error starting speech recognition:', err);
-      }
-    }
-  };
+  }, [products, sales, expenses, purchases, cashDrawer, stockAdjustments, settings, isLiveVoiceActive]);
 
   // Client-Side PDF Generation Bridge: Executes jsPDF export routines based on AI tool output
   const triggerClientPdfExport = (config: any) => {
@@ -443,6 +556,8 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             staffName: data.staffName || staffName,
           });
         }
+      } else if (reportType === 'gpt_cost_comparison' || reportType === 'ai_model_pricing') {
+        exportGptCostComparisonPdf({ ...settings, currentStaffName: staffName });
       } else if (exportPdfOptions) {
         exportReportToPdf({
           ...exportPdfOptions,
@@ -507,12 +622,28 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     if (!userText && filesToSend.length === 0) return;
     if (isLoading) return;
 
-    // Stop voice if listening
+    // Stop voice if listening (legacy Web Speech fallback)
     if (isListening && recognitionRef.current) {
       try {
         recognitionRef.current.stop();
       } catch {}
       setIsListening(false);
+    }
+
+    // If Gemini Live Voice is currently connected and no files are attached, stream prompt directly to Live session
+    if (isLiveVoiceActive && filesToSend.length === 0 && liveClientRef.current) {
+      const newMsgId = `usr_${Date.now()}`;
+      const userMessageItem: ChatMessageItem = {
+        id: newMsgId,
+        role: 'user',
+        content: userText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setMessages((prev) => [...prev, userMessageItem]);
+      setInputQuery('');
+      setLiveStatus('Sending prompt to Gemini Live Voice...');
+      liveClientRef.current.sendText(userText);
+      return;
     }
 
     const newMsgId = `usr_${Date.now()}`;
@@ -757,40 +888,85 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
                       <span className="text-[9px] text-indigo-400 font-mono">Active Model</span>
                     </div>
 
-                    {COPILOT_MODELS.map((m) => {
-                      const isActive = m.id === selectedModel;
-                      return (
+                    <div className="max-h-60 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                      {COPILOT_MODELS.map((m) => {
+                        const isActive = m.id === selectedModel;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedModel(m.id);
+                              setShowModelMenu(false);
+                              try {
+                                localStorage.setItem('mobileshop_copilot_model', m.id);
+                              } catch {}
+                            }}
+                            className={`w-full text-left p-2 rounded-lg transition-all flex items-start justify-between gap-2 cursor-pointer ${
+                              isActive
+                                ? 'bg-indigo-600/30 border border-indigo-500/50 text-white'
+                                : 'hover:bg-white/5 text-slate-300 hover:text-white border border-transparent'
+                            }`}
+                          >
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-semibold">{m.name}</span>
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                                  isActive ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'
+                                }`}>
+                                  {m.badge}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 leading-snug">{m.description}</p>
+                            </div>
+                            {isActive && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Custom Model Input */}
+                    <div className="pt-1.5 mt-1 border-t border-slate-800 px-1">
+                      <div className="text-[10px] text-slate-400 font-semibold mb-1 flex items-center justify-between">
+                        <span>Custom Model ID:</span>
+                        <span className="text-[9px] text-indigo-400 font-mono">e.g. gpt-5.6-luna</span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          value={customModelInput}
+                          onChange={(e) => setCustomModelInput(e.target.value)}
+                          placeholder="Type model ID..."
+                          className="flex-1 px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && customModelInput.trim()) {
+                              const clean = customModelInput.trim();
+                              setSelectedModel(clean);
+                              setShowModelMenu(false);
+                              try {
+                                localStorage.setItem('mobileshop_copilot_model', clean);
+                              } catch {}
+                            }
+                          }}
+                        />
                         <button
-                          key={m.id}
                           type="button"
                           onClick={() => {
-                            setSelectedModel(m.id);
-                            setShowModelMenu(false);
-                            try {
-                              localStorage.setItem('mobileshop_copilot_model', m.id);
-                            } catch {}
+                            if (customModelInput.trim()) {
+                              const clean = customModelInput.trim();
+                              setSelectedModel(clean);
+                              setShowModelMenu(false);
+                              try {
+                                localStorage.setItem('mobileshop_copilot_model', clean);
+                              } catch {}
+                            }
                           }}
-                          className={`w-full text-left p-2 rounded-lg transition-all flex items-start justify-between gap-2 cursor-pointer ${
-                            isActive
-                              ? 'bg-indigo-600/30 border border-indigo-500/50 text-white'
-                              : 'hover:bg-white/5 text-slate-300 hover:text-white border border-transparent'
-                          }`}
+                          className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-semibold"
                         >
-                          <div className="space-y-0.5">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-semibold">{m.name}</span>
-                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
-                                isActive ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'
-                              }`}>
-                                {m.badge}
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-slate-400 leading-snug">{m.description}</p>
-                          </div>
-                          {isActive && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
+                          Apply
                         </button>
-                      );
-                    })}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1182,6 +1358,22 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
                         </div>
                       </div>
                     )}
+
+                    {/* Quick PDF Action for GPT Cost & Model Comparison */}
+                    {(msg.content.includes('gpt-5') || msg.content.includes('GPT-5') || msg.content.includes('Tokens') || msg.content.includes('token') || msg.content.includes('Luna')) && (
+                      <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-slate-400">Official Cost Estimate &amp; Audit</span>
+                        <button
+                          type="button"
+                          onClick={() => exportGptCostComparisonPdf(settings)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300/80 rounded-lg text-[11px] font-semibold transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-95"
+                          title="Generate and download formatted PDF report"
+                        >
+                          <FileDown className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Export Cost Estimate PDF</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -1286,8 +1478,88 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
         })}
       </div>
 
+      {/* Gemini 3.8 Live Voice Active Session Banner & Audio Waveform */}
+      {(isLiveVoiceActive || isLiveConnecting) && (
+        <div className="px-4 py-2.5 bg-slate-900 border-t border-indigo-500/40 text-white flex flex-col gap-2 shadow-inner">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="relative flex h-2.5 w-2.5">
+                <span
+                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                    isAiSpeaking ? 'bg-purple-400' : isLiveConnecting ? 'bg-amber-400' : 'bg-emerald-400'
+                  }`}
+                />
+                <span
+                  className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                    isAiSpeaking ? 'bg-purple-500' : isLiveConnecting ? 'bg-amber-500' : 'bg-emerald-500'
+                  }`}
+                />
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-white tracking-wide">Gemini 3.8 Live</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 font-mono">
+                  PCM 16k/24k
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-300 font-medium">
+                {isLiveConnecting
+                  ? 'Connecting...'
+                  : isAiSpeaking
+                  ? 'Aura Speaking'
+                  : 'Listening (Barge-in ready)'}
+              </span>
+              <button
+                type="button"
+                onClick={toggleVoiceRecording}
+                className="text-[11px] font-semibold px-2.5 py-0.5 rounded bg-rose-500/30 hover:bg-rose-500/50 text-rose-200 border border-rose-500/50 transition-colors"
+              >
+                End Voice
+              </button>
+            </div>
+          </div>
+
+          {/* Dynamic Audio Waveform Visualizer */}
+          <div className="flex items-center justify-between gap-1 h-5 px-1 bg-slate-950/60 rounded-lg py-0.5">
+            <div className="flex items-center gap-1 flex-1 justify-center h-full">
+              {[...Array(24)].map((_, i) => {
+                let height = 3;
+                if (isAiSpeaking) {
+                  height = 5 + Math.sin((Date.now() / 120) + i * 0.5) * 8 + 5;
+                } else if (isLiveVoiceActive) {
+                  const factor = Math.sin((i / 23) * Math.PI);
+                  height = Math.max(3, Math.min(18, 3 + audioVolume * 35 * factor));
+                }
+                return (
+                  <div
+                    key={i}
+                    className={`w-1 rounded-full transition-all duration-75 ${
+                      isAiSpeaking
+                        ? 'bg-gradient-to-t from-purple-500 to-indigo-400'
+                        : audioVolume > 0.05
+                        ? 'bg-gradient-to-t from-emerald-500 to-teal-300'
+                        : 'bg-slate-700'
+                    }`}
+                    style={{ height: `${Math.max(3, Math.min(18, height))}px` }}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          {liveStatus && (
+            <div className="text-[11px] text-slate-300 truncate italic flex items-center gap-1.5">
+              <Sparkles className="w-3 h-3 text-indigo-400 shrink-0" />
+              <span>{liveStatus}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Voice Listening Feedback Alert */}
-      {isListening && (
+      {isListening && !isLiveVoiceActive && !isLiveConnecting && (
         <div className="px-4 py-2 bg-indigo-50 border-t border-indigo-100 flex items-center justify-between text-xs text-indigo-900 animate-pulse">
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
@@ -1484,18 +1756,36 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             <Camera className="w-4 h-4" />
           </button>
 
-          {/* Voice Mic Toggle */}
+          {/* Voice Mic Toggle (Gemini 3.8 Live Voice) */}
           <button
             type="button"
             onClick={toggleVoiceRecording}
-            title={isListening ? 'Stop Listening' : 'Speak with Voice'}
+            title={
+              isLiveVoiceActive
+                ? 'Stop Gemini Live Voice Session'
+                : isLiveConnecting
+                ? 'Connecting to Gemini 3.8 Live...'
+                : isListening
+                ? 'Stop Listening'
+                : 'Speak with Voice (Gemini 3.8 Live)'
+            }
             className={`p-2.5 rounded-xl font-medium transition-all shrink-0 ${
-              isListening
+              isLiveVoiceActive
+                ? 'bg-rose-600 text-white ring-4 ring-rose-500/40 shadow-md shadow-rose-500/40 animate-pulse'
+                : isLiveConnecting
+                ? 'bg-amber-500 text-white'
+                : isListening
                 ? 'bg-rose-500 text-white animate-bounce shadow-md shadow-rose-500/30'
                 : 'bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600'
             }`}
           >
-            {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            {isLiveVoiceActive || isListening ? (
+              <MicOff className="w-4 h-4" />
+            ) : isLiveConnecting ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <Mic className="w-4 h-4" />
+            )}
           </button>
 
           {/* Text Input */}
@@ -1505,7 +1795,13 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             value={inputQuery}
             onChange={(e) => setInputQuery(e.target.value)}
             placeholder={
-              isListening 
+              isLiveVoiceActive
+                ? isAiSpeaking
+                  ? 'Aura Copilot speaking (speak to interrupt)...'
+                  : 'Listening live... speak or type question...'
+                : isLiveConnecting
+                ? 'Connecting to Gemini 3.8 Live Voice...'
+                : isListening 
                 ? 'Listening to voice...' 
                 : attachedFiles.length > 0 
                   ? 'Add instructions for attached file(s)...' 

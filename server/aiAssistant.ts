@@ -291,9 +291,10 @@ export const generatePdfReportTool: ChatCompletionTool = {
             'dead_stock',
             'imei_lifecycle',
             'category_sales',
-            'inventory_catalog'
+            'inventory_catalog',
+            'gpt_cost_comparison'
           ],
-          description: "Type of PDF report to generate: 'daily_profit_dossier' (full landscape daily audit dossier), 'daily_profit_statement' (official portrait income statement), 'daily_profit_ledger' (detailed transaction margin audit), 'annual_profit_statement' (GAAP annual P&L statement), 'annual_profit_dossier' (12-month annual financial dossier), 'z_report' (cash drawer and register balancing audit), 'stock_aging' (inventory age brackets & slow movers), 'dead_stock' (dormant zero-velocity items & tied capital), 'imei_lifecycle' (single device audit trail), 'category_sales' (category revenue & margin ranking), or 'inventory_catalog' (full inventory stock and valuation catalog).",
+          description: "Type of PDF report to generate: 'daily_profit_dossier', 'daily_profit_statement', 'daily_profit_ledger', 'annual_profit_statement', 'annual_profit_dossier', 'z_report', 'stock_aging', 'dead_stock', 'imei_lifecycle', 'category_sales', 'inventory_catalog', or 'gpt_cost_comparison' (GPT-5 vs GPT-4 pricing, token breakdown & store monthly budget estimate).",
         },
         date: {
           type: 'string',
@@ -2010,6 +2011,25 @@ export function executeGeneratePdfReport(args: any, context: PosDataContext) {
       exportPdfOptions,
       data: { totalSkus: products.length, totalStock, totalCostVal, totalRetailVal },
       message: `Generated ${reportName}. PDF downloading now.`,
+    };
+  }
+
+  // 5. GPT-5 vs GPT-4 Cost & Performance Comparison Report
+  if (report_type === 'gpt_cost_comparison' || report_type === 'ai_model_pricing') {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const reportName = 'GPT-5 vs GPT-4 Cost & Performance Comparison';
+    return {
+      success: true,
+      reportType: 'gpt_cost_comparison',
+      reportName,
+      filename: `GPT5_vs_GPT4_Cost_Estimate_${todayStr}.pdf`,
+      data: {
+        timestamp: new Date().toISOString(),
+        modelsCompared: ['gpt-5.6-luna', 'gpt-4o-mini', 'gpt-5.6-terra', 'o3-mini', 'gpt-5.6-sol', 'gpt-4o', 'gpt-5'],
+        recommendedModel: 'gpt-5.6-luna',
+        monthlyEstimate: '$0.22 - $0.35 / month',
+      },
+      message: `Generated ${reportName} PDF report. Browser download initiated.`,
     };
   }
 

@@ -25,11 +25,14 @@ export interface TelegramAiModelOption {
 }
 
 export const SUPPORTED_TELEGRAM_MODELS: TelegramAiModelOption[] = [
-  { id: 'gpt-4o-mini', name: 'GPT-4o mini', description: 'Fast, highly responsive, cost-efficient (Default)', badge: 'Recommended' },
-  { id: 'gpt-4o', name: 'GPT-4o', description: 'Omni Flagship with advanced reasoning & visual understanding', badge: 'Flagship' },
-  { id: 'gpt-4.1-mini', name: 'GPT-4.1 mini', description: 'Next-gen high-efficiency flagship mini model', badge: 'Fast' },
-  { id: 'gpt-4.1', name: 'GPT-4.1', description: 'Next-generation flagship comprehensive intelligence', badge: 'Deep' },
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: 'Fastest & most cost-efficient GPT-5.6 model for high-volume workloads', badge: 'GPT-5.6 Flagship' },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', description: 'Balanced GPT-5.6 speed and depth for POS inventory & sales execution', badge: 'GPT-5.6' },
+  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: 'Frontier intelligence flagship with comprehensive deep reasoning', badge: 'Frontier' },
+  { id: 'gpt-5.6', name: 'GPT-5.6 Frontier', description: 'Full GPT-5.6 frontier scale for deep business & store intelligence', badge: 'Frontier' },
+  { id: 'gpt-5', name: 'GPT-5 Flagship', description: 'OpenAI GPT-5 foundational model for complex reasoning', badge: 'GPT-5' },
   { id: 'o3-mini', name: 'o3-mini', description: 'Specialized deep reasoning model for complex inventory & financial analysis', badge: 'Reasoning' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o mini', description: 'High-speed legacy model, responsive & economical', badge: 'Fast' },
+  { id: 'gpt-4o', name: 'GPT-4o', description: 'Omni flagship with advanced visual understanding', badge: 'Omni' },
 ];
 
 /**
@@ -438,7 +441,7 @@ export async function handleTelegramWebhook(
         (context.settings as any)?.secrets?.telegramBotModel ||
         (context.settings as any)?.telegramBotModel ||
         process.env.TELEGRAM_AI_MODEL ||
-        'gpt-4o-mini';
+        'gpt-5.6-luna';
 
       const welcomeMessage = `👋 *Welcome to Golden Star Mobile POS Assistant, ${senderName}!*
 
@@ -463,7 +466,7 @@ I am your direct, real-time AI store manager connected to your live Firestore PO
   - _"Lookup IMEI 861234567890123 history"_
 • ⚙️ *Model Configuration:*
   - _"/model" (view current model and list available options)_
-  - _"/model gpt-4o" (switch to GPT-4o Flagship)_
+  - _"/model gpt-5.6-luna" (switch to GPT-5.6 Luna Frontier)_
   - _"/model o3-mini" (switch to o3-mini reasoning)_
 
 _Your Telegram Chat ID: \`${chatId}\`_`;
@@ -481,7 +484,7 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
         (context.settings as any)?.secrets?.telegramBotModel ||
         (context.settings as any)?.telegramBotModel ||
         process.env.TELEGRAM_AI_MODEL ||
-        'gpt-4o-mini';
+        'gpt-5.6-luna';
 
       if (!requestedModel) {
         const modelList = SUPPORTED_TELEGRAM_MODELS.map((m) => {
@@ -489,7 +492,7 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
           return `• \`${m.id}\` - *${m.name}* [${m.badge || 'AI'}]${isActive ? ' ⭐️ *(CURRENT)*' : ''}\n  _${m.description}_`;
         }).join('\n\n');
 
-        const reply = `🤖 *Telegram AI Bot Model Selection*\n\nCurrently active model: \`${currentModel}\`\n\n*Available Models:*\n${modelList}\n\n*To switch model:*\nSend \`/model <model_id>\`\n_Example:_ \`/model gpt-4o\` or \`/model o3-mini\``;
+        const reply = `🤖 *Telegram AI Bot Model Selection*\n\nCurrently active model: \`${currentModel}\`\n\n*Available Models:*\n${modelList}\n\n*To switch model:*\nSend \`/model <model_id>\`\n_Example:_ \`/model gpt-5.6-luna\` or \`/model o3-mini\``;
 
         await sendTelegramMessage(botToken, chatId, reply, messageId);
         return;
@@ -499,24 +502,17 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
         (m) => m.id.toLowerCase() === requestedModel || m.name.toLowerCase() === requestedModel
       );
 
-      if (!matchedModel) {
-        const validIds = SUPPORTED_TELEGRAM_MODELS.map((m) => `\`${m.id}\``).join(', ');
-        await sendTelegramMessage(
-          botToken,
-          chatId,
-          `⚠️ Invalid model \`${requestedModel}\`.\n\nSupported models are: ${validIds}.\n\n_Example:_ \`/model gpt-4o\``,
-          messageId
-        );
-        return;
-      }
+      const targetModelId = matchedModel ? matchedModel.id : requestedModel;
+      const targetModelName = matchedModel ? matchedModel.name : requestedModel;
+      const targetModelDesc = matchedModel ? matchedModel.description : 'Custom OpenAI Model';
 
       // Persist chosen model to Firestore global settings
-      await updateSettingSecretInFirestore('telegramBotModel', matchedModel.id);
+      await updateSettingSecretInFirestore('telegramBotModel', targetModelId);
 
       await sendTelegramMessage(
         botToken,
         chatId,
-        `✅ *Telegram AI Model Updated!*\n\nModel switched to: \`${matchedModel.id}\` (*${matchedModel.name}*).\n${matchedModel.description}.\n\nAll subsequent questions will now be processed using ${matchedModel.name}!`,
+        `✅ *Telegram AI Model Updated!*\n\nModel switched to: \`${targetModelId}\` (*${targetModelName}*).\n${targetModelDesc}.\n\nAll subsequent questions will now be processed using this model!`,
         messageId
       );
       return;
@@ -549,11 +545,12 @@ function sanitizeConfidentialMetrics(text: string): string {
       (context.settings as any)?.secrets?.telegramBotModel ||
       (context.settings as any)?.telegramBotModel ||
       process.env.TELEGRAM_AI_MODEL ||
-      'gpt-4o-mini';
+      'gpt-5.6-luna';
 
-    const activeModel = SUPPORTED_TELEGRAM_MODELS.some((m) => m.id === rawSelectedModel)
-      ? rawSelectedModel
-      : 'gpt-4o-mini';
+    const activeModel =
+      typeof rawSelectedModel === 'string' && /^[a-zA-Z0-9_.-]+$/.test(rawSelectedModel)
+        ? rawSelectedModel
+        : 'gpt-5.6-luna';
 
     // Build AI query with existing OpenAI tools
     const openai = getOpenAI();

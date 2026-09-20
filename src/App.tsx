@@ -963,6 +963,8 @@ export default function App() {
           {activeTab === 'staff_payroll' && (
             <StaffPayrollDashboard
               staffUsers={staffUsers}
+              currentStaffUser={currentActiveUser}
+              rolePermissions={rolePermissions}
             />
           )}
 

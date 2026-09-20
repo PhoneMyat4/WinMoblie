@@ -21,8 +21,10 @@ import {
   X,
   CreditCard,
   MessageSquare,
-  Cpu
+  Cpu,
+  FileDown
 } from 'lucide-react';
+import { exportGptCostComparisonPdf } from '../../utils/gptCostPdfExport';
 import { ShopSecretsConfig, CustomSecretItem, SecretCategory, ShopSettings } from '../../types';
 import { authenticatedFetch } from '../../utils/apiClient';
 
@@ -547,16 +549,32 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
                   <span className="text-[9px] text-slate-400">Can also change in chat header</span>
                 </div>
                 <select
-                  value={secrets.chatAssistantModel || 'gpt-4o-mini'}
+                  value={secrets.chatAssistantModel || 'gpt-5.6-luna'}
                   onChange={(e) => updateSecrets({ chatAssistantModel: e.target.value })}
                   className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all cursor-pointer"
                 >
-                  <option value="gpt-4o-mini">GPT-4o mini (Recommended: Fast, responsive & economical)</option>
-                  <option value="gpt-4o">GPT-4o (Omni Flagship: Multimodal vision & complex reasoning)</option>
-                  <option value="gpt-4.1-mini">GPT-4.1 mini (Next-gen fast flagship mini)</option>
-                  <option value="gpt-4.1">GPT-4.1 (Next-gen flagship comprehensive intelligence)</option>
+                  <option value="gpt-5.6-luna">GPT-5.6 Luna (Fastest & Most Cost-Efficient for Store Operations)</option>
+                  <option value="gpt-5.6-terra">GPT-5.6 Terra (Balanced Speed & Depth for POS Inventory & Sales)</option>
+                  <option value="gpt-5.6-sol">GPT-5.6 Sol (Frontier Intelligence Flagship - Deep Reasoning)</option>
+                  <option value="gpt-5.6">GPT-5.6 Frontier (Maximum Intelligence Scale)</option>
+                  <option value="gpt-5">GPT-5 Flagship (Foundational Intelligence)</option>
                   <option value="o3-mini">o3-mini (Deep reasoning for intricate POS & financial analysis)</option>
+                  <option value="gpt-4o-mini">GPT-4o mini (Legacy: Fast, responsive & economical)</option>
+                  <option value="gpt-4o">GPT-4o (Legacy Omni Flagship)</option>
                 </select>
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <input
+                    type="text"
+                    placeholder="Or type custom model ID (e.g. gpt-5.6-luna)..."
+                    value={['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6', 'gpt-5', 'o3-mini', 'gpt-4o-mini', 'gpt-4o'].includes(secrets.chatAssistantModel || '') ? '' : (secrets.chatAssistantModel || '')}
+                    onChange={(e) => {
+                      if (e.target.value.trim()) {
+                        updateSecrets({ chatAssistantModel: e.target.value.trim() });
+                      }
+                    }}
+                    className="w-full px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-slate-50 focus:bg-white text-slate-800 placeholder-slate-400 font-mono"
+                  />
+                </div>
               </div>
 
               {testStates.openai && (
@@ -568,8 +586,17 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
                 </div>
               )}
 
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-[10px] text-slate-500">Read exclusively by server backend</span>
+              <div className="flex items-center justify-between pt-1 border-t border-slate-200/80 mt-1">
+                <button
+                  type="button"
+                  onClick={() => exportGptCostComparisonPdf(formData)}
+                  className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                  title="Download full PDF cost estimate and comparison table"
+                >
+                  <FileDown className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Download GPT-5 vs GPT-4 Cost Report (PDF)</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={testOpenAiKey}
@@ -796,18 +823,34 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
                   <span className="text-[9px] text-sky-600 font-mono">Telegram /model</span>
                 </div>
                 <select
-                  value={secrets.telegramBotModel || 'gpt-4o-mini'}
+                  value={secrets.telegramBotModel || 'gpt-5.6-luna'}
                   onChange={(e) => updateSecrets({ telegramBotModel: e.target.value })}
                   className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-900 focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all cursor-pointer"
                 >
-                  <option value="gpt-4o-mini">GPT-4o mini (Recommended: Fast & Low Latency)</option>
-                  <option value="gpt-4o">GPT-4o (Omni Flagship: Advanced Store Analytics)</option>
-                  <option value="gpt-4.1-mini">GPT-4.1 mini (Next-Gen Fast Mini)</option>
-                  <option value="gpt-4.1">GPT-4.1 (Next-Gen Flagship Comprehensive)</option>
+                  <option value="gpt-5.6-luna">GPT-5.6 Luna (Fastest & Most Cost-Efficient for High-Volume Workloads)</option>
+                  <option value="gpt-5.6-terra">GPT-5.6 Terra (Balanced Speed & Depth for POS Telegram Alerts)</option>
+                  <option value="gpt-5.6-sol">GPT-5.6 Sol (Frontier Intelligence Flagship)</option>
+                  <option value="gpt-5.6">GPT-5.6 Frontier (Maximum Scale Intelligence)</option>
+                  <option value="gpt-5">GPT-5 Flagship (Foundational Intelligence)</option>
                   <option value="o3-mini">o3-mini (Deep Reasoning for Complex POS Calculations)</option>
+                  <option value="gpt-4o-mini">GPT-4o mini (Legacy: Fast & Low Latency)</option>
+                  <option value="gpt-4o">GPT-4o (Legacy Omni Flagship)</option>
                 </select>
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <input
+                    type="text"
+                    placeholder="Or type custom model ID (e.g. gpt-5.6-luna)..."
+                    value={['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6', 'gpt-5', 'o3-mini', 'gpt-4o-mini', 'gpt-4o'].includes(secrets.telegramBotModel || '') ? '' : (secrets.telegramBotModel || '')}
+                    onChange={(e) => {
+                      if (e.target.value.trim()) {
+                        updateSecrets({ telegramBotModel: e.target.value.trim() });
+                      }
+                    }}
+                    className="w-full px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-slate-50 focus:bg-white text-slate-800 placeholder-slate-400 font-mono"
+                  />
+                </div>
                 <p className="text-[10px] text-slate-400">
-                  Store staff can also check or switch models directly in Telegram using the <span className="text-sky-600 font-mono">/model</span> command.
+                  Store staff can also switch or check models directly in Telegram chat using the <span className="text-sky-600 font-mono">/model &lt;id&gt;</span> command.
                 </p>
               </div>
 
