@@ -33,7 +33,8 @@ import {
   Eye,
   Download,
   UploadCloud,
-  FileUp
+  FileUp,
+  Cpu
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Product, Sale, ExpenseRecord, PurchaseRecord, CashDrawerRecord, StockAdjustment, ShopSettings, StaffUser, StaffRole, RolePermissions, FacebookAdPostRecord } from '../../types';
@@ -52,6 +53,21 @@ import {
   exportAnnualProfitDossierPdf 
 } from '../../utils/annualProfitPdfExport';
 import { exportReportToPdf } from '../../utils/pdfExportUtils';
+
+export interface CopilotModelOption {
+  id: string;
+  name: string;
+  badge: string;
+  description: string;
+}
+
+export const COPILOT_MODELS: CopilotModelOption[] = [
+  { id: 'gpt-4o-mini', name: 'GPT-4o mini', badge: 'Fast & Light', description: 'Recommended default: high speed, responsive' },
+  { id: 'gpt-4o', name: 'GPT-4o', badge: 'Flagship Omni', description: 'Multimodal vision, complex reasoning & intelligence' },
+  { id: 'gpt-4.1-mini', name: 'GPT-4.1 mini', badge: 'Fast Mini', description: 'Next-generation high-efficiency flagship' },
+  { id: 'gpt-4.1', name: 'GPT-4.1', badge: 'Flagship', description: 'Next-gen comprehensive store intelligence' },
+  { id: 'o3-mini', name: 'o3-mini', badge: 'Deep Reasoning', description: 'Intricate POS calculation & inventory auditing' },
+];
 
 interface AiChatWidgetProps {
   products: Product[];
@@ -151,6 +167,28 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const [copiedImei, setCopiedImei] = useState<string | null>(null);
   const [copiedCaption, setCopiedCaption] = useState<string | null>(null);
   const [apiKeyWarning, setApiKeyWarning] = useState<string | null>(null);
+
+  // Model Selection State for In-App Copilot
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    try {
+      const cached = localStorage.getItem('mobileshop_copilot_model');
+      if (cached && COPILOT_MODELS.some((m) => m.id === cached)) return cached;
+    } catch {}
+    return settings?.secrets?.chatAssistantModel || 'gpt-4o-mini';
+  });
+  const [showModelMenu, setShowModelMenu] = useState(false);
+
+  // Synchronize with settings if default changes and user hasn't set manual override
+  useEffect(() => {
+    if (settings?.secrets?.chatAssistantModel) {
+      try {
+        const cached = localStorage.getItem('mobileshop_copilot_model');
+        if (!cached) {
+          setSelectedModel(settings.secrets.chatAssistantModel);
+        }
+      } catch {}
+    }
+  }, [settings?.secrets?.chatAssistantModel]);
 
   // File and Photo Attachments State
   const [attachedFiles, setAttachedFiles] = useState<ChatAttachment[]>([]);
@@ -522,6 +560,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
         body: JSON.stringify({
           message: userText,
           history: historyPayload,
+          model: selectedModel,
           context: {
             ...posContext,
             settings: safeSettings,
@@ -694,12 +733,67 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 border-2 border-slate-900 rounded-full" />
           </div>
           <div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 relative">
               <span className="font-semibold text-sm tracking-tight text-white">Aura Copilot</span>
-              <span className="text-[10px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 rounded-full font-medium flex items-center gap-1">
-                <Bot className="w-2.5 h-2.5 text-emerald-300" />
-                GPT-4o-mini Tools
-              </span>
+              
+              {/* Interactive AI Model Switcher */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowModelMenu(!showModelMenu)}
+                  className="text-[10px] px-2 py-0.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-200 hover:text-white border border-indigo-400/40 rounded-full font-medium flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+                  title="Click to switch AI Model for Copilot"
+                >
+                  <Cpu className="w-2.5 h-2.5 text-indigo-300" />
+                  <span>{COPILOT_MODELS.find((m) => m.id === selectedModel)?.name || selectedModel}</span>
+                  <ChevronDown className={`w-2.5 h-2.5 transition-transform duration-200 ${showModelMenu ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Model Dropdown Menu */}
+                {showModelMenu && (
+                  <div className="absolute left-0 top-full mt-2 w-72 bg-slate-900/95 backdrop-blur-xl border border-indigo-500/30 rounded-xl shadow-2xl z-50 p-2 space-y-1 text-left">
+                    <div className="px-2 py-1 flex items-center justify-between border-b border-slate-800 pb-1.5 mb-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Select AI Model</span>
+                      <span className="text-[9px] text-indigo-400 font-mono">Active Model</span>
+                    </div>
+
+                    {COPILOT_MODELS.map((m) => {
+                      const isActive = m.id === selectedModel;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedModel(m.id);
+                            setShowModelMenu(false);
+                            try {
+                              localStorage.setItem('mobileshop_copilot_model', m.id);
+                            } catch {}
+                          }}
+                          className={`w-full text-left p-2 rounded-lg transition-all flex items-start justify-between gap-2 cursor-pointer ${
+                            isActive
+                              ? 'bg-indigo-600/30 border border-indigo-500/50 text-white'
+                              : 'hover:bg-white/5 text-slate-300 hover:text-white border border-transparent'
+                          }`}
+                        >
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-semibold">{m.name}</span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                                isActive ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'
+                              }`}>
+                                {m.badge}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 leading-snug">{m.description}</p>
+                          </div>
+                          {isActive && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
             <p className="text-[11px] text-indigo-200/80 leading-none mt-0.5">Voice & Function Calling Enabled</p>
           </div>

@@ -160,3 +160,27 @@ export async function persistProductToFirestore(product: Product): Promise<boole
     return false;
   }
 }
+
+/**
+ * Updates a secret or configuration field in the global settings document in Firestore.
+ */
+export async function updateSettingSecretInFirestore(key: string, value: any): Promise<boolean> {
+  try {
+    await ensureAuth();
+    await setDoc(
+      doc(db, 'settings', 'global'),
+      {
+        secrets: {
+          [key]: value,
+        },
+      },
+      { merge: true }
+    );
+    console.log(`[FirestoreService] Successfully updated setting secrets.${key} in Firestore.`);
+    return true;
+  } catch (err: any) {
+    console.error(`[FirestoreService] Failed to update setting secret in Firestore:`, err.message);
+    return false;
+  }
+}
+

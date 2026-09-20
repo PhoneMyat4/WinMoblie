@@ -12,9 +12,25 @@ import {
 import {
   fetchPosDataContext,
   persistProductToFirestore,
+  updateSettingSecretInFirestore,
 } from './posFirestoreService';
 import { executePostProductAdToFacebook } from './facebookPostService';
 import type { ShopSettings } from '../src/types';
+
+export interface TelegramAiModelOption {
+  id: string;
+  name: string;
+  description: string;
+  badge?: string;
+}
+
+export const SUPPORTED_TELEGRAM_MODELS: TelegramAiModelOption[] = [
+  { id: 'gpt-4o-mini', name: 'GPT-4o mini', description: 'Fast, highly responsive, cost-efficient (Default)', badge: 'Recommended' },
+  { id: 'gpt-4o', name: 'GPT-4o', description: 'Omni Flagship with advanced reasoning & visual understanding', badge: 'Flagship' },
+  { id: 'gpt-4.1-mini', name: 'GPT-4.1 mini', description: 'Next-gen high-efficiency flagship mini model', badge: 'Fast' },
+  { id: 'gpt-4.1', name: 'GPT-4.1', description: 'Next-generation flagship comprehensive intelligence', badge: 'Deep' },
+  { id: 'o3-mini', name: 'o3-mini', description: 'Specialized deep reasoning model for complex inventory & financial analysis', badge: 'Reasoning' },
+];
 
 /**
  * Retrieves the configured Telegram Bot Token from environment or settings.
@@ -418,9 +434,17 @@ export async function handleTelegramWebhook(
 
     // 3. Handle /start and /help commands
     if (userText === '/start' || userText === '/help') {
+      const activeModelId =
+        (context.settings as any)?.secrets?.telegramBotModel ||
+        (context.settings as any)?.telegramBotModel ||
+        process.env.TELEGRAM_AI_MODEL ||
+        'gpt-4o-mini';
+
       const welcomeMessage = `👋 *Welcome to Golden Star Mobile POS Assistant, ${senderName}!*
 
 I am your direct, real-time AI store manager connected to your live Firestore POS database. You can chat with me in natural language to query sales, check stock, or manage inventory.
+
+🤖 *Active AI Model:* \`${activeModelId}\` (Change anytime with \`/model\`)
 
 📱 *Things you can ask me:*
 • 📊 *Sales & Register Reports:*
@@ -437,10 +461,64 @@ I am your direct, real-time AI store manager connected to your live Firestore PO
   - _"Add 2 units of Redmi Note 13 Black with IMEI..."_
 • 🔍 *IMEI Lifecycle:*
   - _"Lookup IMEI 861234567890123 history"_
+• ⚙️ *Model Configuration:*
+  - _"/model" (view current model and list available options)_
+  - _"/model gpt-4o" (switch to GPT-4o Flagship)_
+  - _"/model o3-mini" (switch to o3-mini reasoning)_
 
 _Your Telegram Chat ID: \`${chatId}\`_`;
 
       await sendTelegramMessage(botToken, chatId, welcomeMessage, messageId);
+      return;
+    }
+
+    // 3b. Handle /model command for checking or switching models
+    if (userText.startsWith('/model')) {
+      const parts = userText.split(/\s+/);
+      const requestedModel = parts[1]?.toLowerCase()?.trim();
+
+      const currentModel =
+        (context.settings as any)?.secrets?.telegramBotModel ||
+        (context.settings as any)?.telegramBotModel ||
+        process.env.TELEGRAM_AI_MODEL ||
+        'gpt-4o-mini';
+
+      if (!requestedModel) {
+        const modelList = SUPPORTED_TELEGRAM_MODELS.map((m) => {
+          const isActive = m.id.toLowerCase() === currentModel.toLowerCase();
+          return `• \`${m.id}\` - *${m.name}* [${m.badge || 'AI'}]${isActive ? ' ⭐️ *(CURRENT)*' : ''}\n  _${m.description}_`;
+        }).join('\n\n');
+
+        const reply = `🤖 *Telegram AI Bot Model Selection*\n\nCurrently active model: \`${currentModel}\`\n\n*Available Models:*\n${modelList}\n\n*To switch model:*\nSend \`/model <model_id>\`\n_Example:_ \`/model gpt-4o\` or \`/model o3-mini\``;
+
+        await sendTelegramMessage(botToken, chatId, reply, messageId);
+        return;
+      }
+
+      const matchedModel = SUPPORTED_TELEGRAM_MODELS.find(
+        (m) => m.id.toLowerCase() === requestedModel || m.name.toLowerCase() === requestedModel
+      );
+
+      if (!matchedModel) {
+        const validIds = SUPPORTED_TELEGRAM_MODELS.map((m) => `\`${m.id}\``).join(', ');
+        await sendTelegramMessage(
+          botToken,
+          chatId,
+          `⚠️ Invalid model \`${requestedModel}\`.\n\nSupported models are: ${validIds}.\n\n_Example:_ \`/model gpt-4o\``,
+          messageId
+        );
+        return;
+      }
+
+      // Persist chosen model to Firestore global settings
+      await updateSettingSecretInFirestore('telegramBotModel', matchedModel.id);
+
+      await sendTelegramMessage(
+        botToken,
+        chatId,
+        `✅ *Telegram AI Model Updated!*\n\nModel switched to: \`${matchedModel.id}\` (*${matchedModel.name}*).\n${matchedModel.description}.\n\nAll subsequent questions will now be processed using ${matchedModel.name}!`,
+        messageId
+      );
       return;
     }
 
@@ -466,7 +544,18 @@ function sanitizeConfidentialMetrics(text: string): string {
     .trim();
 }
 
-    // 5. Build AI query with existing OpenAI tools
+    // 5. Determine active model from settings or env
+    const rawSelectedModel =
+      (context.settings as any)?.secrets?.telegramBotModel ||
+      (context.settings as any)?.telegramBotModel ||
+      process.env.TELEGRAM_AI_MODEL ||
+      'gpt-4o-mini';
+
+    const activeModel = SUPPORTED_TELEGRAM_MODELS.some((m) => m.id === rawSelectedModel)
+      ? rawSelectedModel
+      : 'gpt-4o-mini';
+
+    // Build AI query with existing OpenAI tools
     const openai = getOpenAI();
 
     const formattedMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -499,9 +588,9 @@ TELEGRAM CHAT SPECIFIC INSTRUCTIONS & STRICT SAFEGUARDS:
       },
     ];
 
-    // Initial tool calling pass with OpenAI
+    // Initial tool calling pass with OpenAI using selected model
     const aiResponse = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: activeModel,
       messages: formattedMessages,
       tools: openAiAssistantTools,
       tool_choice: 'auto',
@@ -577,7 +666,7 @@ TELEGRAM CHAT SPECIFIC INSTRUCTIONS & STRICT SAFEGUARDS:
         ];
 
         const secondResponse = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
+          model: activeModel,
           messages: followUpMessages,
           tools: openAiAssistantTools,
           temperature: 0.3,

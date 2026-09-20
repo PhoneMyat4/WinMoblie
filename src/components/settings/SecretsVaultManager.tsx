@@ -20,7 +20,8 @@ import {
   HelpCircle,
   X,
   CreditCard,
-  MessageSquare
+  MessageSquare,
+  Cpu
 } from 'lucide-react';
 import { ShopSecretsConfig, CustomSecretItem, SecretCategory, ShopSettings } from '../../types';
 import { authenticatedFetch } from '../../utils/apiClient';
@@ -177,7 +178,9 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
       const res = await authenticatedFetch('/api/secrets/test-openai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          model: secrets.chatAssistantModel || 'gpt-4o-mini',
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -186,7 +189,7 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
           openai: {
             loading: false,
             success: true,
-            message: `OpenAI key verified from server .env! Model: ${data.model || 'gpt-4o-mini'} (${data.latencyMs || 120}ms)`,
+            message: `OpenAI key verified from server .env! Model: ${data.model || secrets.chatAssistantModel || 'gpt-4o-mini'} (${data.latencyMs || 120}ms)`,
           },
         }));
       } else {
@@ -291,6 +294,7 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
         body: JSON.stringify({
           botToken: secrets.telegramBotToken?.trim(),
           chatId: secrets.telegramChatId?.trim(),
+          model: secrets.telegramBotModel || 'gpt-4o-mini',
         }),
       });
       const data = await res.json();
@@ -533,6 +537,28 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
                 </span>
               </div>
 
+              {/* In-App POS Copilot AI Model Selector */}
+              <div className="pt-1 space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                    <Cpu className="w-3 h-3 text-indigo-600" />
+                    <span>In-App Copilot AI Model</span>
+                  </label>
+                  <span className="text-[9px] text-slate-400">Can also change in chat header</span>
+                </div>
+                <select
+                  value={secrets.chatAssistantModel || 'gpt-4o-mini'}
+                  onChange={(e) => updateSecrets({ chatAssistantModel: e.target.value })}
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all cursor-pointer"
+                >
+                  <option value="gpt-4o-mini">GPT-4o mini (Recommended: Fast, responsive & economical)</option>
+                  <option value="gpt-4o">GPT-4o (Omni Flagship: Multimodal vision & complex reasoning)</option>
+                  <option value="gpt-4.1-mini">GPT-4.1 mini (Next-gen fast flagship mini)</option>
+                  <option value="gpt-4.1">GPT-4.1 (Next-gen flagship comprehensive intelligence)</option>
+                  <option value="o3-mini">o3-mini (Deep reasoning for intricate POS & financial analysis)</option>
+                </select>
+              </div>
+
               {testStates.openai && (
                 <div className={`p-2 rounded-lg text-[11px] flex items-center gap-1.5 ${
                   testStates.openai.success ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
@@ -758,6 +784,31 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
                   onChange={(e) => updateSecrets({ telegramChatId: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white font-mono text-xs text-slate-900"
                 />
+              </div>
+
+              {/* Telegram Bot AI Model Selector */}
+              <div className="pt-1 space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                    <Cpu className="w-3 h-3 text-sky-600" />
+                    <span>Telegram Bot AI Model</span>
+                  </label>
+                  <span className="text-[9px] text-sky-600 font-mono">Telegram /model</span>
+                </div>
+                <select
+                  value={secrets.telegramBotModel || 'gpt-4o-mini'}
+                  onChange={(e) => updateSecrets({ telegramBotModel: e.target.value })}
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-900 focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all cursor-pointer"
+                >
+                  <option value="gpt-4o-mini">GPT-4o mini (Recommended: Fast & Low Latency)</option>
+                  <option value="gpt-4o">GPT-4o (Omni Flagship: Advanced Store Analytics)</option>
+                  <option value="gpt-4.1-mini">GPT-4.1 mini (Next-Gen Fast Mini)</option>
+                  <option value="gpt-4.1">GPT-4.1 (Next-Gen Flagship Comprehensive)</option>
+                  <option value="o3-mini">o3-mini (Deep Reasoning for Complex POS Calculations)</option>
+                </select>
+                <p className="text-[10px] text-slate-400">
+                  Store staff can also check or switch models directly in Telegram using the <span className="text-sky-600 font-mono">/model</span> command.
+                </p>
               </div>
 
               {testStates.telegram && (

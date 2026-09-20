@@ -605,7 +605,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
   // Interactive AI Chatbot Assistant with OpenAI Tool Calling (Function Calling)
   app.post('/api/chat-assistant', async (req, res) => {
     try {
-      const { message, history = [], context = {}, attachments = [] } = req.body;
+      const { message, history = [], context = {}, attachments = [], model } = req.body;
 
       const userText = typeof message === 'string' ? message.trim() : '';
       if (!userText && (!attachments || attachments.length === 0)) {
@@ -624,6 +624,15 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
           error: 'OPENAI_API_KEY is not configured in the server environment (.env). Please configure your server .env to enable the AI Copilot.',
         });
       }
+
+      // Determine active model from request, settings, or server environment
+      const requestedModel = typeof model === 'string' ? model.trim() : '';
+      const settingsModel = (context?.settings as any)?.secrets?.chatAssistantModel;
+      const serverEnvModel = process.env.CHAT_ASSISTANT_MODEL;
+      const candidateModel = requestedModel || settingsModel || serverEnvModel || 'gpt-4o-mini';
+
+      const supportedModels = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1', 'o3-mini', 'o1-mini'];
+      const activeModel = supportedModels.includes(candidateModel) ? candidateModel : 'gpt-4o-mini';
 
       const openai = getOpenAI();
 
@@ -709,9 +718,9 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
         });
       }
 
-      // Step 1: Initial call with OpenAI Tool Declarations using gpt-4o-mini
+      // Step 1: Initial call with OpenAI Tool Declarations using selected model
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: activeModel,
         messages: formattedMessages,
         tools: openAiAssistantTools,
         tool_choice: 'auto',
@@ -798,7 +807,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
           ];
 
           const secondResponse = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: activeModel,
             messages: followUpMessages,
             tools: openAiAssistantTools,
             temperature: 0.3,
@@ -809,6 +818,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
           return res.json({
             success: true,
             reply: replyText,
+            modelUsed: activeModel,
             toolExecuted: {
               name: functionName,
               args: parsedArgs,
@@ -829,6 +839,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
       return res.json({
         success: true,
         reply: replyText,
+        modelUsed: activeModel,
         toolExecuted: null,
         createdProduct: null,
       });
@@ -1638,23 +1649,25 @@ Output a JSON response with:
   // Test OpenAI API Key endpoint (exclusively reads from server process.env)
   app.post('/api/secrets/test-openai', async (req, res) => {
     try {
+      const { model } = req.body;
       const targetKey = process.env.OPENAI_API_KEY;
       if (!targetKey) {
         return res.status(400).json({ success: false, error: 'No OPENAI_API_KEY configured in server environment (.env).' });
       }
+      const testModel = model || 'gpt-4o-mini';
       const client = new OpenAI({ apiKey: targetKey });
       const startTime = Date.now();
-      const response = await client.responses.create({
-        model: 'gpt-4o-mini',
-        input: 'Ping',
-        max_output_tokens: 10,
+      const response = await client.chat.completions.create({
+        model: testModel,
+        messages: [{ role: 'user', content: 'Ping' }],
+        max_tokens: 10,
       });
       const latencyMs = Date.now() - startTime;
       return res.json({
         success: true,
         latencyMs,
-        model: response.model || 'gpt-4o-mini',
-        message: 'OpenAI Responses API validated successfully from server environment!',
+        model: response.model || testModel,
+        message: 'OpenAI API validated successfully from server environment!',
       });
     } catch (err: any) {
       return res.status(400).json({
@@ -1702,9 +1715,10 @@ Output a JSON response with:
   // Test Telegram Bot integration endpoint
   app.post('/api/secrets/test-telegram', async (req, res) => {
     try {
-      const { botToken, chatId } = req.body;
+      const { botToken, chatId, model } = req.body;
       const targetToken = botToken || process.env.TELEGRAM_BOT_TOKEN;
       const rawTargetChat = chatId || process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_ALLOWED_CHAT_IDS;
+      const configuredModel = model || process.env.TELEGRAM_AI_MODEL || 'gpt-4o-mini';
 
       if (!targetToken || !rawTargetChat) {
         return res.status(400).json({
@@ -1736,7 +1750,7 @@ Output a JSON response with:
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               chat_id: singleChatId,
-              text: `📱 *Mobile Shop POS & Inventory Management*\n\n✅ *Secrets Vault Test Alert*\nYour Telegram notification bot has been successfully configured and verified!\n\n_Sent at: ${new Date().toLocaleString()}_`,
+              text: `📱 *Mobile Shop POS & Inventory Management*\n\n✅ *Secrets Vault Test Alert*\nYour Telegram notification bot has been successfully configured and verified!\n🤖 *Configured AI Model:* \`${configuredModel}\`\n\n_Sent at: ${new Date().toLocaleString()}_`,
               parse_mode: 'Markdown',
             }),
           });
