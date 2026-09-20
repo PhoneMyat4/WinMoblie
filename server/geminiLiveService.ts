@@ -10,8 +10,8 @@ import {
   executeGeneratePdfReport 
 } from './aiAssistant';
 
-// Live Tool Declarations for gemini-3.8-live
-const geminiLiveTools = [
+// Live & Chat Tool Declarations for Google Gemini
+export const geminiLiveTools = [
   {
     name: 'query_pos_reports',
     description: 'Query official POS and inventory reports: Z-Report (end-of-day register balancing & cash drawer reconciliation), Stock Aging (inventory age brackets), Dead Stock (0-velocity unsold stock), IMEI Lifecycle (individual device history timeline), and Category Sales breakdown.',

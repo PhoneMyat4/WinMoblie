@@ -5,7 +5,7 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import OpenAI from 'openai';
-import { setupGeminiLiveWebSocket } from './server/geminiLiveService';
+import { setupGeminiLiveWebSocket, geminiLiveTools } from './server/geminiLiveService';
 import { 
   openAiAssistantTools, 
   AI_SYSTEM_INSTRUCTION, 
@@ -630,49 +630,51 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
         });
       }
 
-      // Exclusively read OpenAI API key from server environment
-      const targetOpenAiKey = process.env.OPENAI_API_KEY;
-      if (!targetOpenAiKey) {
+      // Check available AI API keys from environment
+      const hasOpenAiKey = Boolean(process.env.OPENAI_API_KEY);
+      const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY);
+
+      if (!hasOpenAiKey && !hasGeminiKey) {
         return res.status(400).json({
           success: false,
           missingApiKey: true,
-          error: 'OPENAI_API_KEY is not configured in the server environment (.env). Please configure your server .env to enable the AI Copilot.',
+          error: 'Neither GEMINI_API_KEY nor OPENAI_API_KEY is configured in the server environment (.env). Please configure at least one API key to enable AI Copilot.',
         });
       }
 
-      // Determine active model from request, settings, or server environment
+      // Determine requested model and provider
       const requestedModel = typeof model === 'string' ? model.trim() : '';
       const settingsModel = (context?.settings as any)?.secrets?.chatAssistantModel;
       const serverEnvModel = process.env.CHAT_ASSISTANT_MODEL;
-      const candidateModel = requestedModel || settingsModel || serverEnvModel || 'gpt-5.6-luna';
+      const rawCandidate = (requestedModel || settingsModel || serverEnvModel || '').trim();
 
-      // Accept any valid model string (including gpt-5.6-luna, gpt-5.6-terra, gpt-5.6, gpt-5, o3-mini, etc.)
-      const activeModel =
-        typeof candidateModel === 'string' && /^[a-zA-Z0-9_.-]+$/.test(candidateModel)
-          ? candidateModel
-          : 'gpt-5.6-luna';
+      let useGemini = false;
+      let activeModel = '';
 
-      const openai = getOpenAI();
-
-      // Format conversation history for OpenAI Chat Completions API
-      const formattedMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        {
-          role: 'system',
-          content: AI_SYSTEM_INSTRUCTION,
-        },
-      ];
-
-      // Add prior turns
-      for (const item of history) {
-        if (!item || !item.content) continue;
-        const role: 'user' | 'assistant' = item.role === 'user' ? 'user' : 'assistant';
-        formattedMessages.push({
-          role,
-          content: item.content,
-        });
+      if (rawCandidate.toLowerCase().includes('gemini')) {
+        // User requested Google Gemini
+        if (hasGeminiKey) {
+          useGemini = true;
+          activeModel = 'gemini-3.8-flash';
+        } else {
+          // Graceful fallback to OpenAI if Gemini key is missing
+          useGemini = false;
+          activeModel = 'gpt-5.6-luna';
+        }
+      } else if (hasOpenAiKey) {
+        useGemini = false;
+        activeModel = /^[a-zA-Z0-9_.-]+$/.test(rawCandidate) ? rawCandidate : 'gpt-5.6-luna';
+        // Critical safeguard: Never pass a Gemini model name to OpenAI
+        if (activeModel.toLowerCase().includes('gemini')) {
+          activeModel = 'gpt-5.6-luna';
+        }
+      } else {
+        // Only Gemini key exists
+        useGemini = true;
+        activeModel = 'gemini-3.8-flash';
       }
 
-      // Prepare user prompt and attachments for multimodal gpt-4o-mini
+      // Prepare user prompt and attachments for multimodal analysis
       const imageAttachments = (attachments || []).filter((a: any) => 
         a.isImage || 
         (a.type && a.type.startsWith('image/')) || 
@@ -698,6 +700,218 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
         }).join('');
 
         promptWithFiles = `${promptWithFiles || 'Please inspect and analyze the attached document(s).'}${fileSections}`.trim();
+      }
+
+      // Shared tool execution runner
+      const runToolExecution = async (functionName: string, parsedArgs: any) => {
+        let executionResult: any = null;
+        let createdProduct: any = null;
+        let updatedProduct: any = null;
+        let facebookPost: any = null;
+        let requiresClientPdfGeneration = false;
+        let pdfReportConfig: any = null;
+
+        if (functionName === 'query_pos_reports') {
+          executionResult = executeQueryPosReports(parsedArgs, context);
+        } else if (functionName === 'generate_pdf_report') {
+          const pdfResult = executeGeneratePdfReport(parsedArgs, context);
+          executionResult = pdfResult;
+          requiresClientPdfGeneration = true;
+          pdfReportConfig = {
+            reportType: parsedArgs.report_type || pdfResult.reportType,
+            date: parsedArgs.date || pdfResult.date,
+            year: parsedArgs.year || pdfResult.year,
+            dateRange: parsedArgs.date_range,
+            imei: parsedArgs.imei,
+            title: parsedArgs.title,
+            reportName: pdfResult.reportName,
+            filename: pdfResult.filename,
+            data: pdfResult.data,
+            exportPdfOptions: pdfResult.exportPdfOptions || null,
+          };
+        } else if (functionName === 'add_inventory_item') {
+          const mutation = executeAddInventoryItem(parsedArgs, context);
+          executionResult = mutation;
+          if (mutation.createdProduct) {
+            createdProduct = mutation.createdProduct;
+          }
+        } else if (functionName === 'update_product_price') {
+          const updateResult = executeUpdateProductPrice(parsedArgs, context);
+          executionResult = updateResult;
+          if (updateResult.updatedProduct) {
+            updatedProduct = updateResult.updatedProduct;
+          }
+        } else if (functionName === 'query_inventory_products') {
+          executionResult = executeQueryInventoryProducts(parsedArgs, context);
+        } else if (functionName === 'post_product_ad_to_facebook') {
+          let fbOpenAi: any = null;
+          try { fbOpenAi = getOpenAI(); } catch {}
+          const fbResult = await executePostProductAdToFacebook(parsedArgs, context, fbOpenAi, getGenAI);
+          executionResult = fbResult;
+          if (fbResult.facebookPost) {
+            facebookPost = fbResult.facebookPost;
+          }
+        } else {
+          executionResult = { error: `Tool ${functionName} is not recognized.` };
+        }
+
+        return {
+          executionResult,
+          createdProduct,
+          updatedProduct,
+          facebookPost,
+          requiresClientPdfGeneration,
+          pdfReportConfig,
+        };
+      };
+
+      // PROVIDER 1: Google Gemini (gemini-3.8-flash)
+      if (useGemini) {
+        try {
+          const ai = getGenAI();
+          const geminiContents: any[] = [];
+
+          for (const item of history) {
+            if (!item || !item.content) continue;
+            geminiContents.push({
+              role: item.role === 'assistant' ? 'model' : 'user',
+              parts: [{ text: item.content }],
+            });
+          }
+
+          const currentParts: any[] = [];
+          if (promptWithFiles) {
+            currentParts.push({ text: promptWithFiles });
+          }
+
+          for (const img of imageAttachments) {
+            const rawUrl = img.data || img.url || '';
+            if (rawUrl) {
+              let mimeType = img.type || 'image/jpeg';
+              let base64Data = rawUrl;
+              if (rawUrl.includes('base64,')) {
+                const split = rawUrl.split('base64,');
+                base64Data = split[1];
+                const match = rawUrl.match(/data:([^;]+);/);
+                if (match) mimeType = match[1];
+              }
+              currentParts.push({
+                inlineData: {
+                  mimeType,
+                  data: base64Data,
+                },
+              });
+            }
+          }
+
+          geminiContents.push({
+            role: 'user',
+            parts: currentParts.length > 0 ? currentParts : [{ text: 'Hello' }],
+          });
+
+          const geminiResponse = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: geminiContents,
+            config: {
+              systemInstruction: AI_SYSTEM_INSTRUCTION,
+              tools: [{ functionDeclarations: geminiLiveTools }],
+              temperature: 0.3,
+            },
+          });
+
+          const functionCalls = geminiResponse.functionCalls;
+          if (functionCalls && functionCalls.length > 0) {
+            const funcCall = functionCalls[0];
+            const functionName = funcCall.name;
+            const parsedArgs = (funcCall.args as any) || {};
+
+            console.log(`[AI Assistant] Executing Gemini Tool Call: ${functionName} with args:`, parsedArgs);
+            const toolExec = await runToolExecution(functionName, parsedArgs);
+
+            // Follow-up synthesis with tool result
+            const followUpContents = [
+              ...geminiContents,
+              {
+                role: 'model',
+                parts: [{ functionCall: funcCall }],
+              },
+              {
+                role: 'user',
+                parts: [{
+                  functionResponse: {
+                    name: functionName,
+                    response: { result: toolExec.executionResult },
+                  },
+                }],
+              },
+            ];
+
+            const secondResponse = await ai.models.generateContent({
+              model: 'gemini-3.8-flash',
+              contents: followUpContents,
+              config: {
+                systemInstruction: AI_SYSTEM_INSTRUCTION,
+                temperature: 0.3,
+              },
+            });
+
+            const replyText = secondResponse.text || 'Action executed successfully.';
+            return res.json({
+              success: true,
+              reply: replyText,
+              modelUsed: 'gemini-3.8-flash',
+              toolExecuted: {
+                name: functionName,
+                args: parsedArgs,
+                result: toolExec.executionResult,
+              },
+              createdProduct: toolExec.createdProduct || null,
+              updatedProduct: toolExec.updatedProduct || null,
+              facebookPost: toolExec.facebookPost || null,
+              requiresClientPdfGeneration: toolExec.requiresClientPdfGeneration,
+              pdfReportConfig: toolExec.pdfReportConfig || null,
+            });
+          }
+
+          const replyText = geminiResponse.text || "I'm here to assist with POS reports and inventory intake. How can I help you?";
+          return res.json({
+            success: true,
+            reply: replyText,
+            modelUsed: 'gemini-3.8-flash',
+            toolExecuted: null,
+            createdProduct: null,
+          });
+        } catch (geminiErr: any) {
+          console.warn('[AI Assistant] Gemini error, checking OpenAI fallback:', geminiErr?.message);
+          if (hasOpenAiKey) {
+            console.log('[AI Assistant] Switching to OpenAI fallback...');
+            useGemini = false;
+            activeModel = 'gpt-5.6-luna';
+          } else {
+            throw geminiErr;
+          }
+        }
+      }
+
+      // PROVIDER 2: OpenAI (with GPT-5.6, GPT-4o, etc.)
+      const openai = getOpenAI();
+
+      // Format conversation history for OpenAI Chat Completions API
+      const formattedMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        {
+          role: 'system',
+          content: AI_SYSTEM_INSTRUCTION,
+        },
+      ];
+
+      // Add prior turns
+      for (const item of history) {
+        if (!item || !item.content) continue;
+        const role: 'user' | 'assistant' = item.role === 'user' ? 'user' : 'assistant';
+        formattedMessages.push({
+          role,
+          content: item.content,
+        });
       }
 
       // Add current user prompt with vision support
@@ -737,13 +951,31 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
       }
 
       // Step 1: Initial call with OpenAI Tool Declarations using selected model
-      const response = await openai.chat.completions.create({
-        model: activeModel,
-        messages: formattedMessages,
-        tools: openAiAssistantTools,
-        tool_choice: 'auto',
-        temperature: 0.3,
-      });
+      let response: any = null;
+      try {
+        response = await openai.chat.completions.create({
+          model: activeModel,
+          messages: formattedMessages,
+          tools: openAiAssistantTools,
+          tool_choice: 'auto',
+          temperature: 0.3,
+        });
+      } catch (openAiCallErr: any) {
+        // If the model does not exist or access denied, fall back to gpt-4o-mini
+        if (openAiCallErr?.status === 404 || openAiCallErr?.message?.includes('does not exist')) {
+          console.warn(`[AI Assistant] Model ${activeModel} not found on OpenAI, falling back to gpt-4o-mini...`);
+          activeModel = 'gpt-4o-mini';
+          response = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: formattedMessages,
+            tools: openAiAssistantTools,
+            tool_choice: 'auto',
+            temperature: 0.3,
+          });
+        } else {
+          throw openAiCallErr;
+        }
+      }
 
       const choice = response.choices?.[0];
       const assistantMessage = choice?.message;
@@ -763,55 +995,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
           }
 
           console.log(`[AI Assistant] Executing OpenAI Function Call: ${functionName} with args:`, parsedArgs);
-
-          let executionResult: any = null;
-          let createdProduct: any = null;
-          let updatedProduct: any = null;
-          let facebookPost: any = null;
-          let requiresClientPdfGeneration = false;
-          let pdfReportConfig: any = null;
-
-          if (functionName === 'query_pos_reports') {
-            executionResult = executeQueryPosReports(parsedArgs, context);
-          } else if (functionName === 'generate_pdf_report') {
-            const pdfResult = executeGeneratePdfReport(parsedArgs, context);
-            executionResult = pdfResult;
-            requiresClientPdfGeneration = true;
-            pdfReportConfig = {
-              reportType: parsedArgs.report_type || pdfResult.reportType,
-              date: parsedArgs.date || pdfResult.date,
-              year: parsedArgs.year || pdfResult.year,
-              dateRange: parsedArgs.date_range,
-              imei: parsedArgs.imei,
-              title: parsedArgs.title,
-              reportName: pdfResult.reportName,
-              filename: pdfResult.filename,
-              data: pdfResult.data,
-              exportPdfOptions: pdfResult.exportPdfOptions || null,
-            };
-          } else if (functionName === 'add_inventory_item') {
-            const mutation = executeAddInventoryItem(parsedArgs, context);
-            executionResult = mutation;
-            if (mutation.createdProduct) {
-              createdProduct = mutation.createdProduct;
-            }
-          } else if (functionName === 'update_product_price') {
-            const updateResult = executeUpdateProductPrice(parsedArgs, context);
-            executionResult = updateResult;
-            if (updateResult.updatedProduct) {
-              updatedProduct = updateResult.updatedProduct;
-            }
-          } else if (functionName === 'query_inventory_products') {
-            executionResult = executeQueryInventoryProducts(parsedArgs, context);
-          } else if (functionName === 'post_product_ad_to_facebook') {
-            const fbResult = await executePostProductAdToFacebook(parsedArgs, context, openai, getGenAI);
-            executionResult = fbResult;
-            if (fbResult.facebookPost) {
-              facebookPost = fbResult.facebookPost;
-            }
-          } else {
-            executionResult = { error: `Tool ${functionName} is not recognized.` };
-          }
+          const toolExec = await runToolExecution(functionName, parsedArgs);
 
           // Step 2: Feed assistant tool call and execution output back to OpenAI for final natural language synthesis
           const followUpMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -820,7 +1004,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
             {
               role: 'tool',
               tool_call_id: toolCall.id,
-              content: JSON.stringify(executionResult),
+              content: JSON.stringify(toolExec.executionResult),
             },
           ];
 
@@ -840,13 +1024,13 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
             toolExecuted: {
               name: functionName,
               args: parsedArgs,
-              result: executionResult,
+              result: toolExec.executionResult,
             },
-            createdProduct: createdProduct || null,
-            updatedProduct: updatedProduct || null,
-            facebookPost: facebookPost || null,
-            requiresClientPdfGeneration,
-            pdfReportConfig: pdfReportConfig || null,
+            createdProduct: toolExec.createdProduct || null,
+            updatedProduct: toolExec.updatedProduct || null,
+            facebookPost: toolExec.facebookPost || null,
+            requiresClientPdfGeneration: toolExec.requiresClientPdfGeneration,
+            pdfReportConfig: toolExec.pdfReportConfig || null,
           });
         }
       }
@@ -870,18 +1054,18 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
       let isInvalidKey = false;
       let isQuotaExceeded = false;
 
-      if (!process.env.OPENAI_API_KEY || error?.message?.includes('OPENAI_API_KEY')) {
+      if (error?.message?.includes('API_KEY is not configured') || error?.message?.includes('GEMINI_API_KEY') || error?.message?.includes('OPENAI_API_KEY')) {
         statusCode = 400;
         isApiKeyMissing = true;
-        userFriendlyError = 'OPENAI_API_KEY environment variable is not configured. Please set your OpenAI API key in the environment settings.';
-      } else if (error?.status === 401 || error?.code === 'invalid_api_key' || error?.message?.includes('Incorrect API key') || error?.message?.includes('invalid_api_key')) {
+        userFriendlyError = error?.message || 'AI API key is not configured in the server environment (.env).';
+      } else if (error?.status === 401 || error?.code === 'invalid_api_key' || error?.message?.includes('Incorrect API key') || error?.message?.includes('API key not valid')) {
         statusCode = 401;
         isInvalidKey = true;
-        userFriendlyError = 'Invalid OpenAI API Key. Please verify that your OPENAI_API_KEY is valid in the environment settings.';
+        userFriendlyError = 'Invalid API Key. Please verify your GEMINI_API_KEY or OPENAI_API_KEY in the environment settings.';
       } else if (error?.status === 429 || error?.code === 'insufficient_quota' || error?.message?.includes('quota') || error?.message?.includes('Rate limit')) {
         statusCode = 429;
         isQuotaExceeded = true;
-        userFriendlyError = 'OpenAI API quota exceeded or rate limit reached. Please check your OpenAI account billing balance and usage limits.';
+        userFriendlyError = 'AI API quota exceeded or rate limit reached. Please check your account billing balance and usage limits.';
       }
 
       return res.status(statusCode).json({

@@ -67,7 +67,7 @@ export interface CopilotModelOption {
 }
 
 export const COPILOT_MODELS: CopilotModelOption[] = [
-  { id: 'gemini-3.8-live', name: 'Gemini 3.8 Live', badge: 'Live Voice & Tools', description: 'Real-time 16k/24k PCM audio streaming & instant POS tool calling' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', badge: 'Google Gemini', description: 'Google Gemini multimodal intelligence, vision OCR & instant POS tool calling' },
   { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', badge: 'GPT-5.6 Flagship', description: 'Fastest & most cost-efficient GPT-5.6 for store operations' },
   { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', badge: 'GPT-5.6', description: 'Balanced speed & depth for POS inventory & sales execution' },
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', badge: 'Frontier', description: 'Frontier intelligence flagship with comprehensive deep reasoning' },
@@ -189,9 +189,15 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
       const cached = localStorage.getItem('mobileshop_copilot_model');
-      if (cached && typeof cached === 'string') return cached;
+      if (cached && typeof cached === 'string') {
+        if (cached === 'gemini-3.8-live') {
+          localStorage.setItem('mobileshop_copilot_model', 'gemini-3.8-flash');
+          return 'gemini-3.8-flash';
+        }
+        return cached;
+      }
     } catch {}
-    return settings?.secrets?.chatAssistantModel || 'gpt-5.6-luna';
+    return settings?.secrets?.chatAssistantModel || 'gemini-3.8-flash';
   });
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [customModelInput, setCustomModelInput] = useState('');
