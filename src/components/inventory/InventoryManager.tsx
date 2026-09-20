@@ -663,7 +663,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       </div>
 
       {/* Standalone Product Search & Barcode Scanner Row */}
-      <div id="inventory-search-row" className="w-full bg-white p-3 sm:p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
+      <div id="inventory-search-row" className="sticky top-14 sm:top-[60px] z-30 w-full bg-white/95 backdrop-blur-md p-3 sm:p-4 rounded-2xl border border-slate-200/90 shadow-md shadow-slate-200/50 transition-all">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full">
           <div className="relative flex-1 w-full min-w-0">
             <div className="absolute left-3.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-slate-400 pointer-events-none">

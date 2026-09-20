@@ -24,7 +24,6 @@ import {
   Clock, 
   FileText, 
   X,
-  Sparkles,
   Info,
   ShieldCheck,
   ChevronDown,
@@ -50,7 +49,7 @@ import {
 } from '../../utils/formatters';
 import { exportToCsv } from '../../utils/reportUtils';
 import { StockAuditScannerModal } from './StockAuditScannerModal';
-import { isPhoneCategory } from '../../data/categoryTaxonomy';
+import { isPhoneCategory, canonicalCategory, CANONICAL_CATEGORIES } from '../../data/categoryTaxonomy';
 
 interface StockCheckManagerProps {
   products: Product[];
@@ -122,14 +121,89 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
     }
   };
 
-  // Extract unique brands for filtering
-  const allBrands = useMemo(() => {
-    const brands = new Set<string>();
-    products.forEach(p => {
-      if (p.brand) brands.add(p.brand);
+  // Dynamically compute available categories from products and canonical taxonomy with actual product counts
+  const categoryOptions = useMemo(() => {
+    // Start with the standard canonical categories
+    const list = CANONICAL_CATEGORIES.map(c => {
+      // Products that match this category either directly or canonically
+      const count = products.filter(p => {
+        return p.category === c.id || canonicalCategory(p.category) === c.id;
+      }).length;
+
+      return {
+        id: c.id,
+        label: c.label,
+        icon: c.icon === 'Smartphone' ? '📱' :
+              c.icon === 'RefreshCw' ? '♻️' :
+              c.icon === 'Headphones' ? '🎧' :
+              c.icon === 'Utensils' ? '🍳' :
+              c.icon === 'CreditCard' ? '💳' : '📦',
+        count,
+      };
     });
-    return Array.from(brands).sort();
+
+    // Check if products have any non-canonical categories
+    const canonicalIds = new Set(CANONICAL_CATEGORIES.map(c => c.id as string));
+    const extraCategoryKeys = new Set<string>();
+    products.forEach(p => {
+      if (p.category) {
+        const norm = canonicalCategory(p.category);
+        if (!canonicalIds.has(norm) && !canonicalIds.has(p.category)) {
+          extraCategoryKeys.add(p.category);
+        }
+      }
+    });
+
+    extraCategoryKeys.forEach(extraKey => {
+      const count = products.filter(p => p.category === extraKey).length;
+      list.push({
+        id: extraKey as ProductCategory,
+        label: getCategoryLabel(extraKey),
+        icon: '🏷️',
+        count,
+      });
+    });
+
+    return list;
   }, [products]);
+
+  // Extract unique brands with live counts for filtering
+  const brandOptions = useMemo(() => {
+    const brandMap = new Map<string, number>();
+    products.forEach(p => {
+      const b = (p.brand || 'Unbranded').trim();
+      brandMap.set(b, (brandMap.get(b) || 0) + 1);
+    });
+    return Array.from(brandMap.entries())
+      .map(([brand, count]) => ({ brand, count }))
+      .sort((a, b) => a.brand.localeCompare(b.brand));
+  }, [products]);
+
+  // Low stock products count
+  const lowStockCount = useMemo(() => {
+    return products.filter(p => (p.minStockAlert > 0 ? p.stock <= p.minStockAlert : p.stock <= 0)).length;
+  }, [products]);
+
+  // Product count matching selected category
+  const selectedCategoryCount = useMemo(() => {
+    if (selectedCategory === 'all') return products.length;
+    return products.filter(p => {
+      const pCanonical = canonicalCategory(p.category);
+      const selCanonical = canonicalCategory(selectedCategory);
+      return (
+        p.category === selectedCategory ||
+        pCanonical === selCanonical ||
+        pCanonical === selectedCategory ||
+        p.category === selCanonical
+      );
+    }).length;
+  }, [products, selectedCategory]);
+
+  // Product count matching selected brand
+  const selectedBrandCount = useMemo(() => {
+    if (selectedBrand === 'all') return products.length;
+    return products.filter(p => p.brand === selectedBrand).length;
+  }, [products, selectedBrand]);
 
   // Handle Starting a New Audit Session
   const handleStartNewAudit = () => {
@@ -137,7 +211,16 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
     let targetProducts = [...products];
 
     if (auditScope === 'category' && selectedCategory !== 'all') {
-      targetProducts = targetProducts.filter(p => p.category === selectedCategory);
+      targetProducts = targetProducts.filter(p => {
+        const pCanonical = canonicalCategory(p.category);
+        const selCanonical = canonicalCategory(selectedCategory);
+        return (
+          p.category === selectedCategory ||
+          pCanonical === selCanonical ||
+          pCanonical === selectedCategory ||
+          p.category === selCanonical
+        );
+      });
     } else if (auditScope === 'brand' && selectedBrand !== 'all') {
       targetProducts = targetProducts.filter(p => p.brand === selectedBrand);
     } else if (auditScope === 'low_stock') {
@@ -145,7 +228,16 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
     }
 
     if (targetProducts.length === 0) {
-      alert('No products found matching the selected scope criteria.');
+      if (auditScope === 'category') {
+        const catName = categoryOptions.find(c => c.id === selectedCategory)?.label || selectedCategory;
+        alert(`No products found in the "${catName}" category. Please select a category with active inventory products.`);
+      } else if (auditScope === 'brand') {
+        alert(`No products found for brand "${selectedBrand}". Please select another brand with active inventory.`);
+      } else if (auditScope === 'low_stock') {
+        alert('No products are currently at or below minimum stock alert thresholds.');
+      } else {
+        alert('No products found matching the selected scope criteria.');
+      }
       return;
     }
 
@@ -173,11 +265,21 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
       };
     });
 
+    let scopeLabel = 'All Inventory';
+    if (auditScope === 'category') {
+      const foundCat = categoryOptions.find(c => c.id === selectedCategory);
+      scopeLabel = foundCat ? foundCat.label : (selectedCategory === 'all' ? 'All Categories' : getCategoryLabel(selectedCategory));
+    } else if (auditScope === 'brand') {
+      scopeLabel = selectedBrand === 'all' ? 'All Brands' : `Brand: ${selectedBrand}`;
+    } else if (auditScope === 'low_stock') {
+      scopeLabel = 'Low Stock Alert';
+    }
+
     const newSessionNumber = `AUD-${new Date().getFullYear()}-${String(stockAudits.length + 1).padStart(3, '0')}`;
     const newSession: StockAuditSession = {
       id: `audit-${Date.now()}`,
       auditNumber: newSessionNumber,
-      title: auditTitle.trim() || `Physical Stock Audit (${getCategoryLabel(selectedCategory as ProductCategory) || 'All Inventory'})`,
+      title: auditTitle.trim() || `Physical Stock Audit (${scopeLabel})`,
       scope: auditScope,
       filterValue: auditScope === 'category' ? selectedCategory : auditScope === 'brand' ? selectedBrand : undefined,
       createdAt: new Date().toISOString(),
@@ -648,14 +750,9 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
       {/* VIEW 1: NEW AUDIT SETUP */}
       {currentView === 'new_setup' && (
         <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs max-w-3xl mx-auto space-y-6">
-          <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
-            <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Start New Physical Stock Audit</h2>
-              <p className="text-xs text-slate-500">Configure your count scope and assign staff auditors.</p>
-            </div>
+          <div className="pb-4 border-b border-slate-100">
+            <h2 className="text-lg font-bold text-slate-900">Start New Physical Stock Audit</h2>
+            <p className="text-xs text-slate-500">Configure your count scope and assign staff auditors.</p>
           </div>
 
           <div className="space-y-4">
@@ -681,7 +778,13 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => setAuditScope('category')}
+                  onClick={() => {
+                    setAuditScope('category');
+                    if (selectedCategory === 'all' || !categoryOptions.some(c => c.id === selectedCategory)) {
+                      const firstCatWithStock = categoryOptions.find(c => c.count > 0);
+                      if (firstCatWithStock) setSelectedCategory(firstCatWithStock.id);
+                    }
+                  }}
                   className={`p-3 rounded-2xl border text-left cursor-pointer transition-all ${
                     auditScope === 'category'
                       ? 'border-indigo-600 bg-indigo-50/50 text-indigo-950 ring-2 ring-indigo-500/20 font-bold'
@@ -690,12 +793,20 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
                 >
                   <Layers className="w-4 h-4 text-indigo-600 mb-1" />
                   <p className="text-xs font-bold">By Category</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">Filter category</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    {categoryOptions.filter(c => c.count > 0).length} categories in stock
+                  </p>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setAuditScope('brand')}
+                  onClick={() => {
+                    setAuditScope('brand');
+                    if (selectedBrand === 'all' || !brandOptions.some(b => b.brand === selectedBrand)) {
+                      const firstBrandWithStock = brandOptions.find(b => b.count > 0);
+                      if (firstBrandWithStock) setSelectedBrand(firstBrandWithStock.brand);
+                    }
+                  }}
                   className={`p-3 rounded-2xl border text-left cursor-pointer transition-all ${
                     auditScope === 'brand'
                       ? 'border-indigo-600 bg-indigo-50/50 text-indigo-950 ring-2 ring-indigo-500/20 font-bold'
@@ -704,7 +815,9 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
                 >
                   <Smartphone className="w-4 h-4 text-indigo-600 mb-1" />
                   <p className="text-xs font-bold">By Brand</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">Apple, Samsung...</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    {brandOptions.length} brands in store
+                  </p>
                 </button>
 
                 <button
@@ -718,40 +831,61 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
                 >
                   <AlertTriangle className="w-4 h-4 text-amber-600 mb-1" />
                   <p className="text-xs font-bold">Low Stock Only</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">Below alert limit</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    {lowStockCount} below alert limit
+                  </p>
                 </button>
               </div>
             </div>
 
             {/* Scope Specific Filters */}
             {auditScope === 'category' && (
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">Select Category</label>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700">Select Category</label>
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    {selectedCategoryCount} {selectedCategoryCount === 1 ? 'product' : 'products'} available
+                  </span>
+                </div>
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 cursor-pointer"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 cursor-pointer focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
                 >
-                  <option value="new_phones">📱 Brand New Phones</option>
-                  <option value="used_phones">♻️ Used / Secondhand Phones</option>
-                  <option value="accessories">🔌 Original Accessories & Chargers</option>
-                  <option value="gadgets">⌚ Wearables & Audio Gadgets</option>
-                  <option value="sim_topup">💳 SIM Cards & Top-ups</option>
-                  <option value="spare_parts">🛠️ Repair Spare Parts & Screens</option>
+                  <option value="all">🌐 All Categories ({products.length} Products)</option>
+                  {categoryOptions.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.icon} {cat.label} ({cat.count} {cat.count === 1 ? 'Product' : 'Products'})
+                    </option>
+                  ))}
                 </select>
+                {selectedCategory !== 'all' && selectedCategoryCount === 0 && (
+                  <p className="text-[11px] text-amber-600 font-medium flex items-center gap-1 mt-1">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>No inventory products currently registered in this category. Please select another category.</span>
+                  </p>
+                )}
               </div>
             )}
 
             {auditScope === 'brand' && (
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">Select Brand</label>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700">Select Brand</label>
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    {selectedBrandCount} {selectedBrandCount === 1 ? 'product' : 'products'} available
+                  </span>
+                </div>
                 <select
                   value={selectedBrand}
                   onChange={(e) => setSelectedBrand(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 cursor-pointer"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 cursor-pointer focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
                 >
-                  {allBrands.map(b => (
-                    <option key={b} value={b}>{b}</option>
+                  <option value="all">🌐 All Brands ({products.length} Products)</option>
+                  {brandOptions.map((b) => (
+                    <option key={b.brand} value={b.brand}>
+                      🏷️ {b.brand} ({b.count} {b.count === 1 ? 'Product' : 'Products'})
+                    </option>
                   ))}
                 </select>
               </div>

@@ -378,15 +378,15 @@ export const Navigation: React.FC<NavigationProps> = ({
                       }
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs lg:text-[13px] xl:text-sm font-semibold transition-all duration-150 cursor-pointer ${
                         isActive
-                          ? 'bg-emerald-600 text-white font-bold shadow-md shadow-emerald-950/30'
-                          : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                          ? 'bg-emerald-500/15 backdrop-blur-md text-emerald-300 font-bold border border-emerald-500/30 shadow-md shadow-emerald-950/30 ring-1 ring-emerald-400/20'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-800/60 hover:backdrop-blur-xs'
                       } ${isCollapsed ? 'justify-center px-0' : ''}`}
                     >
                       <div className="relative">
                         <Icon
                           className={`w-4 h-4 shrink-0 transition-transform group-hover/tab:scale-110 ${
                             isActive
-                              ? 'text-white'
+                              ? 'text-emerald-400'
                               : 'text-slate-400 group-hover/tab:text-emerald-400'
                           }`}
                         />
@@ -424,7 +424,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                         }}
                         title={`Open ${tab.label} in new tab`}
                         className={`opacity-0 group-hover/tab:opacity-100 p-1.5 mr-1.5 rounded-lg transition-all text-slate-400 hover:text-white hover:bg-slate-700/80 cursor-pointer absolute right-0 z-10 ${
-                          isActive ? 'text-emerald-100 hover:bg-emerald-700' : ''
+                          isActive ? 'text-emerald-200 hover:bg-emerald-500/20' : ''
                         }`}
                       >
                         <ExternalLink className="w-3.5 h-3.5" />

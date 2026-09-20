@@ -356,7 +356,7 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                 onChange={(e) => setRawText(e.target.value)}
                 placeholder="Paste CSV rows here... e.g.:&#10;Name,Brand,Category,SubCategory,Condition,CostPrice,SellingPrice,Stock,Warranty,IMEIs&#10;Apple iPhone 15 Pro,Apple,new_phones,,brand_new,3400000,3750000,1,12,358765123456789 / 358765123456790&#10;Apple 20W USB-C Fast Adapter,Apple,accessories,Fast Chargers & Adapters,brand_new,65000,85000,30,6,&#10;Samsung Galaxy Buds2 Pro,Samsung,gadgets,Wireless Earbuds,brand_new,380000,450000,10,6,"
                 rows={10}
-                className="w-full p-3.5 bg-slate-900 text-[#ebedf2] font-mono text-xs rounded-xl border border-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden leading-relaxed resize-y placeholder:text-slate-600"
+                className="w-full p-3.5 bg-slate-50 text-slate-900 font-mono text-xs rounded-xl border border-slate-300 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-hidden leading-relaxed resize-y placeholder:text-slate-400"
               />
             </div>
 
