@@ -374,6 +374,9 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
 
     try {
       const client = new GeminiLiveClient({
+        onStatus: (statusMsg) => {
+          setLiveStatus(statusMsg);
+        },
         onReady: (model) => {
           setLiveVoiceState('listening');
           setLiveVoiceError(null);
@@ -466,8 +469,9 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           }
           isConnectingOrActiveRef.current = false;
           setLiveVoiceState('error');
-          setLiveVoiceError('Live Voice is unavailable. Please try again.');
-          setLiveStatus('Live Voice is unavailable. Please try again.');
+          const errorMsg = typeof err === 'string' ? err : 'Live Voice is unavailable. Please try again.';
+          setLiveVoiceError(errorMsg);
+          setLiveStatus(errorMsg);
           setAudioVolume(0);
         },
         onClose: (reason) => {
@@ -485,11 +489,36 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
 
       liveClientRef.current = client;
 
+      // Sanitize products and sales to prevent huge base64 payloads over WebSocket
+      const sanitizedProducts = (products || []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        brand: p.brand,
+        model: p.model,
+        category: p.category,
+        sellingPrice: p.sellingPrice,
+        costPrice: p.costPrice,
+        stock: p.stock,
+        sku: p.sku,
+        barcode: p.barcode,
+        imeiList: p.imeiList?.slice(0, 30),
+      }));
+
+      const sanitizedSales = (sales || []).slice(0, 50).map((s) => ({
+        id: s.id,
+        invoiceNumber: s.invoiceNumber,
+        grandTotal: s.grandTotal,
+        subtotal: s.subtotal,
+        paymentMethod: s.paymentMethod,
+        date: s.date,
+        itemsCount: s.items?.length || 0,
+      }));
+
       await client.start({
-        products,
-        sales,
-        expenses,
-        purchases,
+        products: sanitizedProducts as any,
+        sales: sanitizedSales as any,
+        expenses: (expenses || []).slice(0, 50) as any,
+        purchases: (purchases || []).slice(0, 50) as any,
         cashDrawer,
         stockAdjustments,
         currencySymbol: settings.currencySymbol || 'MMK',
@@ -503,8 +532,9 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       }
       isConnectingOrActiveRef.current = false;
       setLiveVoiceState('error');
-      setLiveVoiceError('Live Voice is unavailable. Please try again.');
-      setLiveStatus('Live Voice is unavailable. Please try again.');
+      const friendlyMsg = err?.message || 'Live Voice is unavailable. Please try again.';
+      setLiveVoiceError(friendlyMsg);
+      setLiveStatus(friendlyMsg);
       setAudioVolume(0);
     }
   };

@@ -229,11 +229,8 @@ LANGUAGE INSTRUCTION (STRICT & MANDATORY): You must ALWAYS speak and reply in Bu
               },
               callbacks: {
                 onopen: () => {
-                  console.log('[Gemini Live] Live session opened with gemini-3.8-live');
+                  console.log('[Gemini Live] Live transport socket opened with Google');
                   isConnected = true;
-                  if (clientWs.readyState === WebSocket.OPEN) {
-                    clientWs.send(JSON.stringify({ type: 'ready', model: 'gemini-3.8-live' }));
-                  }
                 },
                 onmessage: async (message: LiveServerMessage) => {
                   try {
@@ -365,6 +362,12 @@ LANGUAGE INSTRUCTION (STRICT & MANDATORY): You must ALWAYS speak and reply in Bu
                 },
               },
             });
+
+            isConnected = true;
+            console.log('[Gemini Live] Session fully established and ready with gemini-3.8-live');
+            if (clientWs.readyState === WebSocket.OPEN) {
+              clientWs.send(JSON.stringify({ type: 'ready', model: 'gemini-3.8-live' }));
+            }
           } catch (sessionErr: any) {
             console.error('[Gemini Live] Failed to create live session:', sessionErr);
             if (clientWs.readyState === WebSocket.OPEN) {
@@ -377,24 +380,32 @@ LANGUAGE INSTRUCTION (STRICT & MANDATORY): You must ALWAYS speak and reply in Bu
         } else if (payload.type === 'audio') {
           // Stream raw 16kHz PCM audio chunk to Gemini Live API
           if (session && isConnected && payload.data) {
-            session.sendRealtimeInput({
-              audio: {
-                data: payload.data, // base64 encoded PCM 16kHz
-                mimeType: 'audio/pcm;rate=16000',
-              },
-            });
+            try {
+              session.sendRealtimeInput({
+                audio: {
+                  data: payload.data, // base64 encoded PCM 16kHz
+                  mimeType: 'audio/pcm;rate=16000',
+                },
+              });
+            } catch (realtimeErr) {
+              console.error('[Gemini Live] Error sending realtime audio input:', realtimeErr);
+            }
           }
         } else if (payload.type === 'text') {
           if (session && isConnected && payload.text) {
-            session.sendClientContent({
-              turns: [
-                {
-                  role: 'user',
-                  parts: [{ text: payload.text }],
-                },
-              ],
-              turnComplete: true,
-            });
+            try {
+              session.sendClientContent({
+                turns: [
+                  {
+                    role: 'user',
+                    parts: [{ text: payload.text }],
+                  },
+                ],
+                turnComplete: true,
+              });
+            } catch (textErr) {
+              console.error('[Gemini Live] Error sending client text content:', textErr);
+            }
           }
         } else if (payload.type === 'updateContext') {
           if (payload.context) {

@@ -92,8 +92,12 @@ export class GeminiLiveAudioPlayer {
   private initContext() {
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      // gemini-3.8-live outputs raw PCM at 24,000 Hz
-      this.ctx = new AudioContextClass({ sampleRate: 24000 });
+      // Prefer 24,000 Hz for gemini-3.8-live PCM, but gracefully fall back to native device sample rate
+      try {
+        this.ctx = new AudioContextClass({ sampleRate: 24000 });
+      } catch {
+        this.ctx = new AudioContextClass();
+      }
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 64;
       this.gainNode = this.ctx.createGain();
@@ -263,7 +267,12 @@ export class GeminiLiveAudioRecorder {
 
     this.sourceNode.connect(this.analyser);
     this.sourceNode.connect(this.processorNode);
-    this.processorNode.connect(this.ctx.destination);
+
+    // Keep ScriptProcessorNode alive without leaking mic audio back into speakers (prevents echo/feedback)
+    const silentGain = this.ctx.createGain();
+    silentGain.gain.value = 0;
+    this.processorNode.connect(silentGain);
+    silentGain.connect(this.ctx.destination);
 
     this.isRecording = true;
   }
