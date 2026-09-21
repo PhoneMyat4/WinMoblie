@@ -3,7 +3,7 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, Modality } from '@google/genai';
 import OpenAI from 'openai';
 import { setupGeminiLiveWebSocket, geminiLiveTools } from './server/geminiLiveService';
 import { 
@@ -617,10 +617,106 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
   app.post('/api/setup-telegram-webhook', handleSetupTelegramWebhook);
   app.get('/api/telegram-webhook-info', handleTelegramWebhookInfo);
 
+  // Audio processing: Convert Gemini raw 24kHz 16-bit PCM little-endian audio to a standard WAV Data URL
+  function pcmToWav(pcmBase64: string, sampleRate = 24000): string {
+    const pcmBuffer = Buffer.from(pcmBase64, 'base64');
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+    const blockAlign = numChannels * (bitsPerSample / 8);
+    const dataSize = pcmBuffer.length;
+    const chunkSize = 36 + dataSize;
+
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0);
+    header.writeUInt32LE(chunkSize, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16); // Subchunk1Size (16 for PCM)
+    header.writeUInt16LE(1, 20); // AudioFormat (1 = PCM)
+    header.writeUInt16LE(numChannels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(dataSize, 40);
+
+    const wavBuffer = Buffer.concat([header, pcmBuffer]);
+    return 'data:audio/wav;base64,' + wavBuffer.toString('base64');
+  }
+
+  // Generate high-fidelity spoken response audio via Gemini TTS
+  async function generateGeminiSpeechAudio(text: string, voiceName: string = 'Kore'): Promise<string | null> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || !text) return null;
+    try {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: { 'User-Agent': 'aistudio-build' },
+        },
+      });
+
+      // Strip markdown asterisks, URLs, hashes, and brackets for natural human vocal delivery
+      const spokenText = text
+        .replace(/[*#_`~\[\]]/g, '')
+        .replace(/\bhttps?:\/\/\S+/gi, '')
+        .replace(/IMEI:\s*/gi, 'IMEI ')
+        .replace(/\b\$\b/g, 'dollars ')
+        .trim()
+        .slice(0, 500);
+
+      if (!spokenText) return null;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-tts-preview',
+        contents: [{ parts: [{ text: spokenText }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: voiceName || 'Kore' },
+            },
+          },
+        },
+      });
+
+      const pcmBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (pcmBase64) {
+        return pcmToWav(pcmBase64, 24000);
+      }
+      return null;
+    } catch (err: any) {
+      console.warn('[Gemini TTS] Speech audio generation notice:', err?.message || err);
+      return null;
+    }
+  }
+
+  // Standalone TTS API for on-demand speech synthesis
+  app.post('/api/tts', async (req, res) => {
+    try {
+      const { text, voice = 'Kore' } = req.body;
+      if (!text || typeof text !== 'string') {
+        return res.status(400).json({ success: false, error: 'Text string is required for TTS synthesis.' });
+      }
+
+      const audioWav = await generateGeminiSpeechAudio(text, voice);
+      if (!audioWav) {
+        return res.status(500).json({ success: false, error: 'Unable to synthesize speech audio from Gemini TTS.' });
+      }
+
+      return res.json({ success: true, audioWav });
+    } catch (err: any) {
+      console.error('Error in /api/tts endpoint:', err);
+      return res.status(500).json({ success: false, error: err?.message || 'Failed to synthesize speech.' });
+    }
+  });
+
   // Interactive AI Chatbot Assistant with OpenAI Tool Calling (Function Calling)
   app.post('/api/chat-assistant', async (req, res) => {
     try {
-      const { message, history = [], context = {}, attachments = [], model } = req.body;
+      const { message, history = [], context = {}, attachments = [], model, returnAudio = false } = req.body;
 
       const userText = typeof message === 'string' ? message.trim() : '';
       if (!userText && (!attachments || attachments.length === 0)) {
@@ -854,9 +950,16 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
               .join('')
               .trim();
             const replyText = secondResponse.text || textFromParts || 'Action executed successfully.';
+
+            let audioWav: string | null = null;
+            if (returnAudio && hasGeminiKey) {
+              audioWav = await generateGeminiSpeechAudio(replyText);
+            }
+
             return res.json({
               success: true,
               reply: replyText,
+              audioWav,
               modelUsed: activeModel || 'gemini-3.8-flash',
               toolExecuted: {
                 name: functionName,
@@ -872,9 +975,16 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
           }
 
           const replyText = geminiResponse.text || "I'm here to assist with POS reports and inventory intake. How can I help you?";
+
+          let audioWav: string | null = null;
+          if (returnAudio && hasGeminiKey) {
+            audioWav = await generateGeminiSpeechAudio(replyText);
+          }
+
           return res.json({
             success: true,
             reply: replyText,
+            audioWav,
             modelUsed: activeModel || 'gemini-3.8-flash',
             toolExecuted: null,
             createdProduct: null,
@@ -1015,9 +1125,15 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
 
           const replyText = secondResponse.choices?.[0]?.message?.content || 'Action executed successfully.';
 
+          let audioWav: string | null = null;
+          if (returnAudio && hasGeminiKey) {
+            audioWav = await generateGeminiSpeechAudio(replyText);
+          }
+
           return res.json({
             success: true,
             reply: replyText,
+            audioWav,
             modelUsed: activeModel,
             toolExecuted: {
               name: functionName,
@@ -1036,9 +1152,15 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
       // No tool call, standard conversational reply (e.g. asking for missing IMEI or specifications)
       const replyText = assistantMessage?.content || "I'm here to assist with POS reports and inventory intake. How can I help you?";
 
+      let audioWav: string | null = null;
+      if (returnAudio && hasGeminiKey) {
+        audioWav = await generateGeminiSpeechAudio(replyText);
+      }
+
       return res.json({
         success: true,
         reply: replyText,
+        audioWav,
         modelUsed: activeModel,
         toolExecuted: null,
         createdProduct: null,
