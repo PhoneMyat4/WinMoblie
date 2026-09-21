@@ -20,12 +20,6 @@ import {
   ExternalLink,
   ChevronDown,
   Volume2,
-  VolumeX,
-  Phone,
-  PhoneOff,
-  Play,
-  Square,
-  Headphones,
   Wand2,
   Trash2,
   Lock,
@@ -41,9 +35,7 @@ import {
   UploadCloud,
   FileUp,
   Cpu,
-  FileDown,
-  Radio,
-  Sparkles
+  FileDown
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Product, Sale, ExpenseRecord, PurchaseRecord, CashDrawerRecord, StockAdjustment, ShopSettings, StaffUser, StaffRole, RolePermissions, FacebookAdPostRecord } from '../../types';
@@ -51,7 +43,6 @@ import { StorageService } from '../../utils/storage';
 import { formatCurrency, getRoleBadgeClass } from '../../utils/formatters';
 import { compressImageForOcr } from '../../utils/boxScannerService';
 import { authenticatedFetch } from '../../utils/apiClient';
-import { GeminiLiveClient } from '../../utils/geminiLiveClient';
 import confetti from 'canvas-confetti';
 import { 
   exportDailyProfitDossierPdf, 
@@ -73,12 +64,14 @@ export interface CopilotModelOption {
 }
 
 export const COPILOT_MODELS: CopilotModelOption[] = [
-  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', badge: 'Google Gemini', description: 'Google Gemini multimodal intelligence, vision OCR & instant POS tool calling' },
-  { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', badge: 'Gemini Frontier', description: 'Google advanced reasoning, intricate store analytics & reports' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o mini', badge: 'OpenAI Fast', description: 'OpenAI high-speed, cost-effective vision & POS tool execution' },
-  { id: 'gpt-4o', name: 'GPT-4o', badge: 'OpenAI Flagship', description: 'OpenAI flagship multimodal intelligence, complex reasoning & vision' },
-  { id: 'o3-mini', name: 'o3-mini', badge: 'Deep Reasoning', description: 'OpenAI specialized STEM & mathematical inventory auditing' },
-  { id: 'o1', name: 'o1', badge: 'Frontier Reasoning', description: 'OpenAI frontier deep-thinking reasoning engine' },
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', badge: 'GPT-5.6 Flagship', description: 'Fastest & most cost-efficient GPT-5.6 for store operations' },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', badge: 'GPT-5.6', description: 'Balanced speed & depth for POS inventory & sales execution' },
+  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', badge: 'Frontier', description: 'Frontier intelligence flagship with comprehensive deep reasoning' },
+  { id: 'gpt-5.6', name: 'GPT-5.6 Frontier', badge: 'Frontier', description: 'OpenAI GPT-5.6 frontier intelligence scaling' },
+  { id: 'gpt-5', name: 'GPT-5 Flagship', badge: 'GPT-5', description: 'OpenAI GPT-5 foundational intelligence model' },
+  { id: 'o3-mini', name: 'o3-mini', badge: 'Deep Reasoning', description: 'Intricate POS calculation & inventory auditing' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o mini', badge: 'Fast & Light', description: 'High-speed legacy model, responsive & economical' },
+  { id: 'gpt-4o', name: 'GPT-4o', badge: 'Omni Flagship', description: 'Multimodal vision, complex reasoning & intelligence' },
 ];
 
 interface AiChatWidgetProps {
@@ -165,7 +158,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       {
         id: 'msg_welcome',
         role: 'assistant',
-        content: `👋 **မင်္ဂလာပါ! ကျွန်တော်က Aura ဖြစ်ပါတယ်။**\n\nAI Store Copilot အနေဖြင့် ဆိုင်၏ POS လုပ်ဆောင်ချက်များကို ကူညီဆောင်ရွက်ပေးနိုင်ပါသည်:\n- 📊 **POS အစီရင်ခံစာများ ကြည့်ရှုခြင်း**: Daily Profit, Z-Report, Stock Aging, Dead Stock\n- 📱 **ကုန်ပစ္စည်းစာရင်းသွင်းခြင်း**: ဖုန်း Model၊ Specs နှင့် IMEI ထည့်သွင်းခြင်း\n- 🎙️ **Live AI Voice (တိုက်ရိုက်အသံဖြင့် စကားပြောခြင်း)**: အပေါ်ရှိ **"Live Voice"** ခလုတ်ကို နှိပ်၍ မြန်မာဘာသာဖြင့် တိုက်ရိုက်ပြောဆိုနိုင်ပါသည်။`,
+        content: `👋 **Hello! I'm Aura, your AI Store Copilot.**\n\nI can execute live POS database operations via **OpenAI Function Calling (GPT-4o-mini)**:\n- 📊 **Query POS Reports**: Z-Reports, Stock Aging, Dead Stock, IMEI lifecycle tracking, Category margins.\n- 📱 **Add Inventory**: Say e.g. *"Add 1 Xiaomi Redmi Note 14 Pro 8/256GB Black for $220 cost, $270 sell with IMEI 864201061234567"*\n- 🎙️ **Voice Commands**: Click the mic to speak in real-time!`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ];
@@ -174,36 +167,19 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const [inputQuery, setInputQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [speechTranscript, setSpeechTranscript] = useState('');
   const [copiedImei, setCopiedImei] = useState<string | null>(null);
   const [copiedCaption, setCopiedCaption] = useState<string | null>(null);
   const [apiKeyWarning, setApiKeyWarning] = useState<string | null>(null);
-
-  // Gemini Live Voice State (Single True Live Voice System: mic -> gemini-3.8-live -> speaker)
-  type LiveVoiceState = 'disconnected' | 'connecting' | 'listening' | 'speaking' | 'error';
-  const [liveVoiceState, setLiveVoiceState] = useState<LiveVoiceState>('disconnected');
-  const [liveVoiceError, setLiveVoiceError] = useState<string | null>(null);
-  const [audioVolume, setAudioVolume] = useState(0);
-  const [liveStatus, setLiveStatus] = useState<string>('');
-  const liveClientRef = useRef<GeminiLiveClient | null>(null);
-  const isConnectingOrActiveRef = useRef(false);
-
-  // Voice Dictation (Speech-to-Text Fallback when WebSockets are blocked by proxies)
-  const [isDictating, setIsDictating] = useState(false);
-  const recognitionRef = useRef<any>(null);
 
   // Model Selection State for In-App Copilot
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
       const cached = localStorage.getItem('mobileshop_copilot_model');
-      if (cached && typeof cached === 'string') {
-        if (cached === 'gemini-3.8-live' || cached.startsWith('gpt-5')) {
-          localStorage.setItem('mobileshop_copilot_model', 'gemini-3.8-flash');
-          return 'gemini-3.8-flash';
-        }
-        return cached;
-      }
+      if (cached && typeof cached === 'string') return cached;
     } catch {}
-    return settings?.secrets?.chatAssistantModel || 'gemini-3.8-flash';
+    return settings?.secrets?.chatAssistantModel || 'gpt-5.6-luna';
   });
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [customModelInput, setCustomModelInput] = useState('');
@@ -230,6 +206,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   // Process selected, dropped, or pasted files
   const processFiles = async (files: File[]) => {
@@ -240,8 +217,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     for (const file of files) {
       try {
         if (file.size > 15 * 1024 * 1024) {
-          setLiveStatus(`File "${file.name}" exceeds 15MB size limit.`);
-          setTimeout(() => setLiveStatus(''), 4000);
+          alert(`File "${file.name}" exceeds the 15MB size limit. Please choose a smaller file.`);
           continue;
         }
 
@@ -352,292 +328,70 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     }
   }, [isOpen, messages, isLoading]);
 
-  // Stop active Gemini Live Voice session cleanly
-  const stopLiveVoice = () => {
-    if (liveClientRef.current) {
-      liveClientRef.current.stop();
-      liveClientRef.current = null;
-    }
-    isConnectingOrActiveRef.current = false;
-    setLiveVoiceState('disconnected');
-    setAudioVolume(0);
-    setLiveStatus('');
-  };
-
-  // Start Gemini Live Voice Session (gemini-3.8-live) with microphone PCM streaming
-  const startLiveVoice = async () => {
-    // Prevent duplicate connections: verify if already connected or connecting
-    if (isConnectingOrActiveRef.current || liveClientRef.current) {
-      return;
-    }
-
-    setLiveVoiceError(null);
-    setLiveVoiceState('connecting');
-    setLiveStatus('Connecting to Gemini Live Voice...');
-    isConnectingOrActiveRef.current = true;
-
-    try {
-      const client = new GeminiLiveClient({
-        onStatus: (statusMsg) => {
-          setLiveStatus(statusMsg);
-        },
-        onReady: (model) => {
-          setLiveVoiceState('listening');
-          setLiveVoiceError(null);
-          setLiveStatus(`Live Voice Connected (${model}) — စတင်ပြောဆိုနိုင်ပါပြီ`);
-        },
-        onAiSpeaking: (speaking) => {
-          if (speaking) {
-            setLiveVoiceState('speaking');
-            setLiveStatus('Aura Speaking (မြန်မာဘာသာဖြင့် ဖြေကြားနေပါသည်)...');
-          } else {
-            setLiveVoiceState('listening');
-            setLiveStatus('Listening... (Barge-in ready)');
-          }
-        },
-        onUserSpeaking: (vol) => {
-          setAudioVolume(vol);
-        },
-        onTranscript: (text, role) => {
-          if (!text) return;
-          if (role === 'assistant') {
-            setLiveStatus(`Aura: "${text}"`);
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              if (last && last.id.startsWith('live_transcript_')) {
-                return prev.map((m, idx) =>
-                  idx === prev.length - 1
-                    ? { ...m, content: (m.content ? m.content + ' ' : '') + text }
-                    : m
-                );
-              }
-              return [
-                ...prev,
-                {
-                  id: `live_transcript_${Date.now()}`,
-                  role: 'assistant',
-                  content: text,
-                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                },
-              ];
-            });
-          }
-        },
-        onInterrupted: () => {
-          setLiveVoiceState('listening');
-          setLiveStatus('Interrupted — Listening to you...');
-        },
-        onToolExecuted: (toolData) => {
-          const { name, args, result, createdProduct, updatedProduct, pdfReport } = toolData;
-          setLiveStatus(`Tool executed: ${name}`);
-
-          if (createdProduct) {
-            StorageService.saveProducts([createdProduct, ...products]);
-            confetti({ particleCount: 35, spread: 60, origin: { y: 0.8 } });
-          }
-          if (updatedProduct) {
-            const updatedList = products.map((p) => (p.id === updatedProduct.id ? updatedProduct : p));
-            StorageService.saveProducts(updatedList);
-          }
-          if (pdfReport) {
-            triggerClientPdfExport(pdfReport);
-          }
-
-          const toolMsg: ChatMessageItem = {
-            id: `live_tool_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            role: 'assistant',
-            content: `⚡ **Live Voice Tool Action: \`${name}\`**\n\n${
-              typeof result?.message === 'string'
-                ? result.message
-                : typeof result?.output?.message === 'string'
-                ? result.output.message
-                : `Executed tool \`${name}\` successfully via Gemini Live Voice.`
-            }`,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            toolExecuted: {
-              name,
-              args,
-              result,
-            },
-            createdProduct,
-            updatedProduct,
-            pdfReport,
-          };
-          setMessages((prev) => [...prev, toolMsg]);
-        },
-        onError: (err) => {
-          console.warn('[Gemini Live Error]:', err);
-          if (liveClientRef.current) {
-            liveClientRef.current.stop();
-            liveClientRef.current = null;
-          }
-          isConnectingOrActiveRef.current = false;
-          setLiveVoiceState('error');
-          const errorMsg = typeof err === 'string' ? err : 'Live Voice is unavailable. Please try again.';
-          setLiveVoiceError(errorMsg);
-          setLiveStatus(errorMsg);
-          setAudioVolume(0);
-        },
-        onClose: (reason) => {
-          console.log('[Gemini Live Closed]:', reason);
-          if (liveClientRef.current) {
-            liveClientRef.current.stop();
-            liveClientRef.current = null;
-          }
-          isConnectingOrActiveRef.current = false;
-          setLiveVoiceState('disconnected');
-          setAudioVolume(0);
-          setLiveStatus('');
-        },
-      });
-
-      liveClientRef.current = client;
-
-      // Sanitize products and sales to prevent huge base64 payloads over WebSocket
-      const sanitizedProducts = (products || []).map((p) => ({
-        id: p.id,
-        name: p.name,
-        brand: p.brand,
-        model: p.model,
-        category: p.category,
-        sellingPrice: p.sellingPrice,
-        costPrice: p.costPrice,
-        stock: p.stock,
-        sku: p.sku,
-        barcode: p.barcode,
-        imeiList: p.imeiList?.slice(0, 30),
-      }));
-
-      const sanitizedSales = (sales || []).slice(0, 50).map((s) => ({
-        id: s.id,
-        invoiceNumber: s.invoiceNumber,
-        grandTotal: s.grandTotal,
-        subtotal: s.subtotal,
-        paymentMethod: s.paymentMethod,
-        date: s.date,
-        itemsCount: s.items?.length || 0,
-      }));
-
-      await client.start({
-        products: sanitizedProducts as any,
-        sales: sanitizedSales as any,
-        expenses: (expenses || []).slice(0, 50) as any,
-        purchases: (purchases || []).slice(0, 50) as any,
-        cashDrawer,
-        stockAdjustments,
-        currencySymbol: settings.currencySymbol || 'MMK',
-        settings,
-      });
-    } catch (err: any) {
-      console.warn('[Gemini Live Start Failure]:', err);
-      if (liveClientRef.current) {
-        liveClientRef.current.stop();
-        liveClientRef.current = null;
-      }
-      isConnectingOrActiveRef.current = false;
-      setLiveVoiceState('error');
-      const friendlyMsg = err?.message || 'Live Voice is unavailable. Please try again.';
-      setLiveVoiceError(friendlyMsg);
-      setLiveStatus(friendlyMsg);
-      setAudioVolume(0);
-    }
-  };
-
-  // Toggle Live Voice session directly
-  const toggleLiveVoice = () => {
-    if (liveVoiceState === 'connecting' || liveVoiceState === 'listening' || liveVoiceState === 'speaking') {
-      stopLiveVoice();
-    } else {
-      startLiveVoice();
-    }
-  };
-
-  // Start Voice Dictation (Speech-to-Text) fallback
-  const startVoiceDictation = () => {
+  // Web Speech API Initialization
+  useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert('Your browser does not support Speech Recognition. Please use Google Chrome or Microsoft Edge.');
-      return;
-    }
-
-    try {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
-      }
-
+    if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
       recognition.interimResults = true;
-      recognition.lang = 'my-MM'; // Burmese dictation, works in Chrome on Windows
+      recognition.lang = 'en-US';
 
       recognition.onstart = () => {
-        setIsDictating(true);
+        setIsListening(true);
+        setSpeechTranscript('');
       };
 
       recognition.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((result: any) => result[0].transcript)
-          .join('');
-        if (transcript) {
-          setInputQuery(transcript);
+        let currentTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          currentTranscript += event.results[i][0].transcript;
         }
+        setSpeechTranscript(currentTranscript);
+        setInputQuery(currentTranscript);
       };
 
       recognition.onerror = (event: any) => {
         console.warn('Speech recognition error:', event.error);
-        setIsDictating(false);
+        setIsListening(false);
       };
 
       recognition.onend = () => {
-        setIsDictating(false);
+        setIsListening(false);
+        // If transcript was captured, user can review or auto-send
       };
 
       recognitionRef.current = recognition;
-      recognition.start();
-    } catch (e) {
-      console.warn('Failed to start speech recognition:', e);
-      setIsDictating(false);
     }
-  };
 
-  // Stop active voice dictation
-  const stopVoiceDictation = () => {
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (e) {}
-      setIsDictating(false);
-    }
-  };
-
-  // Clean up Gemini Live Voice session when widget is closed or unmounted
-  useEffect(() => {
-    if (!isOpen) {
-      stopLiveVoice();
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
     return () => {
-      stopLiveVoice();
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore
+        }
+      }
     };
   }, []);
 
-  // Update POS context inside active Live Voice session when store state changes
-  useEffect(() => {
-    if (liveVoiceState !== 'disconnected' && liveClientRef.current) {
-      liveClientRef.current.updateContext({
-        products,
-        sales,
-        expenses,
-        purchases,
-        cashDrawer,
-        stockAdjustments,
-        currencySymbol: settings.currencySymbol || 'MMK',
-        settings,
-      });
+  const toggleVoiceRecording = () => {
+    if (!recognitionRef.current) {
+      alert('Voice recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
+      return;
     }
-  }, [products, sales, expenses, purchases, cashDrawer, stockAdjustments, settings, liveVoiceState]);
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      try {
+        recognitionRef.current.start();
+      } catch (err) {
+        console.error('Error starting speech recognition:', err);
+      }
+    }
+  };
 
   // Client-Side PDF Generation Bridge: Executes jsPDF export routines based on AI tool output
   const triggerClientPdfExport = (config: any) => {
@@ -744,10 +498,9 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     }
   };
 
-  // Send message to backend AI Assistant API with Multimodal Vision & Files
+  // Send message to backend OpenAI Function Calling API with Multimodal Vision & Files
   const handleSendMessage = async (textToSend?: string, filesOverride?: ChatAttachment[]) => {
     if (!canAccess) return;
-
     const filesToSend = filesOverride !== undefined ? filesOverride : attachedFiles;
     let userText = (textToSend !== undefined ? textToSend : inputQuery).trim();
 
@@ -762,20 +515,12 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     if (!userText && filesToSend.length === 0) return;
     if (isLoading) return;
 
-    // If Gemini Live Voice is currently connected and no files are attached, stream prompt directly to Live session
-    if (liveVoiceState !== 'disconnected' && filesToSend.length === 0 && liveClientRef.current) {
-      const newMsgId = `usr_${Date.now()}`;
-      const userMessageItem: ChatMessageItem = {
-        id: newMsgId,
-        role: 'user',
-        content: userText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      setMessages((prev) => [...prev, userMessageItem]);
-      setInputQuery('');
-      setLiveStatus('Sending prompt to Gemini Live Voice...');
-      liveClientRef.current.sendText(userText);
-      return;
+    // Stop voice if listening
+    if (isListening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      setIsListening(false);
     }
 
     const newMsgId = `usr_${Date.now()}`;
@@ -789,6 +534,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
 
     setMessages((prev) => [...prev, userMessageItem]);
     setInputQuery('');
+    setSpeechTranscript('');
     setAttachedFiles([]);
     setIsLoading(true);
 
@@ -843,7 +589,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
 
       if (!data.success) {
         if (data.missingApiKey) {
-          setApiKeyWarning(data.error || 'API key is not configured in the server environment.');
+          setApiKeyWarning(data.error || 'OPENAI_API_KEY is not configured in the server environment.');
         }
         throw new Error(data.error || 'Failed to receive response from AI Assistant.');
       } else {
@@ -853,13 +599,16 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       // If an inventory item was created by the tool call, persist it into StorageService!
       if (data.createdProduct) {
         StorageService.saveProduct(data.createdProduct);
+        // Trigger celebratory confetti effect
         try {
           confetti({
             particleCount: 60,
             spread: 70,
             origin: { y: 0.7, x: 0.8 },
           });
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
 
       // If an inventory product price was updated by the tool call, persist update into StorageService!
@@ -875,7 +624,9 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             spread: 60,
             origin: { y: 0.6, x: 0.8 },
           });
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
 
       // If the AI Assistant triggered PDF report generation, run the client-side jsPDF routine!
@@ -1055,7 +806,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
                     <div className="pt-1.5 mt-1 border-t border-slate-800 px-1">
                       <div className="text-[10px] text-slate-400 font-semibold mb-1 flex items-center justify-between">
                         <span>Custom Model ID:</span>
-                        <span className="text-[9px] text-indigo-400 font-mono">e.g. gpt-4o-mini</span>
+                        <span className="text-[9px] text-indigo-400 font-mono">e.g. gpt-5.6-luna</span>
                       </div>
                       <div className="flex gap-1.5">
                         <input
@@ -1101,65 +852,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          {/* Gemini Live Voice Session Button */}
-          <button
-            type="button"
-            onClick={toggleLiveVoice}
-            title={
-              liveVoiceState === 'listening'
-                ? 'Listening to your voice (Gemini Live) — Tap to stop'
-                : liveVoiceState === 'speaking'
-                ? 'Aura is speaking — Tap to stop'
-                : liveVoiceState === 'connecting'
-                ? 'Connecting to Gemini Live Voice...'
-                : liveVoiceState === 'error'
-                ? 'Live Voice unavailable — Click to retry'
-                : 'Start Gemini Live Voice (မြန်မာဘာသာ)'
-            }
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-              liveVoiceState === 'listening'
-                ? 'bg-emerald-500 text-white shadow-md'
-                : liveVoiceState === 'speaking'
-                ? 'bg-cyan-500 text-white shadow-md animate-pulse'
-                : liveVoiceState === 'connecting'
-                ? 'bg-amber-500/25 text-amber-200 border border-amber-500/40'
-                : liveVoiceState === 'error'
-                ? 'bg-rose-500/25 text-rose-300 border border-rose-500/40'
-                : 'bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-300 border border-emerald-500/40 shadow-xs'
-            }`}
-          >
-            {liveVoiceState === 'connecting' ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-300" />
-                <span>Connecting...</span>
-              </>
-            ) : liveVoiceState === 'listening' ? (
-              <>
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-200 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
-                </span>
-                <span>Listening...</span>
-              </>
-            ) : liveVoiceState === 'speaking' ? (
-              <>
-                <Volume2 className="w-3.5 h-3.5 text-white animate-bounce" />
-                <span>Speaking...</span>
-              </>
-            ) : liveVoiceState === 'error' ? (
-              <>
-                <AlertTriangle className="w-3.5 h-3.5 text-rose-300" />
-                <span>Retry Voice</span>
-              </>
-            ) : (
-              <>
-                <Phone className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">Live Voice</span>
-              </>
-            )}
-          </button>
-
+        <div className="flex items-center gap-1">
           <button
             onClick={handleClearHistory}
             title="Clear Chat History"
@@ -1223,16 +916,16 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 flex items-start gap-2.5 text-xs text-amber-900">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div className="flex-1">
-                <p className="font-semibold text-amber-900">API Key Required</p>
+                <p className="font-semibold text-amber-900">OpenAI API Key Required</p>
                 <p className="text-amber-800 text-[11px] mt-0.5 leading-snug">
-                  Set API key in your environment or secrets settings to activate Aura Copilot.
+                  Set <code className="font-mono bg-amber-100 px-1 py-0.5 rounded text-amber-900">OPENAI_API_KEY</code> in your environment or secrets settings to activate Aura Copilot.
                 </p>
               </div>
             </div>
           )}
 
-          {/* Messages Scroll Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/60">
+      {/* Messages Scroll Area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/60">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -1623,25 +1316,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
                 )}
               </div>
             </div>
-            <div className="flex items-center justify-between gap-2 mt-1 px-1 text-[10px] text-slate-400">
-              <span>{msg.timestamp}</span>
-              {msg.role === 'assistant' && (
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(msg.content);
-                      setLiveStatus('Copied message text');
-                      setTimeout(() => setLiveStatus(''), 2000);
-                    }}
-                    title="Copy message"
-                    className="p-1 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
-                  >
-                    <Copy className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
-            </div>
+            <span className="text-[10px] text-slate-400 mt-1 px-1">{msg.timestamp}</span>
           </div>
         ))}
 
@@ -1680,141 +1355,25 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
         })}
       </div>
 
-      {/* Gemini Live Voice Session Error Banner with Voice Dictation Fallback */}
-      {liveVoiceState === 'error' && (
-        <div className="px-4 py-2.5 bg-rose-50/95 border-t border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-rose-900 shadow-2xs">
+      {/* Voice Listening Feedback Alert */}
+      {isListening && (
+        <div className="px-4 py-2 bg-indigo-50 border-t border-indigo-100 flex items-center justify-between text-xs text-indigo-900 animate-pulse">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-            <div>
-              <p className="font-semibold text-rose-900">Live Voice ဆာဗာ (WebSocket) ချိတ်ဆက်မှု မရရှိပါ</p>
-              <p className="text-[11px] text-rose-700/90">Hosting Proxy ကြောင့်ဖြစ်ပါက Voice Dictation ဖြင့် အသံပြောဆိုနိုင်ပါသည်</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
-            <button
-              type="button"
-              onClick={startVoiceDictation}
-              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-semibold cursor-pointer transition-colors shadow-xs flex items-center gap-1"
-            >
-              <Mic className="w-3.5 h-3.5" />
-              Voice Dictation ဖြင့် မေးမည်
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setLiveVoiceError(null);
-                startLiveVoice();
-              }}
-              className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-md text-xs font-semibold cursor-pointer transition-colors"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Active Voice Dictation Banner */}
-      {isDictating && (
-        <div className="px-4 py-2 bg-indigo-900 text-white border-t border-indigo-700 flex items-center justify-between text-xs animate-pulse">
-          <div className="flex items-center gap-2">
-            <Mic className="w-4 h-4 text-emerald-400 animate-bounce" />
-            <span className="font-medium">အသံနားထောင်နေပါသည် (Listening... စကားပြောပါ)...</span>
+            <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+            <span className="font-semibold">Listening to voice command...</span>
+            <span className="text-slate-500 italic max-w-[200px] truncate">{speechTranscript || 'Speak now...'}</span>
           </div>
           <button
-            type="button"
-            onClick={stopVoiceDictation}
-            className="px-2.5 py-0.5 bg-rose-500 hover:bg-rose-600 text-white rounded text-[11px] font-semibold cursor-pointer"
+            onClick={() => {
+              if (speechTranscript) {
+                handleSendMessage(speechTranscript);
+              }
+              toggleVoiceRecording();
+            }}
+            className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 underline"
           >
-            ပြီးပြီ (Stop)
+            Done & Send
           </button>
-        </div>
-      )}
-
-      {/* Gemini Live Voice Active Session Banner & Audio Waveform */}
-      {(liveVoiceState === 'connecting' || liveVoiceState === 'listening' || liveVoiceState === 'speaking') && (
-        <div className="px-4 py-2.5 bg-slate-900 border-t border-indigo-500/40 text-white flex flex-col gap-2 shadow-inner">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <span className="relative flex h-2.5 w-2.5">
-                <span
-                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                    liveVoiceState === 'speaking'
-                      ? 'bg-cyan-400'
-                      : liveVoiceState === 'connecting'
-                      ? 'bg-amber-400'
-                      : 'bg-emerald-400'
-                  }`}
-                />
-                <span
-                  className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-                    liveVoiceState === 'speaking'
-                      ? 'bg-cyan-500'
-                      : liveVoiceState === 'connecting'
-                      ? 'bg-amber-500'
-                      : 'bg-emerald-500'
-                  }`}
-                />
-              </span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-white tracking-wide">Gemini Live Voice</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 font-mono">
-                  မြန်မာဘာသာ (Burmese)
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-300 font-medium">
-                {liveVoiceState === 'connecting'
-                  ? 'Connecting...'
-                  : liveVoiceState === 'speaking'
-                  ? 'Aura is Speaking...'
-                  : 'Listening (Barge-in ready)'}
-              </span>
-              <button
-                type="button"
-                onClick={stopLiveVoice}
-                className="text-[11px] font-semibold px-2.5 py-0.5 rounded bg-rose-500/30 hover:bg-rose-500/50 text-rose-200 border border-rose-500/50 transition-colors cursor-pointer"
-              >
-                End Voice
-              </button>
-            </div>
-          </div>
-
-          {/* Dynamic Audio Waveform Visualizer */}
-          <div className="flex items-center justify-between gap-1 h-5 px-1 bg-slate-950/60 rounded-lg py-0.5">
-            <div className="flex items-center gap-1 flex-1 justify-center h-full">
-              {[...Array(24)].map((_, i) => {
-                let height = 3;
-                if (liveVoiceState === 'speaking') {
-                  height = 5 + Math.sin((Date.now() / 120) + i * 0.5) * 8 + 5;
-                } else if (liveVoiceState === 'listening') {
-                  const factor = Math.sin((i / 23) * Math.PI);
-                  height = Math.max(3, Math.min(18, 3 + audioVolume * 35 * factor));
-                }
-                return (
-                  <div
-                    key={i}
-                    className={`w-1 rounded-full transition-all duration-75 ${
-                      liveVoiceState === 'speaking'
-                        ? 'bg-gradient-to-t from-cyan-400 to-indigo-400'
-                        : audioVolume > 0.05
-                        ? 'bg-gradient-to-t from-emerald-500 to-teal-300'
-                        : 'bg-slate-700'
-                    }`}
-                    style={{ height: `${Math.max(3, Math.min(18, height))}px` }}
-                  />
-                );
-              })}
-            </div>
-          </div>
-
-          {liveStatus && (
-            <div className="text-[11px] text-slate-300 truncate italic flex items-center gap-1.5">
-              <Sparkles className="w-3 h-3 text-indigo-400 shrink-0" />
-              <span>{liveStatus}</span>
-            </div>
-          )}
         </div>
       )}
 
@@ -1994,58 +1553,18 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             <Camera className="w-4 h-4" />
           </button>
 
-          {/* Voice Mic Toggle (Gemini Live Voice with Voice Dictation Fallback) */}
+          {/* Voice Mic Toggle */}
           <button
             type="button"
-            onClick={() => {
-              if (isDictating) {
-                stopVoiceDictation();
-              } else if (liveVoiceState === 'listening' || liveVoiceState === 'speaking') {
-                stopLiveVoice();
-              } else if (liveVoiceState === 'error') {
-                startVoiceDictation();
-              } else {
-                toggleLiveVoice();
-              }
-            }}
-            title={
-              isDictating
-                ? 'Listening (Voice Dictation) — Tap to stop'
-                : liveVoiceState === 'listening'
-                ? 'Listening to your voice (Gemini Live) — Tap to stop'
-                : liveVoiceState === 'speaking'
-                ? 'Aura is speaking — Tap to stop'
-                : liveVoiceState === 'connecting'
-                ? 'Connecting to Gemini Live Voice...'
-                : liveVoiceState === 'error'
-                ? 'Live Voice unavailable — Click to use Voice Dictation'
-                : 'Speak with Voice (Gemini Live in Burmese)'
-            }
-            className={`p-2.5 rounded-xl font-medium transition-all shrink-0 cursor-pointer ${
-              isDictating
-                ? 'bg-emerald-600 text-white ring-4 ring-emerald-500/40 shadow-md animate-pulse'
-                : liveVoiceState === 'listening'
-                ? 'bg-rose-600 text-white ring-4 ring-rose-500/40 shadow-md shadow-rose-500/40 animate-pulse'
-                : liveVoiceState === 'speaking'
-                ? 'bg-cyan-600 text-white ring-4 ring-cyan-500/40 shadow-md animate-pulse'
-                : liveVoiceState === 'connecting'
-                ? 'bg-amber-500 text-white'
-                : liveVoiceState === 'error'
-                ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+            onClick={toggleVoiceRecording}
+            title={isListening ? 'Stop Listening' : 'Speak with Voice'}
+            className={`p-2.5 rounded-xl font-medium transition-all shrink-0 ${
+              isListening
+                ? 'bg-rose-500 text-white animate-bounce shadow-md shadow-rose-500/30'
                 : 'bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600'
             }`}
           >
-            {isDictating ? (
-              <Mic className="w-4 h-4 text-white" />
-            ) : liveVoiceState === 'listening' || liveVoiceState === 'speaking' ? (
-              <MicOff className="w-4 h-4" />
-            ) : liveVoiceState === 'connecting' ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            ) : liveVoiceState === 'error' ? (
-              <Mic className="w-4 h-4 text-indigo-600" />
-            ) : (
-              <Mic className="w-4 h-4" />
-            )}
+            {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
           </button>
 
           {/* Text Input */}
@@ -2055,12 +1574,8 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             value={inputQuery}
             onChange={(e) => setInputQuery(e.target.value)}
             placeholder={
-              liveVoiceState === 'speaking'
-                ? 'Aura Copilot speaking (speak to interrupt)...'
-                : liveVoiceState === 'listening'
-                ? 'Listening live... speak in Burmese or type question...'
-                : liveVoiceState === 'connecting'
-                ? 'Connecting to Gemini Live Voice...'
+              isListening 
+                ? 'Listening to voice...' 
                 : attachedFiles.length > 0 
                   ? 'Add instructions for attached file(s)...' 
                   : 'Ask reports, paste image, or add phone with IMEI...'
@@ -2073,18 +1588,18 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           <button
             type="submit"
             disabled={(!inputQuery.trim() && attachedFiles.length === 0) || isLoading || isProcessingFiles}
-            className="p-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 text-white disabled:text-slate-400 rounded-xl font-medium transition-colors shadow-sm disabled:shadow-none shrink-0 cursor-pointer"
+            className="p-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 text-white disabled:text-slate-400 rounded-xl font-medium transition-colors shadow-sm disabled:shadow-none shrink-0"
           >
             <Send className="w-4 h-4" />
           </button>
         </form>
         <div className="flex items-center justify-between mt-1.5 px-1 text-[10px] text-slate-400">
-          <span>AI Vision &amp; Real-time POS Intelligence</span>
+          <span>GPT-4o-mini Vision &amp; OCR Enabled</span>
           <span>Paste screenshot or drop files</span>
         </div>
       </div>
-    </>
-  )}
+        </>
+      )}
 
       {/* Photo Preview Lightbox Modal */}
       {previewModalImage && (

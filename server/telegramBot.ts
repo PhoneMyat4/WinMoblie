@@ -15,7 +15,6 @@ import {
   updateSettingSecretInFirestore,
 } from './posFirestoreService';
 import { executePostProductAdToFacebook } from './facebookPostService';
-import { geminiLiveTools } from './geminiLiveService';
 import type { ShopSettings } from '../src/types';
 
 export interface TelegramAiModelOption {
@@ -26,11 +25,14 @@ export interface TelegramAiModelOption {
 }
 
 export const SUPPORTED_TELEGRAM_MODELS: TelegramAiModelOption[] = [
-  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', description: 'Google Gemini fast multimodal intelligence & real-time POS reports', badge: 'Google Gemini' },
-  { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', description: 'Google advanced reasoning for complex store auditing and inventory insights', badge: 'Gemini Frontier' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o mini', description: 'OpenAI fast, responsive & cost-effective intelligence', badge: 'OpenAI Fast' },
-  { id: 'gpt-4o', name: 'GPT-4o', description: 'OpenAI flagship multimodal intelligence and analysis', badge: 'OpenAI Flagship' },
-  { id: 'o3-mini', name: 'o3-mini', description: 'OpenAI deep mathematical and logical inventory reasoning', badge: 'Reasoning' },
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: 'Fastest & most cost-efficient GPT-5.6 model for high-volume workloads', badge: 'GPT-5.6 Flagship' },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', description: 'Balanced GPT-5.6 speed and depth for POS inventory & sales execution', badge: 'GPT-5.6' },
+  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: 'Frontier intelligence flagship with comprehensive deep reasoning', badge: 'Frontier' },
+  { id: 'gpt-5.6', name: 'GPT-5.6 Frontier', description: 'Full GPT-5.6 frontier scale for deep business & store intelligence', badge: 'Frontier' },
+  { id: 'gpt-5', name: 'GPT-5 Flagship', description: 'OpenAI GPT-5 foundational model for complex reasoning', badge: 'GPT-5' },
+  { id: 'o3-mini', name: 'o3-mini', description: 'Specialized deep reasoning model for complex inventory & financial analysis', badge: 'Reasoning' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o mini', description: 'High-speed legacy model, responsive & economical', badge: 'Fast' },
+  { id: 'gpt-4o', name: 'GPT-4o', description: 'Omni flagship with advanced visual understanding', badge: 'Omni' },
 ];
 
 /**
@@ -439,7 +441,7 @@ export async function handleTelegramWebhook(
         (context.settings as any)?.secrets?.telegramBotModel ||
         (context.settings as any)?.telegramBotModel ||
         process.env.TELEGRAM_AI_MODEL ||
-        'gemini-3.8-flash';
+        'gpt-5.6-luna';
 
       const welcomeMessage = `👋 *Welcome to Golden Star Mobile POS Assistant, ${senderName}!*
 
@@ -464,8 +466,7 @@ I am your direct, real-time AI store manager connected to your live Firestore PO
   - _"Lookup IMEI 861234567890123 history"_
 • ⚙️ *Model Configuration:*
   - _"/model" (view current model and list available options)_
-  - _"/model gemini-3.8-flash" (switch to Gemini 3.8 Flash)_
-  - _"/model gpt-4o-mini" (switch to GPT-4o mini)_
+  - _"/model gpt-5.6-luna" (switch to GPT-5.6 Luna Frontier)_
   - _"/model o3-mini" (switch to o3-mini reasoning)_
 
 _Your Telegram Chat ID: \`${chatId}\`_`;
@@ -483,7 +484,7 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
         (context.settings as any)?.secrets?.telegramBotModel ||
         (context.settings as any)?.telegramBotModel ||
         process.env.TELEGRAM_AI_MODEL ||
-        'gemini-3.8-flash';
+        'gpt-5.6-luna';
 
       if (!requestedModel) {
         const modelList = SUPPORTED_TELEGRAM_MODELS.map((m) => {
@@ -491,7 +492,7 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
           return `• \`${m.id}\` - *${m.name}* [${m.badge || 'AI'}]${isActive ? ' ⭐️ *(CURRENT)*' : ''}\n  _${m.description}_`;
         }).join('\n\n');
 
-        const reply = `🤖 *Telegram AI Bot Model Selection*\n\nCurrently active model: \`${currentModel}\`\n\n*Available Models:*\n${modelList}\n\n*To switch model:*\nSend \`/model <model_id>\`\n_Example:_ \`/model gemini-3.8-flash\` or \`/model gpt-4o-mini\``;
+        const reply = `🤖 *Telegram AI Bot Model Selection*\n\nCurrently active model: \`${currentModel}\`\n\n*Available Models:*\n${modelList}\n\n*To switch model:*\nSend \`/model <model_id>\`\n_Example:_ \`/model gpt-5.6-luna\` or \`/model o3-mini\``;
 
         await sendTelegramMessage(botToken, chatId, reply, messageId);
         return;
@@ -503,7 +504,7 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
 
       const targetModelId = matchedModel ? matchedModel.id : requestedModel;
       const targetModelName = matchedModel ? matchedModel.name : requestedModel;
-      const targetModelDesc = matchedModel ? matchedModel.description : 'Custom AI Model';
+      const targetModelDesc = matchedModel ? matchedModel.description : 'Custom OpenAI Model';
 
       // Persist chosen model to Firestore global settings
       await updateSettingSecretInFirestore('telegramBotModel', targetModelId);
@@ -540,137 +541,24 @@ function sanitizeConfidentialMetrics(text: string): string {
 }
 
     // 5. Determine active model from settings or env
-    let rawSelectedModel =
+    const rawSelectedModel =
       (context.settings as any)?.secrets?.telegramBotModel ||
       (context.settings as any)?.telegramBotModel ||
       process.env.TELEGRAM_AI_MODEL ||
-      'gemini-3.8-flash';
-
-    if (typeof rawSelectedModel === 'string' && rawSelectedModel.startsWith('gpt-5')) {
-      rawSelectedModel = 'gemini-3.8-flash';
-    }
+      'gpt-5.6-luna';
 
     const activeModel =
       typeof rawSelectedModel === 'string' && /^[a-zA-Z0-9_.-]+$/.test(rawSelectedModel)
         ? rawSelectedModel
-        : 'gemini-3.8-flash';
+        : 'gpt-5.6-luna';
 
-    const isGeminiModel = activeModel.toLowerCase().includes('gemini');
-    let finalReply = '';
+    // Build AI query with existing OpenAI tools
+    const openai = getOpenAI();
 
-    if (isGeminiModel) {
-      try {
-        const ai = getGenAI();
-        const geminiModelId = activeModel.includes('pro') ? 'gemini-3.1-pro-preview' : 'gemini-3.8-flash';
-        const sysInstruction = `${AI_SYSTEM_INSTRUCTION}
-
-TELEGRAM CHAT SPECIFIC INSTRUCTIONS & STRICT SAFEGUARDS:
-- You are communicating directly with store owners and staff over Telegram.
-- Format responses cleanly with Markdown (bold headlines, bullet points, concise tables).
-- STRICT SAFEGUARD 1: PRECISE CATEGORY FILTERING (ACCESSORIES EXCLUSION).
-  When a user asks about a phone model (e.g. "iPhone 15", "Samsung S24", "Redmi Note"), you MUST filter database results to show ONLY the actual mobile phones.
-  Strictly exclude accessories (cases, covers, glasses, chargers) unless the user explicitly asks for them.
-  Always call 'query_inventory_products' with category: 'Mobile Phones' and exclude_accessories: true.
-  Double-check the parsed data before sending the final response to Telegram to guarantee no accessories are listed under phones.
-- STRICT SAFEGUARD 2: PRICE CONFIDENTIALITY.
-  NEVER reveal 'Cost Price', 'Profit', 'Purchase Cost', or 'Supplier Name' in the Telegram chat under ANY circumstances. Only show the 'Selling Price'.
-  If a user asks for cost or profit, politely state that cost details are internal and confidential.
-- STRICT SAFEGUARD 3: OUT-OF-STOCK FILTERING.
-  When a user asks "what is available" or queries stock/prices, automatically show ONLY items with positive stock (stock > 0).
-  Only return zero-stock items if the user specifically asks for "out of stock" or "dead stock".
-- STRICT SAFEGUARD 4: TIMEZONE ACCURACY.
-  All sales figures, dates, and Z-reports strictly adhere to Myanmar Time (Asia/Yangon UTC+6:30).
-- STRICT SAFEGUARD 5: CURRENCY & TYPO HANDLING.
-  Gracefully handle typos (e.g. "ihpone" -> "iPhone"). Format all monetary values neatly with commas and "Ks" (e.g., 4,250,000 Ks).`;
-
-        const geminiContents = [
-          { role: 'user', parts: [{ text: userText }] },
-        ];
-
-        const geminiResponse = await ai.models.generateContent({
-          model: geminiModelId,
-          contents: geminiContents,
-          config: {
-            systemInstruction: sysInstruction,
-            tools: [{ functionDeclarations: geminiLiveTools }],
-            temperature: 0.3,
-          },
-        });
-
-        const functionCalls = geminiResponse.functionCalls;
-        if (functionCalls && functionCalls.length > 0) {
-          await sendTelegramChatAction(botToken, chatId, 'typing');
-          const funcCall = functionCalls[0];
-          const functionName = funcCall.name;
-          const parsedArgs = (funcCall.args as any) || {};
-
-          let executionResult: any = null;
-          if (functionName === 'query_pos_reports') {
-            executionResult = executeQueryPosReports(parsedArgs, context);
-          } else if (functionName === 'query_inventory_products') {
-            executionResult = executeQueryInventoryProducts(parsedArgs, context);
-          } else if (functionName === 'add_inventory_item') {
-            const mutation = executeAddInventoryItem(parsedArgs, context);
-            executionResult = mutation;
-            if (mutation.createdProduct) {
-              await persistProductToFirestore(mutation.createdProduct);
-            }
-          } else if (functionName === 'update_product_price') {
-            const updateResult = executeUpdateProductPrice(parsedArgs, context);
-            executionResult = updateResult;
-            if (updateResult.updatedProduct) {
-              await persistProductToFirestore(updateResult.updatedProduct);
-            }
-          } else if (functionName === 'generate_pdf_report') {
-            executionResult = executeGeneratePdfReport(parsedArgs, context);
-          } else {
-            executionResult = { error: `Tool ${functionName} is not recognized.` };
-          }
-
-          const followUpContents = [
-            ...geminiContents,
-            { role: 'model', parts: [{ functionCall: funcCall }] },
-            {
-              role: 'user',
-              parts: [{
-                functionResponse: {
-                  name: functionName,
-                  response: { result: executionResult },
-                },
-              }],
-            },
-          ];
-
-          const secondResponse = await ai.models.generateContent({
-            model: geminiModelId,
-            contents: followUpContents,
-            config: {
-              systemInstruction: sysInstruction,
-              temperature: 0.3,
-            },
-          });
-
-          finalReply = secondResponse.text || 'Action executed successfully.';
-        } else {
-          finalReply = geminiResponse.text || '';
-        }
-      } catch (geminiErr: any) {
-        console.error('[TelegramBot] Gemini execution error:', geminiErr?.message || geminiErr);
-      }
-    }
-
-    if (!finalReply) {
-      try {
-        // Build AI query with existing OpenAI tools
-        const openai = getOpenAI();
-        const openAiModel = ['gpt-4o-mini', 'gpt-4o', 'o3-mini', 'o1'].includes(activeModel)
-          ? activeModel
-          : 'gpt-4o-mini';
-
-        const formattedMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-          {
-            role: 'system',
-            content: `${AI_SYSTEM_INSTRUCTION}
+    const formattedMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      {
+        role: 'system',
+        content: `${AI_SYSTEM_INSTRUCTION}
 
 TELEGRAM CHAT SPECIFIC INSTRUCTIONS & STRICT SAFEGUARDS:
 - You are communicating directly with store owners and staff over Telegram.
@@ -690,104 +578,100 @@ TELEGRAM CHAT SPECIFIC INSTRUCTIONS & STRICT SAFEGUARDS:
   All sales figures, dates, and Z-reports strictly adhere to Myanmar Time (Asia/Yangon UTC+6:30).
 - STRICT SAFEGUARD 5: CURRENCY & TYPO HANDLING.
   Gracefully handle typos (e.g. "ihpone" -> "iPhone"). Format all monetary values neatly with commas and "Ks" (e.g., 4,250,000 Ks).`,
-          },
+      },
+      {
+        role: 'user',
+        content: userText,
+      },
+    ];
+
+    // Initial tool calling pass with OpenAI using selected model
+    const aiResponse = await openai.chat.completions.create({
+      model: activeModel,
+      messages: formattedMessages,
+      tools: openAiAssistantTools,
+      tool_choice: 'auto',
+      temperature: 0.3,
+    });
+
+    const choice = aiResponse.choices?.[0];
+    const assistantMessage = choice?.message;
+    const toolCalls = assistantMessage?.tool_calls;
+
+    let finalReply = assistantMessage?.content || '';
+
+    // If the model invoked tools (query_pos_reports, query_inventory_products, etc.)
+    if (toolCalls && toolCalls.length > 0) {
+      await sendTelegramChatAction(botToken, chatId, 'typing');
+
+      const toolCall = toolCalls[0];
+      if (toolCall.type === 'function') {
+        const functionName = toolCall.function.name;
+        let parsedArgs: any = {};
+        try {
+          parsedArgs = JSON.parse(toolCall.function.arguments || '{}');
+        } catch {
+          parsedArgs = {};
+        }
+
+        console.log(`[TelegramBot] Executing Tool Call: ${functionName} with args:`, parsedArgs);
+
+        let executionResult: any = null;
+
+        if (functionName === 'query_pos_reports') {
+          executionResult = executeQueryPosReports(parsedArgs, context);
+        } else if (functionName === 'query_inventory_products') {
+          executionResult = executeQueryInventoryProducts(parsedArgs, context);
+        } else if (functionName === 'add_inventory_item') {
+          const mutation = executeAddInventoryItem(parsedArgs, context);
+          executionResult = mutation;
+          if (mutation.createdProduct) {
+            await persistProductToFirestore(mutation.createdProduct);
+          }
+        } else if (functionName === 'update_product_price') {
+          const updateResult = executeUpdateProductPrice(parsedArgs, context);
+          executionResult = updateResult;
+          if (updateResult.updatedProduct) {
+            await persistProductToFirestore(updateResult.updatedProduct);
+          }
+        } else if (functionName === 'generate_pdf_report') {
+          const pdfResult = executeGeneratePdfReport(parsedArgs, context);
+          executionResult = pdfResult;
+        } else if (functionName === 'post_product_ad_to_facebook') {
+          executionResult = await executePostProductAdToFacebook(
+            parsedArgs,
+            context,
+            openai,
+            getGenAI
+          );
+        } else {
+          executionResult = { error: `Tool ${functionName} is not recognized.` };
+        }
+
+        // Send intermediate typing indicator
+        await sendTelegramChatAction(botToken, chatId, 'typing');
+
+        // Feed tool results back to OpenAI for final natural language synthesis
+        const followUpMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+          ...formattedMessages,
+          assistantMessage,
           {
-            role: 'user',
-            content: userText,
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(executionResult),
           },
         ];
 
-        // Initial tool calling pass with OpenAI using selected model
-        const aiResponse = await openai.chat.completions.create({
-          model: openAiModel,
-          messages: formattedMessages,
+        const secondResponse = await openai.chat.completions.create({
+          model: activeModel,
+          messages: followUpMessages,
           tools: openAiAssistantTools,
-          tool_choice: 'auto',
           temperature: 0.3,
         });
 
-        const choice = aiResponse.choices?.[0];
-        const assistantMessage = choice?.message;
-        const toolCalls = assistantMessage?.tool_calls;
-
-        finalReply = assistantMessage?.content || '';
-
-        // If the model invoked tools (query_pos_reports, query_inventory_products, etc.)
-        if (toolCalls && toolCalls.length > 0) {
-          await sendTelegramChatAction(botToken, chatId, 'typing');
-
-          const toolCall = toolCalls[0];
-          if (toolCall.type === 'function') {
-            const functionName = toolCall.function.name;
-            let parsedArgs: any = {};
-            try {
-              parsedArgs = JSON.parse(toolCall.function.arguments || '{}');
-            } catch {
-              parsedArgs = {};
-            }
-
-            console.log(`[TelegramBot] Executing Tool Call: ${functionName} with args:`, parsedArgs);
-
-            let executionResult: any = null;
-
-            if (functionName === 'query_pos_reports') {
-              executionResult = executeQueryPosReports(parsedArgs, context);
-            } else if (functionName === 'query_inventory_products') {
-              executionResult = executeQueryInventoryProducts(parsedArgs, context);
-            } else if (functionName === 'add_inventory_item') {
-              const mutation = executeAddInventoryItem(parsedArgs, context);
-              executionResult = mutation;
-              if (mutation.createdProduct) {
-                await persistProductToFirestore(mutation.createdProduct);
-              }
-            } else if (functionName === 'update_product_price') {
-              const updateResult = executeUpdateProductPrice(parsedArgs, context);
-              executionResult = updateResult;
-              if (updateResult.updatedProduct) {
-                await persistProductToFirestore(updateResult.updatedProduct);
-              }
-            } else if (functionName === 'generate_pdf_report') {
-              const pdfResult = executeGeneratePdfReport(parsedArgs, context);
-              executionResult = pdfResult;
-            } else if (functionName === 'post_product_ad_to_facebook') {
-              executionResult = await executePostProductAdToFacebook(
-                parsedArgs,
-                context,
-                openai,
-                getGenAI
-              );
-            } else {
-              executionResult = { error: `Tool ${functionName} is not recognized.` };
-            }
-
-            // Send intermediate typing indicator
-            await sendTelegramChatAction(botToken, chatId, 'typing');
-
-            // Feed tool results back to OpenAI for final natural language synthesis
-            const followUpMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-              ...formattedMessages,
-              assistantMessage,
-              {
-                role: 'tool',
-                tool_call_id: toolCall.id,
-                content: JSON.stringify(executionResult),
-              },
-            ];
-
-            const secondResponse = await openai.chat.completions.create({
-              model: openAiModel,
-              messages: followUpMessages,
-              tools: openAiAssistantTools,
-              temperature: 0.3,
-            });
-
-            finalReply =
-              secondResponse.choices?.[0]?.message?.content ||
-              'Action executed successfully on store POS database.';
-          }
-        }
-      } catch (openAiErr: any) {
-        console.error('[TelegramBot] OpenAI error:', openAiErr?.message || openAiErr);
+        finalReply =
+          secondResponse.choices?.[0]?.message?.content ||
+          'Action executed successfully on store POS database.';
       }
     }
 
