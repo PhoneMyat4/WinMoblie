@@ -1,0 +1,20 @@
+# Firebase App Hosting Configuration
+# Reference: https://firebase.google.com/docs/app-hosting/configure
+# Configures the underlying Google Cloud Run container service for real-time WebSocket connections and optimal concurrency.
+
+runConfig:
+  # Dedicated CPU allocation to ensure consistent real-time audio encode/decode performance
+  cpu: 1
+  # Dedicated memory allocation (1024 MiB) for WebSocket connections and audio stream buffering
+  memoryMiB: 1024
+  # High concurrency limit so long-lived WebSocket connections do not block HTTP requests
+  concurrency: 100
+  # Keep at least 1 warm instance alive at all times to eliminate cold-start handshake dropouts
+  minInstances: 1
+  # Maximum container instances to control auto-scaling
+  maxInstances: 10
+
+# Default environment configuration
+env:
+  - variable: NODE_ENV
+    value: production

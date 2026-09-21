@@ -139,9 +139,14 @@ export function setupGeminiLiveWebSocket(server: http.Server) {
   server.on('upgrade', (request, socket, head) => {
     try {
       const rawUrl = request.url || '';
-      // Support /api/live, /api/live/, /live, /live/, and tolerate query parameters / hashes
+      // Support /api/live, /api/live/, /live, /live/, and tolerate proxy path prefixes / query parameters
       const pathname = rawUrl.split('?')[0].split('#')[0].replace(/\/+$/, '');
-      if (pathname === '/api/live' || pathname === '/live') {
+      if (
+        pathname === '/api/live' || 
+        pathname === '/live' || 
+        pathname.endsWith('/api/live') || 
+        pathname.endsWith('/live')
+      ) {
         wss.handleUpgrade(request, socket, head, (ws) => {
           wss.emit('connection', ws, request);
         });
@@ -149,6 +154,11 @@ export function setupGeminiLiveWebSocket(server: http.Server) {
       }
     } catch (err) {
       console.error('[Gemini Live WS Upgrade Error]:', err);
+      try {
+        socket.destroy();
+      } catch (e) {
+        // ignore
+      }
     }
   });
 

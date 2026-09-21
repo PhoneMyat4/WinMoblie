@@ -122,8 +122,12 @@ async function startServer() {
     });
   });
 
-  // Live Voice API info & HTTP probe endpoint
+  // Live Voice API info & HTTP probe endpoint (explicitly disable caching and enable CORS for load balancers)
   app.get(['/api/live', '/api/live/status'], (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
     res.json({
       status: 'ok',
       service: 'gemini-3.8-live',
@@ -2101,6 +2105,12 @@ Output a JSON response with:
   }
 
   const server = http.createServer(app);
+
+  // Configure timeouts to match Google Cloud Run / Envoy Load Balancer specifications
+  // Node.js defaults (5000ms) can cause load balancers to prematurely sever WebSocket connections
+  server.keepAliveTimeout = 650000;
+  server.headersTimeout = 660000;
+
   setupGeminiLiveWebSocket(server);
 
   server.listen(PORT, '0.0.0.0', () => {
