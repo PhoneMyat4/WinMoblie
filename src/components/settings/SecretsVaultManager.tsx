@@ -549,24 +549,22 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
                   <span className="text-[9px] text-slate-400">Can also change in chat header</span>
                 </div>
                 <select
-                  value={secrets.chatAssistantModel || 'gpt-5.6-luna'}
+                  value={secrets.chatAssistantModel || 'gemini-3.8-flash'}
                   onChange={(e) => updateSecrets({ chatAssistantModel: e.target.value })}
                   className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all cursor-pointer"
                 >
-                  <option value="gpt-5.6-luna">GPT-5.6 Luna (Fastest & Most Cost-Efficient for Store Operations)</option>
-                  <option value="gpt-5.6-terra">GPT-5.6 Terra (Balanced Speed & Depth for POS Inventory & Sales)</option>
-                  <option value="gpt-5.6-sol">GPT-5.6 Sol (Frontier Intelligence Flagship - Deep Reasoning)</option>
-                  <option value="gpt-5.6">GPT-5.6 Frontier (Maximum Intelligence Scale)</option>
-                  <option value="gpt-5">GPT-5 Flagship (Foundational Intelligence)</option>
-                  <option value="o3-mini">o3-mini (Deep reasoning for intricate POS & financial analysis)</option>
-                  <option value="gpt-4o-mini">GPT-4o mini (Legacy: Fast, responsive & economical)</option>
-                  <option value="gpt-4o">GPT-4o (Legacy Omni Flagship)</option>
+                  <option value="gemini-3.8-flash">Gemini 3.8 Flash (Google Gemini - Fast, Multimodal, Recommended)</option>
+                  <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Google Gemini - Deep Reasoning & Analytics)</option>
+                  <option value="gpt-4o-mini">GPT-4o mini (OpenAI - Fast, Responsive & Economical)</option>
+                  <option value="gpt-4o">GPT-4o (OpenAI - Flagship Multimodal & Vision)</option>
+                  <option value="o3-mini">o3-mini (OpenAI - Deep Reasoning for Intricate Calculations)</option>
+                  <option value="o1">o1 (OpenAI - Frontier Deep Reasoning)</option>
                 </select>
                 <div className="flex items-center gap-1.5 pt-0.5">
                   <input
                     type="text"
-                    placeholder="Or type custom model ID (e.g. gpt-5.6-luna)..."
-                    value={['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6', 'gpt-5', 'o3-mini', 'gpt-4o-mini', 'gpt-4o'].includes(secrets.chatAssistantModel || '') ? '' : (secrets.chatAssistantModel || '')}
+                    placeholder="Or type custom model ID (e.g. gpt-4o-mini)..."
+                    value={['gemini-3.8-flash', 'gemini-3.1-pro-preview', 'gpt-4o-mini', 'gpt-4o', 'o3-mini', 'o1'].includes(secrets.chatAssistantModel || '') ? '' : (secrets.chatAssistantModel || '')}
                     onChange={(e) => {
                       if (e.target.value.trim()) {
                         updateSecrets({ chatAssistantModel: e.target.value.trim() });
@@ -823,24 +821,21 @@ export const SecretsVaultManager: React.FC<SecretsVaultManagerProps> = ({
                   <span className="text-[9px] text-sky-600 font-mono">Telegram /model</span>
                 </div>
                 <select
-                  value={secrets.telegramBotModel || 'gpt-5.6-luna'}
+                  value={secrets.telegramBotModel || 'gemini-3.8-flash'}
                   onChange={(e) => updateSecrets({ telegramBotModel: e.target.value })}
                   className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-900 focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all cursor-pointer"
                 >
-                  <option value="gpt-5.6-luna">GPT-5.6 Luna (Fastest & Most Cost-Efficient for High-Volume Workloads)</option>
-                  <option value="gpt-5.6-terra">GPT-5.6 Terra (Balanced Speed & Depth for POS Telegram Alerts)</option>
-                  <option value="gpt-5.6-sol">GPT-5.6 Sol (Frontier Intelligence Flagship)</option>
-                  <option value="gpt-5.6">GPT-5.6 Frontier (Maximum Scale Intelligence)</option>
-                  <option value="gpt-5">GPT-5 Flagship (Foundational Intelligence)</option>
-                  <option value="o3-mini">o3-mini (Deep Reasoning for Complex POS Calculations)</option>
-                  <option value="gpt-4o-mini">GPT-4o mini (Legacy: Fast & Low Latency)</option>
-                  <option value="gpt-4o">GPT-4o (Legacy Omni Flagship)</option>
+                  <option value="gemini-3.8-flash">Gemini 3.8 Flash (Google Gemini - Fast, Low Latency, Recommended)</option>
+                  <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Google Gemini - High Intelligence)</option>
+                  <option value="gpt-4o-mini">GPT-4o mini (OpenAI - Fast & Cost-Efficient)</option>
+                  <option value="gpt-4o">GPT-4o (OpenAI - Flagship Multimodal)</option>
+                  <option value="o3-mini">o3-mini (OpenAI - Deep Reasoning for POS Calculations)</option>
                 </select>
                 <div className="flex items-center gap-1.5 pt-0.5">
                   <input
                     type="text"
-                    placeholder="Or type custom model ID (e.g. gpt-5.6-luna)..."
-                    value={['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6', 'gpt-5', 'o3-mini', 'gpt-4o-mini', 'gpt-4o'].includes(secrets.telegramBotModel || '') ? '' : (secrets.telegramBotModel || '')}
+                    placeholder="Or type custom model ID (e.g. gpt-4o-mini)..."
+                    value={['gemini-3.8-flash', 'gemini-3.1-pro-preview', 'gpt-4o-mini', 'gpt-4o', 'o3-mini'].includes(secrets.telegramBotModel || '') ? '' : (secrets.telegramBotModel || '')}
                     onChange={(e) => {
                       if (e.target.value.trim()) {
                         updateSecrets({ telegramBotModel: e.target.value.trim() });

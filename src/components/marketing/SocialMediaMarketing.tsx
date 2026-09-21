@@ -1696,11 +1696,10 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
                     onChange={(e) => setSocialState(prev => ({ ...prev, selectedModel: e.target.value }))}
                     className="w-full sm:flex-1 px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="gpt-5.6-luna">gpt-5.6-luna — Frontier Speed / Cost-Efficient (Recommended)</option>
-                    <option value="gpt-5.6">gpt-5.6 — Frontier Intelligence (Highest Converting)</option>
-                    <option value="gpt-5">gpt-5 — Pro / High-Quality (Deep Reasoning & Copywriting)</option>
-                    <option value="gpt-4o-mini">gpt-4o-mini — Legacy Fast / Budget</option>
-                    <option value="gpt-4o">gpt-4o — Legacy Balanced Flagship</option>
+                    <option value="gemini-3.8-flash">gemini-3.8-flash — Google Gemini Fast / Multimodal (Recommended)</option>
+                    <option value="gpt-4o-mini">gpt-4o-mini — OpenAI High Speed / Cost-Efficient</option>
+                    <option value="gpt-4o">gpt-4o — OpenAI Flagship Copywriting & Multimodal</option>
+                    <option value="gemini-3.1-pro-preview">gemini-3.1-pro — Google Gemini Advanced Reasoning</option>
                   </select>
                 </div>
               </div>

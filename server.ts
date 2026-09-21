@@ -651,27 +651,18 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
       let useGemini = false;
       let activeModel = '';
 
-      if (rawCandidate.toLowerCase().includes('gemini')) {
-        // User requested Google Gemini
-        if (hasGeminiKey) {
-          useGemini = true;
-          activeModel = 'gemini-3.8-flash';
-        } else {
-          // Graceful fallback to OpenAI if Gemini key is missing
-          useGemini = false;
-          activeModel = 'gpt-5.6-luna';
-        }
-      } else if (hasOpenAiKey) {
-        useGemini = false;
-        activeModel = /^[a-zA-Z0-9_.-]+$/.test(rawCandidate) ? rawCandidate : 'gpt-5.6-luna';
-        // Critical safeguard: Never pass a Gemini model name to OpenAI
-        if (activeModel.toLowerCase().includes('gemini')) {
-          activeModel = 'gpt-5.6-luna';
-        }
-      } else {
-        // Only Gemini key exists
+      if (rawCandidate.toLowerCase().includes('gemini') || !hasOpenAiKey) {
+        // User requested Google Gemini or only Gemini key is available
         useGemini = true;
-        activeModel = 'gemini-3.8-flash';
+        activeModel = rawCandidate.includes('pro') ? 'gemini-3.1-pro-preview' : 'gemini-3.8-flash';
+      } else {
+        // OpenAI model requested
+        useGemini = false;
+        activeModel = /^[a-zA-Z0-9_.-]+$/.test(rawCandidate) ? rawCandidate : 'gpt-4o-mini';
+        // Fictional model names safeguard (gpt-5.6-* does not exist in OpenAI)
+        if (activeModel.startsWith('gpt-5') || activeModel.toLowerCase().includes('gemini')) {
+          activeModel = 'gpt-4o-mini';
+        }
       }
 
       // Prepare user prompt and attachments for multimodal analysis
@@ -828,26 +819,29 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
             console.log(`[AI Assistant] Executing Gemini Tool Call: ${functionName} with args:`, parsedArgs);
             const toolExec = await runToolExecution(functionName, parsedArgs);
 
-            // Follow-up synthesis with tool result
+            // Follow-up synthesis with tool result, preserving thoughtSignature in model candidate
+            const modelTurn = geminiResponse.candidates?.[0]?.content || {
+              role: 'model',
+              parts: [{ functionCall: funcCall }],
+            };
+
             const followUpContents = [
               ...geminiContents,
-              {
-                role: 'model',
-                parts: [{ functionCall: funcCall }],
-              },
+              modelTurn,
               {
                 role: 'user',
                 parts: [{
                   functionResponse: {
                     name: functionName,
                     response: { result: toolExec.executionResult },
+                    id: funcCall.id,
                   },
                 }],
               },
             ];
 
             const secondResponse = await ai.models.generateContent({
-              model: 'gemini-3.8-flash',
+              model: activeModel || 'gemini-3.8-flash',
               contents: followUpContents,
               config: {
                 systemInstruction: AI_SYSTEM_INSTRUCTION,
@@ -855,11 +849,15 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
               },
             });
 
-            const replyText = secondResponse.text || 'Action executed successfully.';
+            const textFromParts = secondResponse.candidates?.[0]?.content?.parts
+              ?.map((p: any) => p.text || '')
+              .join('')
+              .trim();
+            const replyText = secondResponse.text || textFromParts || 'Action executed successfully.';
             return res.json({
               success: true,
               reply: replyText,
-              modelUsed: 'gemini-3.8-flash',
+              modelUsed: activeModel || 'gemini-3.8-flash',
               toolExecuted: {
                 name: functionName,
                 args: parsedArgs,
@@ -877,7 +875,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
           return res.json({
             success: true,
             reply: replyText,
-            modelUsed: 'gemini-3.8-flash',
+            modelUsed: activeModel || 'gemini-3.8-flash',
             toolExecuted: null,
             createdProduct: null,
           });
@@ -886,7 +884,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
           if (hasOpenAiKey) {
             console.log('[AI Assistant] Switching to OpenAI fallback...');
             useGemini = false;
-            activeModel = 'gpt-5.6-luna';
+            activeModel = 'gpt-4o-mini';
           } else {
             throw geminiErr;
           }

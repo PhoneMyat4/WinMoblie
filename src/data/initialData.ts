@@ -101,8 +101,8 @@ export const initialSettings: ShopSettings = {
     fbPageAccessToken: '',
     telegramBotToken: '',
     telegramChatId: '',
-    telegramBotModel: 'gpt-5.6-luna',
-    chatAssistantModel: 'gpt-5.6-luna',
+    telegramBotModel: 'gemini-3.8-flash',
+    chatAssistantModel: 'gemini-3.8-flash',
     customWebhookUrl: '',
     customWebhookSecret: '',
     customSecrets: [

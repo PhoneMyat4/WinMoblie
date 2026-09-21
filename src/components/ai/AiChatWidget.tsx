@@ -68,14 +68,11 @@ export interface CopilotModelOption {
 
 export const COPILOT_MODELS: CopilotModelOption[] = [
   { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', badge: 'Google Gemini', description: 'Google Gemini multimodal intelligence, vision OCR & instant POS tool calling' },
-  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', badge: 'GPT-5.6 Flagship', description: 'Fastest & most cost-efficient GPT-5.6 for store operations' },
-  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', badge: 'GPT-5.6', description: 'Balanced speed & depth for POS inventory & sales execution' },
-  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', badge: 'Frontier', description: 'Frontier intelligence flagship with comprehensive deep reasoning' },
-  { id: 'gpt-5.6', name: 'GPT-5.6 Frontier', badge: 'Frontier', description: 'OpenAI GPT-5.6 frontier intelligence scaling' },
-  { id: 'gpt-5', name: 'GPT-5 Flagship', badge: 'GPT-5', description: 'OpenAI GPT-5 foundational intelligence model' },
-  { id: 'o3-mini', name: 'o3-mini', badge: 'Deep Reasoning', description: 'Intricate POS calculation & inventory auditing' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o mini', badge: 'Fast & Light', description: 'High-speed legacy model, responsive & economical' },
-  { id: 'gpt-4o', name: 'GPT-4o', badge: 'Omni Flagship', description: 'Multimodal vision, complex reasoning & intelligence' },
+  { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', badge: 'Gemini Frontier', description: 'Google advanced reasoning, intricate store analytics & reports' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o mini', badge: 'OpenAI Fast', description: 'OpenAI high-speed, cost-effective vision & POS tool execution' },
+  { id: 'gpt-4o', name: 'GPT-4o', badge: 'OpenAI Flagship', description: 'OpenAI flagship multimodal intelligence, complex reasoning & vision' },
+  { id: 'o3-mini', name: 'o3-mini', badge: 'Deep Reasoning', description: 'OpenAI specialized STEM & mathematical inventory auditing' },
+  { id: 'o1', name: 'o1', badge: 'Frontier Reasoning', description: 'OpenAI frontier deep-thinking reasoning engine' },
 ];
 
 interface AiChatWidgetProps {
@@ -190,7 +187,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     try {
       const cached = localStorage.getItem('mobileshop_copilot_model');
       if (cached && typeof cached === 'string') {
-        if (cached === 'gemini-3.8-live') {
+        if (cached === 'gemini-3.8-live' || cached.startsWith('gpt-5')) {
           localStorage.setItem('mobileshop_copilot_model', 'gemini-3.8-flash');
           return 'gemini-3.8-flash';
         }
@@ -1084,7 +1081,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
                     <div className="pt-1.5 mt-1 border-t border-slate-800 px-1">
                       <div className="text-[10px] text-slate-400 font-semibold mb-1 flex items-center justify-between">
                         <span>Custom Model ID:</span>
-                        <span className="text-[9px] text-indigo-400 font-mono">e.g. gpt-5.6-luna</span>
+                        <span className="text-[9px] text-indigo-400 font-mono">e.g. gpt-4o-mini</span>
                       </div>
                       <div className="flex gap-1.5">
                         <input
