@@ -32,7 +32,7 @@ export class GeminiLiveClient {
     this.callbacks = callbacks;
   }
 
-  public async start(context: PosDataContext): Promise<void> {
+  public async start(context: PosDataContext, model: string = 'gemini-3.8-live'): Promise<void> {
     if (this.isConnected) return;
 
     return new Promise(async (resolve, reject) => {
@@ -59,15 +59,16 @@ export class GeminiLiveClient {
         const host = window.location.host;
         const wsUrl = `${protocol}//${host}/api/live`;
 
-        console.log('[GeminiLiveClient] Connecting to WebSocket:', wsUrl);
+        console.log(`[GeminiLiveClient] Connecting to WebSocket ${wsUrl} with model: ${model}`);
 
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
-          console.log('[GeminiLiveClient] WebSocket open, sending init context...');
+          console.log(`[GeminiLiveClient] WebSocket open, sending init context with model: ${model}...`);
           this.ws?.send(
             JSON.stringify({
               type: 'init',
+              model: model || 'gemini-3.8-live',
               context,
             })
           );

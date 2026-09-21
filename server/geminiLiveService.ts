@@ -203,9 +203,13 @@ export function setupGeminiLiveWebSocket(server: http.Server) {
               },
             });
 
-            console.log('[Gemini Live] Initializing gemini-3.8-live session...');
+            const requestedLiveModel = (typeof payload.model === 'string' && payload.model.trim())
+              ? payload.model.trim()
+              : 'gemini-3.8-live';
+
+            console.log(`[Gemini Live] Initializing ${requestedLiveModel} session...`);
             session = await ai.live.connect({
-              model: 'gemini-3.8-live',
+              model: requestedLiveModel,
               config: {
                 responseModalities: [Modality.AUDIO],
                 speechConfig: {
@@ -228,10 +232,10 @@ When executing a tool, confirm the action in a brief, friendly sentence.`,
               },
               callbacks: {
                 onopen: () => {
-                  console.log('[Gemini Live] Live session opened with gemini-3.8-live');
+                  console.log(`[Gemini Live] Live session opened with ${requestedLiveModel}`);
                   isConnected = true;
                   if (clientWs.readyState === WebSocket.OPEN) {
-                    clientWs.send(JSON.stringify({ type: 'ready', model: 'gemini-3.8-live' }));
+                    clientWs.send(JSON.stringify({ type: 'ready', model: requestedLiveModel }));
                   }
                 },
                 onmessage: async (message: LiveServerMessage) => {

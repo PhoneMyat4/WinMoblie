@@ -46,6 +46,7 @@ import { formatCurrency, getRoleBadgeClass } from '../../utils/formatters';
 import { compressImageForOcr } from '../../utils/boxScannerService';
 import { authenticatedFetch } from '../../utils/apiClient';
 import { GeminiLiveClient } from '../../utils/geminiLiveClient';
+import { GeminiLiveAudioPlayer, GeminiLiveAudioRecorder } from '../../utils/geminiLiveAudio';
 import confetti from 'canvas-confetti';
 import { 
   exportDailyProfitDossierPdf, 
@@ -168,8 +169,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const [inputQuery, setInputQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [speechTranscript, setSpeechTranscript] = useState('');
   const [copiedImei, setCopiedImei] = useState<string | null>(null);
   const [copiedCaption, setCopiedCaption] = useState<string | null>(null);
   const [apiKeyWarning, setApiKeyWarning] = useState<string | null>(null);
@@ -221,7 +220,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
-  const recognitionRef = useRef<any>(null);
 
   // Process selected, dropped, or pasted files
   const processFiles = async (files: File[]) => {
@@ -344,112 +342,8 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     }
   }, [isOpen, messages, isLoading]);
 
-  // Browser Speech Synthesis (Text-to-Speech) for voice assistant mode
-  const speakText = (text: string) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    try {
-      window.speechSynthesis.cancel();
-      const cleanText = text
-        .replace(/[*#_`~\[\]]/g, '')
-        .replace(/\bhttps?:\/\/\S+/gi, '')
-        .slice(0, 320);
-      if (!cleanText.trim()) return;
-
-      const utterance = new SpeechSynthesisUtterance(cleanText);
-      utterance.rate = 1.05;
-      utterance.pitch = 1.0;
-      window.speechSynthesis.speak(utterance);
-    } catch (e) {
-      console.warn('Speech synthesis error:', e);
-    }
-  };
-
-  // Browser Speech Recognition Fallback (hands-free voice input)
-  const startSpeechRecognitionFallback = () => {
-    const SpeechRecognitionClass =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition ||
-      null;
-
-    if (!SpeechRecognitionClass) {
-      setLiveStatus('Voice input not supported in this browser. Please type your message.');
-      setTimeout(() => setLiveStatus(''), 4000);
-      return;
-    }
-
-    try {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {}
-      }
-
-      const recognition = new SpeechRecognitionClass();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        setLiveStatus('Listening to your voice command... (Speak now)');
-      };
-
-      recognition.onresult = (event: any) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const item = event.results[i];
-          if (item.isFinal) {
-            finalTranscript += item[0].transcript;
-          } else {
-            interimTranscript += item[0].transcript;
-          }
-        }
-        const currentText = (finalTranscript || interimTranscript).trim();
-        if (currentText) {
-          setInputQuery(currentText);
-          setSpeechTranscript(currentText);
-          setLiveStatus(`Hearing: "${currentText}"`);
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn('[SpeechRecognition Error]:', event.error);
-        setIsListening(false);
-        if (event.error !== 'no-speech') {
-          setLiveStatus(`Voice notice: ${event.error}`);
-          setTimeout(() => setLiveStatus(''), 3500);
-        }
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-        const textToSubmit = inputRef.current?.value || speechTranscript;
-        if (textToSubmit && textToSubmit.trim()) {
-          setLiveStatus('Processing your voice request...');
-          handleSendMessage(textToSubmit);
-        } else {
-          setLiveStatus('');
-        }
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch (err: any) {
-      console.warn('[SpeechRecognition Start Error]:', err);
-      setIsListening(false);
-      setLiveStatus('Could not access microphone.');
-      setTimeout(() => setLiveStatus(''), 3000);
-    }
-  };
-
-  // Gemini Live Voice Session Management (gemini-3.8-live) with Automatic Voice Fallback
+  // Gemini Live Voice Session Management (gemini-3.8-live bidirectional audio streaming)
   const toggleVoiceRecording = async () => {
-    // Stop any active text-to-speech
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-
     // If active or connecting, cleanly stop session
     if (isLiveVoiceActive || isLiveConnecting) {
       if (liveClientRef.current) {
@@ -460,29 +354,14 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       setIsLiveConnecting(false);
       setIsAiSpeaking(false);
       setAudioVolume(0);
-      setLiveStatus('Voice session ended');
+      setLiveStatus('Live voice session ended');
       setTimeout(() => setLiveStatus(''), 2000);
-      return;
-    }
-
-    // If Speech Recognition is currently listening, stop it
-    if (isListening) {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {}
-      }
-      setIsListening(false);
-      if (speechTranscript || inputQuery) {
-        handleSendMessage(speechTranscript || inputQuery);
-      }
-      setLiveStatus('');
       return;
     }
 
     try {
       setIsLiveConnecting(true);
-      setLiveStatus('Connecting to Gemini 3.8 Live API...');
+      setLiveStatus('Connecting to Gemini 3.8 Live (Speech-to-Speech)...');
 
       const client = new GeminiLiveClient({
         onReady: (model) => {
@@ -548,69 +427,62 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           };
           setMessages((prev) => [...prev, toolMsg]);
         },
-        onError: (err, isConnectionError) => {
-          console.warn('[Gemini Live Error / Fallback]:', err);
+        onError: (err) => {
+          console.warn('[Gemini Live Error]:', err);
           setIsLiveVoiceActive(false);
           setIsLiveConnecting(false);
           setIsAiSpeaking(false);
           setAudioVolume(0);
-
-          if (isConnectionError) {
-            // WebSocket blocked or unavailable on this domain/host -> seamless fallback to Browser Voice!
-            setLiveStatus('Live WebSocket unavailable — switched to Voice Assistant');
-            startSpeechRecognitionFallback();
-          } else {
-            setLiveStatus(err || 'Live voice session ended');
-            setTimeout(() => setLiveStatus(''), 4000);
-          }
+          setLiveStatus(err || 'Live voice session error');
+          setTimeout(() => setLiveStatus(''), 4000);
         },
         onClose: (reason) => {
           console.log('[Gemini Live Closed]:', reason);
           setIsLiveVoiceActive(false);
           setIsLiveConnecting(false);
           setIsAiSpeaking(false);
+          setAudioVolume(0);
           setLiveStatus('');
         },
       });
 
       liveClientRef.current = client;
 
-      await client.start({
-        products,
-        sales,
-        expenses,
-        purchases,
-        cashDrawer,
-        stockAdjustments,
-        currencySymbol: settings.currencySymbol,
-        settings,
-      });
+      // Start bidirectional streaming session requesting gemini-3.8-live
+      await client.start(
+        {
+          products,
+          sales,
+          expenses,
+          purchases,
+          cashDrawer,
+          stockAdjustments,
+          currencySymbol: settings.currencySymbol,
+          settings,
+        },
+        'gemini-3.8-live'
+      );
     } catch (err: any) {
-      console.warn('Live voice startup error, falling back to Web Speech:', err);
+      console.warn('Live voice startup error:', err);
       setIsLiveVoiceActive(false);
       setIsLiveConnecting(false);
-      setLiveStatus('Live WebSocket unavailable — switched to Voice Assistant');
-      startSpeechRecognitionFallback();
+      setIsAiSpeaking(false);
+      setAudioVolume(0);
+      setLiveStatus(err?.message || 'Could not connect to Gemini 3.8 Live API');
+      setTimeout(() => setLiveStatus(''), 4000);
     }
   };
 
-  // Clean up Gemini Live Voice session and Speech Recognition when widget is closed or unmounted
+  // Clean up Gemini Live Voice session when widget is closed or unmounted
   useEffect(() => {
     if (!isOpen) {
       if (liveClientRef.current) {
         liveClientRef.current.stop();
         liveClientRef.current = null;
       }
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch {}
-      }
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
       setIsLiveVoiceActive(false);
       setIsLiveConnecting(false);
       setIsAiSpeaking(false);
-      setIsListening(false);
       setAudioVolume(0);
     }
   }, [isOpen]);
@@ -620,12 +492,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       if (liveClientRef.current) {
         liveClientRef.current.stop();
         liveClientRef.current = null;
-      }
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch {}
-      }
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
       }
     };
   }, []);
@@ -768,14 +634,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     if (!userText && filesToSend.length === 0) return;
     if (isLoading) return;
 
-    // Stop voice if listening (legacy Web Speech fallback)
-    if (isListening && recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-      setIsListening(false);
-    }
-
     // If Gemini Live Voice is currently connected and no files are attached, stream prompt directly to Live session
     if (isLiveVoiceActive && filesToSend.length === 0 && liveClientRef.current) {
       const newMsgId = `usr_${Date.now()}`;
@@ -803,7 +661,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
 
     setMessages((prev) => [...prev, userMessageItem]);
     setInputQuery('');
-    setSpeechTranscript('');
     setAttachedFiles([]);
     setIsLoading(true);
 
@@ -927,12 +784,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       };
 
       setMessages((prev) => [...prev, assistantMsgItem]);
-
-      // If user prompted with speech, read back answer naturally
-      if (speechTranscript || isListening) {
-        speakText(data.reply);
-        setSpeechTranscript('');
-      }
     } catch (err: any) {
       console.error('Chat error:', err);
       const errorMsgItem: ChatMessageItem = {
@@ -1710,28 +1561,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
         </div>
       )}
 
-      {/* Voice Listening Feedback Alert */}
-      {isListening && !isLiveVoiceActive && !isLiveConnecting && (
-        <div className="px-4 py-2 bg-indigo-50 border-t border-indigo-100 flex items-center justify-between text-xs text-indigo-900 animate-pulse">
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
-            <span className="font-semibold">Listening to voice command...</span>
-            <span className="text-slate-500 italic max-w-[200px] truncate">{speechTranscript || 'Speak now...'}</span>
-          </div>
-          <button
-            onClick={() => {
-              if (speechTranscript) {
-                handleSendMessage(speechTranscript);
-              }
-              toggleVoiceRecording();
-            }}
-            className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 underline"
-          >
-            Done & Send
-          </button>
-        </div>
-      )}
-
       {/* File Processing Spinner Indicator */}
       {isProcessingFiles && (
         <div className="px-4 py-1.5 bg-indigo-50/90 border-t border-indigo-100 flex items-center gap-2 text-xs text-indigo-700">
@@ -1908,31 +1737,36 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             <Camera className="w-4 h-4" />
           </button>
 
-          {/* Voice Mic Toggle (Gemini 3.8 Live Voice) */}
+          {/* Voice Mic Toggle (Gemini 3.8 Live Voice - Speech-to-Speech) */}
           <button
             type="button"
             onClick={toggleVoiceRecording}
             title={
               isLiveVoiceActive
-                ? 'Stop Gemini Live Voice Session'
+                ? isAiSpeaking
+                  ? 'Aura is speaking... (Click to disconnect Live Voice)'
+                  : 'Listening in real-time... (Click to disconnect Live Voice)'
                 : isLiveConnecting
                 ? 'Connecting to Gemini 3.8 Live...'
-                : isListening
-                ? 'Stop Listening'
-                : 'Speak with Voice (Gemini 3.8 Live)'
+                : 'Start Live Voice Session (Gemini 3.8 Live Speech-to-Speech)'
             }
-            className={`p-2.5 rounded-xl font-medium transition-all shrink-0 ${
+            className={`px-3 py-2.5 rounded-xl font-medium transition-all shrink-0 flex items-center gap-1.5 ${
               isLiveVoiceActive
-                ? 'bg-rose-600 text-white ring-4 ring-rose-500/40 shadow-md shadow-rose-500/40 animate-pulse'
+                ? isAiSpeaking
+                  ? 'bg-purple-600 hover:bg-purple-700 text-white ring-4 ring-purple-400/40 shadow-md shadow-purple-500/30 animate-pulse'
+                  : 'bg-rose-600 hover:bg-rose-700 text-white ring-4 ring-rose-500/40 shadow-md shadow-rose-500/30 animate-pulse'
                 : isLiveConnecting
-                ? 'bg-amber-500 text-white'
-                : isListening
-                ? 'bg-rose-500 text-white animate-bounce shadow-md shadow-rose-500/30'
+                ? 'bg-amber-500 text-white ring-2 ring-amber-400/40'
                 : 'bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600'
             }`}
           >
-            {isLiveVoiceActive || isListening ? (
-              <MicOff className="w-4 h-4" />
+            {isLiveVoiceActive ? (
+              <>
+                <MicOff className="w-4 h-4" />
+                <span className="text-[11px] font-semibold tracking-tight hidden sm:inline">
+                  {isAiSpeaking ? 'Speaking...' : 'Listening...'}
+                </span>
+              </>
             ) : isLiveConnecting ? (
               <RefreshCw className="w-4 h-4 animate-spin" />
             ) : (
@@ -1950,11 +1784,9 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
               isLiveVoiceActive
                 ? isAiSpeaking
                   ? 'Aura Copilot speaking (speak to interrupt)...'
-                  : 'Listening live... speak or type question...'
+                  : 'Listening live... speak naturally or type question...'
                 : isLiveConnecting
                 ? 'Connecting to Gemini 3.8 Live Voice...'
-                : isListening 
-                ? 'Listening to voice...' 
                 : attachedFiles.length > 0 
                   ? 'Add instructions for attached file(s)...' 
                   : 'Ask reports, paste image, or add phone with IMEI...'
