@@ -1,3 +1,4 @@
+import OpenAI from 'openai';
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 import type { Product, Sale, ExpenseRecord, CashDrawerRecord, StockAdjustment, PurchaseRecord, ShopSettings } from '../src/types/index';
 import { isPhoneProduct } from '../src/data/categoryTaxonomy';
@@ -2049,4 +2050,79 @@ export const openAiAssistantTools: ChatCompletionTool[] = [
 ];
 export const aiAssistantDeclarations = openAiAssistantTools;
 export const AI_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION;
+
+/**
+ * Detects if a model ID represents an OpenAI reasoning model (e.g. gpt-5.6-luna, gpt-5.6-terra, gpt-5.6, o1, o3-mini, etc.).
+ */
+export function isReasoningModel(modelName?: string): boolean {
+  const m = (modelName || '').toLowerCase().trim();
+  return (
+    m.includes('gpt-5') ||
+    m.startsWith('o1') ||
+    m.startsWith('o3') ||
+    m.startsWith('o4')
+  );
+}
+
+/**
+ * Executes an OpenAI chat completion with tools safely across all models.
+ * For reasoning models (gpt-5.6-luna, gpt-5.6-terra, gpt-5.6-sol, gpt-5.6, o3-mini, etc.) in /v1/chat/completions,
+ * OpenAI requires `reasoning_effort: 'none'` when function tools are declared.
+ * Conversely, standard non-reasoning models (gpt-4o, gpt-4o-mini) reject `reasoning_effort` with a 400 error.
+ * This helper dynamically sets `reasoning_effort: 'none'` when needed and provides automated recovery.
+ */
+export async function executeOpenAiChatCompletionWithTools(
+  openai: OpenAI,
+  params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+  const modelName = params.model || '';
+  const hasTools = Boolean(params.tools && params.tools.length > 0);
+  const reasoning = isReasoningModel(modelName);
+
+  const callParams: any = { ...params };
+
+  // For reasoning models with tools in /v1/chat/completions, OpenAI requires reasoning_effort: 'none'
+  if (hasTools && reasoning) {
+    callParams.reasoning_effort = 'none';
+  } else if (!reasoning && 'reasoning_effort' in callParams) {
+    delete callParams.reasoning_effort;
+  }
+
+  try {
+    return await openai.chat.completions.create(callParams);
+  } catch (err: any) {
+    const errMsg = String(err?.message || '');
+
+    // Error recovery 1: "Function tools with reasoning_effort are not supported for ... set reasoning_effort to 'none'"
+    if (
+      errMsg.includes('reasoning_effort') &&
+      (errMsg.includes("set reasoning_effort to 'none'") || errMsg.includes('not supported'))
+    ) {
+      console.warn(`[AI Tool Engine] Applying reasoning_effort='none' auto-recovery for model: ${modelName}`);
+      return await openai.chat.completions.create({
+        ...callParams,
+        reasoning_effort: 'none',
+      });
+    }
+
+    // Error recovery 2: "Unrecognized request argument supplied: reasoning_effort"
+    if (errMsg.includes('Unrecognized request argument') && errMsg.includes('reasoning_effort')) {
+      console.warn(`[AI Tool Engine] Removing reasoning_effort auto-recovery for model: ${modelName}`);
+      const fallbackParams = { ...callParams };
+      delete fallbackParams.reasoning_effort;
+      return await openai.chat.completions.create(fallbackParams);
+    }
+
+    // Error recovery 3: Temperature restrictions on reasoning models
+    if (errMsg.includes('temperature') && errMsg.includes('not supported')) {
+      console.warn(`[AI Tool Engine] Removing temperature auto-recovery for model: ${modelName}`);
+      const fallbackParams = { ...callParams };
+      delete fallbackParams.temperature;
+      return await openai.chat.completions.create(fallbackParams);
+    }
+
+    throw err;
+  }
+}
+
 

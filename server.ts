@@ -11,7 +11,8 @@ import {
   executeAddInventoryItem,
   executeUpdateProductPrice,
   executeQueryInventoryProducts,
-  executeGeneratePdfReport
+  executeGeneratePdfReport,
+  executeOpenAiChatCompletionWithTools
 } from './server/aiAssistant';
 import {
   executePostProductAdToFacebook,
@@ -722,7 +723,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
       }
 
       // Step 1: Initial call with OpenAI Tool Declarations using selected model
-      const response = await openai.chat.completions.create({
+      const response = await executeOpenAiChatCompletionWithTools(openai, {
         model: activeModel,
         messages: formattedMessages,
         tools: openAiAssistantTools,
@@ -809,7 +810,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
             },
           ];
 
-          const secondResponse = await openai.chat.completions.create({
+          const secondResponse = await executeOpenAiChatCompletionWithTools(openai, {
             model: activeModel,
             messages: followUpMessages,
             tools: openAiAssistantTools,

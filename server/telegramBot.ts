@@ -8,6 +8,7 @@ import {
   executeUpdateProductPrice,
   executeQueryInventoryProducts,
   executeGeneratePdfReport,
+  executeOpenAiChatCompletionWithTools,
 } from './aiAssistant';
 import {
   fetchPosDataContext,
@@ -586,7 +587,7 @@ TELEGRAM CHAT SPECIFIC INSTRUCTIONS & STRICT SAFEGUARDS:
     ];
 
     // Initial tool calling pass with OpenAI using selected model
-    const aiResponse = await openai.chat.completions.create({
+    const aiResponse = await executeOpenAiChatCompletionWithTools(openai, {
       model: activeModel,
       messages: formattedMessages,
       tools: openAiAssistantTools,
@@ -662,7 +663,7 @@ TELEGRAM CHAT SPECIFIC INSTRUCTIONS & STRICT SAFEGUARDS:
           },
         ];
 
-        const secondResponse = await openai.chat.completions.create({
+        const secondResponse = await executeOpenAiChatCompletionWithTools(openai, {
           model: activeModel,
           messages: followUpMessages,
           tools: openAiAssistantTools,
