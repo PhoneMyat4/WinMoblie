@@ -187,6 +187,10 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const liveClientRef = useRef<GeminiLiveClient | null>(null);
   const isConnectingOrActiveRef = useRef(false);
 
+  // Voice Dictation (Speech-to-Text Fallback when WebSockets are blocked by proxies)
+  const [isDictating, setIsDictating] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
   // Model Selection State for In-App Copilot
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
@@ -545,6 +549,64 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       stopLiveVoice();
     } else {
       startLiveVoice();
+    }
+  };
+
+  // Start Voice Dictation (Speech-to-Text) fallback
+  const startVoiceDictation = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Your browser does not support Speech Recognition. Please use Google Chrome or Microsoft Edge.');
+      return;
+    }
+
+    try {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'my-MM'; // Burmese dictation, works in Chrome on Windows
+
+      recognition.onstart = () => {
+        setIsDictating(true);
+      };
+
+      recognition.onresult = (event: any) => {
+        const transcript = Array.from(event.results)
+          .map((result: any) => result[0].transcript)
+          .join('');
+        if (transcript) {
+          setInputQuery(transcript);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn('Speech recognition error:', event.error);
+        setIsDictating(false);
+      };
+
+      recognition.onend = () => {
+        setIsDictating(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (e) {
+      console.warn('Failed to start speech recognition:', e);
+      setIsDictating(false);
+    }
+  };
+
+  // Stop active voice dictation
+  const stopVoiceDictation = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+      setIsDictating(false);
     }
   };
 
@@ -1618,22 +1680,52 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
         })}
       </div>
 
-      {/* Gemini Live Voice Session Error Banner */}
+      {/* Gemini Live Voice Session Error Banner with Voice Dictation Fallback */}
       {liveVoiceState === 'error' && (
-        <div className="px-4 py-2.5 bg-rose-50 border-t border-rose-200 flex items-center justify-between text-xs text-rose-900">
+        <div className="px-4 py-2.5 bg-rose-50/95 border-t border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-rose-900 shadow-2xs">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-            <span className="font-semibold">Live Voice is unavailable. Please try again.</span>
+            <div>
+              <p className="font-semibold text-rose-900">Live Voice ဆာဗာ (WebSocket) ချိတ်ဆက်မှု မရရှိပါ</p>
+              <p className="text-[11px] text-rose-700/90">Hosting Proxy ကြောင့်ဖြစ်ပါက Voice Dictation ဖြင့် အသံပြောဆိုနိုင်ပါသည်</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
+            <button
+              type="button"
+              onClick={startVoiceDictation}
+              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-semibold cursor-pointer transition-colors shadow-xs flex items-center gap-1"
+            >
+              <Mic className="w-3.5 h-3.5" />
+              Voice Dictation ဖြင့် မေးမည်
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLiveVoiceError(null);
+                startLiveVoice();
+              }}
+              className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-md text-xs font-semibold cursor-pointer transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Active Voice Dictation Banner */}
+      {isDictating && (
+        <div className="px-4 py-2 bg-indigo-900 text-white border-t border-indigo-700 flex items-center justify-between text-xs animate-pulse">
+          <div className="flex items-center gap-2">
+            <Mic className="w-4 h-4 text-emerald-400 animate-bounce" />
+            <span className="font-medium">အသံနားထောင်နေပါသည် (Listening... စကားပြောပါ)...</span>
           </div>
           <button
             type="button"
-            onClick={() => {
-              setLiveVoiceError(null);
-              startLiveVoice();
-            }}
-            className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-xs font-semibold cursor-pointer transition-colors shadow-xs"
+            onClick={stopVoiceDictation}
+            className="px-2.5 py-0.5 bg-rose-500 hover:bg-rose-600 text-white rounded text-[11px] font-semibold cursor-pointer"
           >
-            Retry
+            ပြီးပြီ (Stop)
           </button>
         </div>
       )}
@@ -1902,39 +1994,55 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             <Camera className="w-4 h-4" />
           </button>
 
-          {/* Voice Mic Toggle (Gemini Live Voice) */}
+          {/* Voice Mic Toggle (Gemini Live Voice with Voice Dictation Fallback) */}
           <button
             type="button"
-            onClick={toggleLiveVoice}
+            onClick={() => {
+              if (isDictating) {
+                stopVoiceDictation();
+              } else if (liveVoiceState === 'listening' || liveVoiceState === 'speaking') {
+                stopLiveVoice();
+              } else if (liveVoiceState === 'error') {
+                startVoiceDictation();
+              } else {
+                toggleLiveVoice();
+              }
+            }}
             title={
-              liveVoiceState === 'listening'
+              isDictating
+                ? 'Listening (Voice Dictation) — Tap to stop'
+                : liveVoiceState === 'listening'
                 ? 'Listening to your voice (Gemini Live) — Tap to stop'
                 : liveVoiceState === 'speaking'
                 ? 'Aura is speaking — Tap to stop'
                 : liveVoiceState === 'connecting'
                 ? 'Connecting to Gemini Live Voice...'
                 : liveVoiceState === 'error'
-                ? 'Live Voice unavailable — Click to retry'
+                ? 'Live Voice unavailable — Click to use Voice Dictation'
                 : 'Speak with Voice (Gemini Live in Burmese)'
             }
             className={`p-2.5 rounded-xl font-medium transition-all shrink-0 cursor-pointer ${
-              liveVoiceState === 'listening'
+              isDictating
+                ? 'bg-emerald-600 text-white ring-4 ring-emerald-500/40 shadow-md animate-pulse'
+                : liveVoiceState === 'listening'
                 ? 'bg-rose-600 text-white ring-4 ring-rose-500/40 shadow-md shadow-rose-500/40 animate-pulse'
                 : liveVoiceState === 'speaking'
                 ? 'bg-cyan-600 text-white ring-4 ring-cyan-500/40 shadow-md animate-pulse'
                 : liveVoiceState === 'connecting'
                 ? 'bg-amber-500 text-white'
                 : liveVoiceState === 'error'
-                ? 'bg-rose-100 text-rose-600 border border-rose-300'
+                ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
                 : 'bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600'
             }`}
           >
-            {liveVoiceState === 'listening' || liveVoiceState === 'speaking' ? (
+            {isDictating ? (
+              <Mic className="w-4 h-4 text-white" />
+            ) : liveVoiceState === 'listening' || liveVoiceState === 'speaking' ? (
               <MicOff className="w-4 h-4" />
             ) : liveVoiceState === 'connecting' ? (
               <RefreshCw className="w-4 h-4 animate-spin" />
             ) : liveVoiceState === 'error' ? (
-              <AlertTriangle className="w-4 h-4" />
+              <Mic className="w-4 h-4 text-indigo-600" />
             ) : (
               <Mic className="w-4 h-4" />
             )}

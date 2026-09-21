@@ -91,8 +91,7 @@ export class GeminiLiveClient {
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
-        const search = window.location.search || '';
-        const wsUrl = `${protocol}//${host}/api/live${search}`;
+        const wsUrl = `${protocol}//${host}/api/live`;
 
         console.log('[GeminiLiveClient] Connecting to WebSocket:', wsUrl);
 
