@@ -38,7 +38,8 @@ export function setupLiveVoiceServer(server: http.Server) {
     try {
       const host = request.headers.host || 'localhost';
       const parsedUrl = new URL(request.url || '', `http://${host}`);
-      if (parsedUrl.pathname === '/api/live-voice') {
+      const p = parsedUrl.pathname;
+      if (p === '/api/live-voice' || p === '/ws/live-voice' || p === '/live-voice') {
         wss.handleUpgrade(request, socket, head, (clientWs) => {
           wss.emit('connection', clientWs, request);
         });

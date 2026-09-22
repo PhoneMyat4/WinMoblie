@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="winGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+    <linearGradient id="phoneGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+  </defs>
+  <!-- Background Rounded Shield -->
+  <rect x="5" y="5" width="90" height="90" rx="24" fill="url(#winGrad)" />
+  <!-- Phone Silhouette -->
+  <rect x="28" y="16" width="44" height="68" rx="8" fill="url(#phoneGrad)" stroke="#ffffff" stroke-width="3" />
+  <!-- Phone Screen -->
+  <rect x="33" y="24" width="34" height="48" rx="3" fill="#0284c7" fill-opacity="0.25" />
+  <!-- Speaker notch -->
+  <line x1="44" y1="20" x2="56" y2="20" stroke="#ffffff" stroke-width="2" stroke-linecap="round" />
+  <!-- Home Indicator / Indicator Dot -->
+  <circle cx="50" cy="77" r="3" fill="#38bdf8" />
+  <!-- Sparkle / AI Star -->
+  <path d="M50 34 L52 42 L60 44 L52 46 L50 54 L48 46 L40 44 L48 42 Z" fill="#38bdf8" />
+</svg>

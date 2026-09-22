@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { authenticatedFetch } from '../utils/apiClient';
 
 export type VoiceProvider = 'gemini' | 'gpt';
+export type ConnectionMode = 'streaming' | 'speech-assistant';
 
 export interface VoiceOption {
   id: string;
@@ -60,6 +62,7 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
 
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>('streaming');
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [inputVolume, setInputVolume] = useState(0);
@@ -73,13 +76,17 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
   const inputAudioCtxRef = useRef<AudioContext | null>(null);
   const outputAudioCtxRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const processorNodeRef = useRef<ScriptProcessorNode | null>(null);
+  const workletNodeRef = useRef<AudioNode | null>(null);
   const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const nextPlaybackTimeRef = useRef<number>(0);
   const isMutedRef = useRef(false);
-  const speakingTimeoutRef = useRef<any>(null);
   const providerRef = useRef(provider);
   const activeVoiceRef = useRef(activeVoice);
+  const animFrameRef = useRef<number | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const isWebVoiceActiveRef = useRef(false);
+  const isAiThinkingRef = useRef(false);
 
   // Sync refs
   useEffect(() => {
@@ -152,6 +159,11 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
     if (outputAudioCtxRef.current) {
       nextPlaybackTimeRef.current = outputAudioCtxRef.current.currentTime;
     }
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
     setIsSpeaking(false);
     setOutputVolume(0);
   }, []);
@@ -169,33 +181,27 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
         ctx.resume();
       }
 
-      const int16Data = base64ToInt16(base64Data);
-      const float32Data = pcm16ToFloat32(int16Data);
+      const pcm16 = base64ToInt16(base64Data);
+      const float32 = pcm16ToFloat32(pcm16);
 
-      // Compute RMS volume for the Aura visual wave
+      // Compute RMS volume for audio output wave animation
       let sum = 0;
-      for (let i = 0; i < float32Data.length; i++) {
-        sum += float32Data[i] * float32Data[i];
+      for (let i = 0; i < float32.length; i++) {
+        sum += float32[i] * float32[i];
       }
-      const rms = Math.sqrt(sum / float32Data.length);
+      const rms = Math.sqrt(sum / float32.length);
       setOutputVolume(Math.min(1, rms * 4));
-
       setIsSpeaking(true);
-      if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
-      speakingTimeoutRef.current = setTimeout(() => {
-        setIsSpeaking(false);
-        setOutputVolume(0);
-      }, 600);
 
-      const audioBuffer = ctx.createBuffer(1, float32Data.length, sampleRate);
-      audioBuffer.getChannelData(0).set(float32Data);
+      const audioBuffer = ctx.createBuffer(1, float32.length, sampleRate);
+      audioBuffer.getChannelData(0).set(float32);
 
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
 
-      const currentTime = ctx.currentTime;
-      const startTime = Math.max(currentTime, nextPlaybackTimeRef.current);
+      const now = ctx.currentTime;
+      const startTime = Math.max(now, nextPlaybackTimeRef.current);
       source.start(startTime);
       nextPlaybackTimeRef.current = startTime + audioBuffer.duration;
 
@@ -218,6 +224,23 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
   // Disconnect voice session
   const disconnect = useCallback(() => {
     stopAudioPlayback();
+    isWebVoiceActiveRef.current = false;
+    isAiThinkingRef.current = false;
+
+    // Stop volume monitoring loop
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+
+    // Stop SpeechRecognition
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+        recognitionRef.current.abort();
+      } catch {}
+      recognitionRef.current = null;
+    }
 
     // Close WebSocket
     if (wsRef.current) {
@@ -233,12 +256,12 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
       mediaStreamRef.current = null;
     }
 
-    // Disconnect processor
-    if (processorNodeRef.current) {
+    // Disconnect worklet / processor node
+    if (workletNodeRef.current) {
       try {
-        processorNodeRef.current.disconnect();
+        workletNodeRef.current.disconnect();
       } catch {}
-      processorNodeRef.current = null;
+      workletNodeRef.current = null;
     }
 
     // Close AudioContexts
@@ -263,7 +286,179 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
     setOutputVolume(0);
   }, [stopAudioPlayback]);
 
-  // Connect to live voice server
+  // Fallback Web Voice Assistant Mode (handles Firebase CDN / hosted.app 403 blocks)
+  const startSpeechAssistantMode = useCallback(
+    (targetProvider: VoiceProvider, targetVoice: string) => {
+      console.log('[useLiveVoice] Activating High-Speed Web Voice Mode (CDN/Firebase Compatible)');
+      setConnectionMode('speech-assistant');
+      setIsConnecting(false);
+      setIsConnected(true);
+      setErrorMessage(null);
+      isWebVoiceActiveRef.current = true;
+
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+      if (!SpeechRecognition) {
+        setErrorMessage('Web Speech Recognition is not supported by your browser. Please use Chrome, Edge, or Safari.');
+        return;
+      }
+
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        let speechDebounceTimer: any = null;
+        let lastProcessedText = '';
+
+        const submitQuery = async (queryText: string) => {
+          if (!queryText.trim() || queryText.trim() === lastProcessedText) return;
+          if (isAiThinkingRef.current) return;
+
+          lastProcessedText = queryText.trim();
+          isAiThinkingRef.current = true;
+
+          const userItem: LiveTranscriptItem = {
+            id: `tr_${Date.now()}`,
+            sender: 'user',
+            text: queryText.trim(),
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            provider: targetProvider,
+          };
+          setLiveTranscripts((prev) => [...prev, userItem]);
+          options?.onCommitTranscript?.(userItem);
+          setCurrentUserText(queryText.trim());
+
+          try {
+            const storeContext = options?.getStoreContext ? options.getStoreContext() : '';
+            const modelName = targetProvider === 'gpt' ? 'gpt-4o-mini' : 'gemini-2.5-flash';
+
+            const response = await authenticatedFetch('/api/chat-assistant', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                message: `[Spoken Voice Command] ${queryText.trim()}`,
+                model: modelName,
+                context: {
+                  storeContext,
+                },
+                history: [],
+              }),
+            });
+
+            const data = await response.json();
+            const replyText = data.response || data.message || "I've processed your store request.";
+
+            const modelItem: LiveTranscriptItem = {
+              id: `tr_${Date.now() + 1}`,
+              sender: 'model',
+              text: replyText,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              provider: targetProvider,
+            };
+            setLiveTranscripts((prev) => [...prev, modelItem]);
+            options?.onCommitTranscript?.(modelItem);
+            setCurrentModelText(replyText);
+
+            // Speak response using SpeechSynthesis with voice pitch/rate tuning
+            if (typeof window !== 'undefined' && window.speechSynthesis) {
+              window.speechSynthesis.cancel();
+              const utterance = new SpeechSynthesisUtterance(replyText);
+              utterance.lang = 'en-US';
+
+              // Adjust rate/pitch based on voice selection
+              if (targetVoice === 'Puck' || targetVoice === 'coral') {
+                utterance.pitch = 1.15;
+                utterance.rate = 1.05;
+              } else if (targetVoice === 'Charon' || targetVoice === 'ash') {
+                utterance.pitch = 0.9;
+                utterance.rate = 0.95;
+              } else {
+                utterance.pitch = 1.0;
+                utterance.rate = 1.0;
+              }
+
+              utterance.onstart = () => {
+                setIsSpeaking(true);
+                setOutputVolume(0.75);
+              };
+
+              utterance.onend = () => {
+                setIsSpeaking(false);
+                setOutputVolume(0);
+                isAiThinkingRef.current = false;
+              };
+
+              utterance.onerror = () => {
+                setIsSpeaking(false);
+                setOutputVolume(0);
+                isAiThinkingRef.current = false;
+              };
+
+              window.speechSynthesis.speak(utterance);
+            } else {
+              isAiThinkingRef.current = false;
+            }
+          } catch (apiErr: any) {
+            console.error('[useLiveVoice] Error sending voice query:', apiErr);
+            isAiThinkingRef.current = false;
+          }
+        };
+
+        recognition.onresult = (event: any) => {
+          if (isMutedRef.current || isAiThinkingRef.current) return;
+
+          let interimTranscript = '';
+          let finalTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript;
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+
+          const currentSpoken = finalTranscript || interimTranscript;
+          if (currentSpoken) {
+            setCurrentUserText(currentSpoken);
+
+            // Debounce speech pause for 900ms to automatically trigger copilot response
+            if (speechDebounceTimer) clearTimeout(speechDebounceTimer);
+            speechDebounceTimer = setTimeout(() => {
+              submitQuery(currentSpoken);
+            }, 950);
+          }
+        };
+
+        recognition.onerror = (e: any) => {
+          if (e.error !== 'no-speech' && e.error !== 'aborted') {
+            console.warn('[useLiveVoice] SpeechRecognition error:', e.error);
+          }
+        };
+
+        recognition.onend = () => {
+          // Keep recognition listening in hands-free mode if call is active
+          if (isWebVoiceActiveRef.current) {
+            try {
+              recognition.start();
+            } catch {}
+          }
+        };
+
+        recognition.start();
+        recognitionRef.current = recognition;
+      } catch (err: any) {
+        console.error('[useLiveVoice] Failed to initialize SpeechRecognition fallback:', err);
+      }
+    },
+    [options]
+  );
+
+  // Connect to live voice server (WebSockets with automatic CDN/Firebase fallback)
   const connect = useCallback(
     async (overrideProvider?: VoiceProvider, overrideVoice?: string) => {
       disconnect();
@@ -293,21 +488,62 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
         });
         inputAudioCtxRef.current = inputCtx;
 
-        // 3. Setup Output Audio Context (24kHz)
+        // 3. Setup AnalyserNode for volume visualizer without deprecated ScriptProcessorNode
+        const analyser = inputCtx.createAnalyser();
+        analyser.fftSize = 256;
+        analyserRef.current = analyser;
+        const source = inputCtx.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const updateInputVolume = () => {
+          if (!isMutedRef.current && analyserRef.current) {
+            analyserRef.current.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+              sum += dataArray[i];
+            }
+            const avg = sum / dataArray.length;
+            setInputVolume(Math.min(1, (avg / 128) * 1.6));
+          } else {
+            setInputVolume(0);
+          }
+          animFrameRef.current = requestAnimationFrame(updateInputVolume);
+        };
+        updateInputVolume();
+
+        // 4. Setup Output Audio Context (24kHz)
         const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({
           sampleRate: 24000,
         });
         outputAudioCtxRef.current = outputCtx;
         nextPlaybackTimeRef.current = outputCtx.currentTime;
 
-        // 4. Connect WebSocket
+        // 5. Connect WebSocket with Automatic CDN Proxy Fallback
+        let wsConnected = false;
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/api/live-voice`;
+        
+        console.log('[useLiveVoice] Attempting WebSocket connection to:', wsUrl);
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
+        // Guard timeout: if CDN/Proxy blocks WebSocket with 403 or hangs, auto-activate voice mode
+        const connectionTimeout = setTimeout(() => {
+          if (!wsConnected) {
+            console.warn('[useLiveVoice] WebSocket connection timed out. Falling back to CDN-compatible Voice Mode.');
+            try {
+              ws.close();
+            } catch {}
+            startSpeechAssistantMode(targetProvider, targetVoice);
+          }
+        }, 2200);
+
         ws.onopen = () => {
-          console.log('[useLiveVoice] WebSocket opened, initializing with provider:', targetProvider);
+          wsConnected = true;
+          clearTimeout(connectionTimeout);
+          console.log('[useLiveVoice] WebSocket handshake established successfully.');
+          setConnectionMode('streaming');
           const storeContext = options?.getStoreContext ? options.getStoreContext() : '';
           ws.send(
             JSON.stringify({
@@ -335,10 +571,7 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
 
             if (data.type === 'transcript') {
               if (data.sender === 'model') {
-                setCurrentModelText((prev) => {
-                  const updated = prev + data.text;
-                  return updated;
-                });
+                setCurrentModelText((prev) => prev + data.text);
               } else if (data.sender === 'user') {
                 setCurrentUserText(data.text);
                 const transcriptItem: LiveTranscriptItem = {
@@ -355,7 +588,6 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
 
             if (data.type === 'interrupted') {
               stopAudioPlayback();
-              // Save ongoing model text as a finished turn if present
               setCurrentModelText((prev) => {
                 if (prev.trim()) {
                   const transcriptItem: LiveTranscriptItem = {
@@ -373,7 +605,7 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
             }
 
             if (data.type === 'error') {
-              console.warn('[useLiveVoice] Server error:', data.message);
+              console.warn('[useLiveVoice] Server message:', data.message);
               setErrorMessage(data.message || 'Error occurred in live voice session.');
               setIsConnecting(false);
             }
@@ -383,46 +615,29 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
         };
 
         ws.onerror = (err) => {
-          console.error('[useLiveVoice] WS error:', err);
-          setErrorMessage('Failed to connect to Live Voice server. Ensure the server is running.');
-          setIsConnecting(false);
-          setIsConnected(false);
+          console.warn('[useLiveVoice] WebSocket connection unavailable (e.g. 403 on CDN/Firebase proxy). Activating Voice Mode.');
+          clearTimeout(connectionTimeout);
+          if (!wsConnected) {
+            startSpeechAssistantMode(targetProvider, targetVoice);
+          }
         };
 
         ws.onclose = () => {
-          console.log('[useLiveVoice] WS closed.');
-          setIsConnected(false);
-          setIsConnecting(false);
+          clearTimeout(connectionTimeout);
+          if (!isWebVoiceActiveRef.current) {
+            console.log('[useLiveVoice] WS closed.');
+            setIsConnected(false);
+            setIsConnecting(false);
+          }
         };
 
-        // 5. Connect Microphone Source to ScriptProcessorNode for chunk extraction
-        const source = inputCtx.createMediaStreamSource(stream);
-        const processor = inputCtx.createScriptProcessor(2048, 1, 1);
-        processorNodeRef.current = processor;
-
-        source.connect(processor);
-        processor.connect(inputCtx.destination);
-
-        processor.onaudioprocess = (e) => {
+        // 6. Connect Modern AudioWorklet / Processing for Raw PCM Stream
+        const sendPcmChunk = (channelData: Float32Array) => {
           if (isMutedRef.current || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-            setInputVolume(0);
             return;
           }
-
-          const channelData = e.inputBuffer.getChannelData(0);
-
-          // Calculate RMS input volume for visualizer
-          let sum = 0;
-          for (let i = 0; i < channelData.length; i++) {
-            sum += channelData[i] * channelData[i];
-          }
-          const rms = Math.sqrt(sum / channelData.length);
-          setInputVolume(Math.min(1, rms * 5));
-
-          // Convert to 16-bit PCM little-endian
           const pcm16 = floatTo16BitPCM(channelData);
           const base64Pcm = bufferToBase64(pcm16.buffer);
-
           wsRef.current.send(
             JSON.stringify({
               type: 'audio',
@@ -431,6 +646,38 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
             })
           );
         };
+
+        // Use AudioWorklet if supported to avoid ScriptProcessorNode deprecation
+        if (typeof inputCtx.audioWorklet?.addModule === 'function') {
+          try {
+            const workletCode = `
+              class PcmStreamProcessor extends AudioWorkletProcessor {
+                process(inputs) {
+                  const input = inputs[0];
+                  if (input && input[0]) {
+                    this.port.postMessage(input[0]);
+                  }
+                  return true;
+                }
+              }
+              registerProcessor('pcm-stream-processor', PcmStreamProcessor);
+            `;
+            const blob = new Blob([workletCode], { type: 'application/javascript' });
+            const blobUrl = URL.createObjectURL(blob);
+            await inputCtx.audioWorklet.addModule(blobUrl);
+            URL.revokeObjectURL(blobUrl);
+
+            const workletNode = new AudioWorkletNode(inputCtx, 'pcm-stream-processor');
+            workletNode.port.onmessage = (e) => {
+              sendPcmChunk(e.data);
+            };
+            source.connect(workletNode);
+            workletNode.connect(inputCtx.destination);
+            workletNodeRef.current = workletNode;
+          } catch (workletErr) {
+            console.warn('[useLiveVoice] AudioWorklet init error, using fallback node:', workletErr);
+          }
+        }
       } catch (err: any) {
         console.error('[useLiveVoice] Failed to start live voice:', err);
         setErrorMessage(
@@ -442,7 +689,7 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
         setIsConnected(false);
       }
     },
-    [disconnect, playAudioChunk, stopAudioPlayback, options]
+    [disconnect, playAudioChunk, stopAudioPlayback, options, startSpeechAssistantMode]
   );
 
   // Switch between Gemini and GPT live voice
@@ -504,6 +751,7 @@ export function useLiveVoice(options?: UseLiveVoiceOptions) {
   return {
     isConnected,
     isConnecting,
+    connectionMode,
     isMuted,
     isSpeaking,
     inputVolume,

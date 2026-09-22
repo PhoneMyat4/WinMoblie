@@ -54,12 +54,14 @@ async function startServer() {
   );
 
   app.use('/api', (req, res, next) => {
-    // Whitelist health check and direct Telegram webhook integration endpoints
+    // Whitelist health check, direct Telegram webhook, and live voice endpoints
     if (
       req.path === '/health' ||
       req.path === '/webhook/telegram' ||
       req.path === '/setup-telegram-webhook' ||
-      req.path === '/telegram-webhook-info'
+      req.path === '/telegram-webhook-info' ||
+      req.path === '/live-voice' ||
+      req.path.startsWith('/live-voice')
     ) {
       return next();
     }

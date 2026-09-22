@@ -43,6 +43,7 @@ export const LiveVoiceCallModal: React.FC<LiveVoiceCallModalProps> = ({
   const {
     isConnected,
     isConnecting,
+    connectionMode,
     isMuted,
     isSpeaking,
     inputVolume,
@@ -106,16 +107,22 @@ export const LiveVoiceCallModal: React.FC<LiveVoiceCallModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-semibold text-base text-slate-100 tracking-tight">Aura Live Voice</h3>
-                <span className="px-2 py-0.5 text-xs font-semibold uppercase tracking-wider rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  Sub-Second
+                <span className={`px-2 py-0.5 text-xs font-semibold uppercase tracking-wider rounded-full border ${
+                  connectionMode === 'streaming'
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                    : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+                }`}>
+                  {connectionMode === 'streaming' ? 'Live Stream' : 'Voice Mode'}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
                 {isConnecting
-                  ? 'Connecting audio stream...'
+                  ? 'Connecting audio...'
                   : isConnected
                   ? isSpeaking
                     ? 'Aura is speaking...'
+                    : connectionMode === 'speech-assistant'
+                    ? 'Listening... speak hands-free'
                     : 'Listening to your voice...'
                   : 'Call disconnected'}
               </p>
