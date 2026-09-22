@@ -1,9 +1,11 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import OpenAI from 'openai';
+import { setupLiveVoiceServer } from './server/liveVoiceService';
 import { 
   openAiAssistantTools, 
   AI_SYSTEM_INSTRUCTION, 
@@ -1903,8 +1905,11 @@ Output a JSON response with:
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Mobile Shop POS server running at http://0.0.0.0:${PORT}`);
+  const server = http.createServer(app);
+  setupLiveVoiceServer(server);
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Mobile Shop POS server with Live Voice running at http://0.0.0.0:${PORT}`);
   });
 }
 

@@ -35,7 +35,9 @@ import {
   UploadCloud,
   FileUp,
   Cpu,
-  FileDown
+  FileDown,
+  PhoneCall,
+  Radio
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Product, Sale, ExpenseRecord, PurchaseRecord, CashDrawerRecord, StockAdjustment, ShopSettings, StaffUser, StaffRole, RolePermissions, FacebookAdPostRecord } from '../../types';
@@ -44,6 +46,8 @@ import { formatCurrency, getRoleBadgeClass } from '../../utils/formatters';
 import { compressImageForOcr } from '../../utils/boxScannerService';
 import { authenticatedFetch } from '../../utils/apiClient';
 import confetti from 'canvas-confetti';
+import { LiveVoiceCallModal } from './LiveVoiceCallModal';
+import { LiveTranscriptItem } from '../../hooks/useLiveVoice';
 import { 
   exportDailyProfitDossierPdf, 
   exportDailyProfitStatementPdf, 
@@ -158,7 +162,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       {
         id: 'msg_welcome',
         role: 'assistant',
-        content: `👋 **Hello! I'm Aura, your AI Store Copilot.**\n\nI can execute live POS database operations via **OpenAI Function Calling (GPT-4o-mini)**:\n- 📊 **Query POS Reports**: Z-Reports, Stock Aging, Dead Stock, IMEI lifecycle tracking, Category margins.\n- 📱 **Add Inventory**: Say e.g. *"Add 1 Xiaomi Redmi Note 14 Pro 8/256GB Black for $220 cost, $270 sell with IMEI 864201061234567"*\n- 🎙️ **Voice Commands**: Click the mic to speak in real-time!`,
+        content: `👋 **Hello! I'm Aura, your AI Store Copilot.**\n\nI can execute live POS database operations via **OpenAI Function Calling** and **Full-Duplex Live Voice Streaming**:\n- 📞 **Live Voice Call**: Click **"Live Voice"** in the header or bottom bar to talk hands-free with sub-second latency! Easily switch between **Gemini 3.8 Live** and **GPT-4o Realtime**.\n- 📊 **Query POS Reports**: Z-Reports, Stock Aging, Dead Stock, IMEI lifecycle tracking, Category margins.\n- 📱 **Add Inventory**: Say e.g. *"Add 1 Xiaomi Redmi Note 14 Pro 8/256GB Black for $220 cost, $270 sell with IMEI 864201061234567"*\n- 🎙️ **Voice Commands**: Click the phone or mic icon to converse in real-time!`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ];
@@ -172,6 +176,43 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const [copiedImei, setCopiedImei] = useState<string | null>(null);
   const [copiedCaption, setCopiedCaption] = useState<string | null>(null);
   const [apiKeyWarning, setApiKeyWarning] = useState<string | null>(null);
+  const [isLiveVoiceOpen, setIsLiveVoiceOpen] = useState(false);
+
+  // Synchronize Live Voice transcript messages into main Copilot chat history
+  const handleLiveVoiceTranscript = (item: LiveTranscriptItem) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: item.id,
+        role: item.sender === 'user' ? 'user' : 'assistant',
+        content: item.text,
+        timestamp: item.timestamp,
+      },
+    ]);
+  };
+
+  // Build live POS context summary for real-time voice assistant
+  const getLiveStoreSummary = () => {
+    try {
+      const topProducts = products.slice(0, 15).map((p) => ({
+        name: p.name,
+        brand: p.brand,
+        price: p.sellingPrice,
+        stock: p.stock,
+      }));
+      return JSON.stringify({
+        shopName: settings.shopName || 'Mobile Shop',
+        currency: settings.currencySymbol || 'MMK',
+        totalProductsCount: products.length,
+        totalInventoryUnits: products.reduce((acc, p) => acc + (p.stock || 0), 0),
+        todaySalesCount: sales.length,
+        drawerClosing: cashDrawer?.actualCounted || cashDrawer?.expectedInDrawer || cashDrawer?.openingBalance || 0,
+        sampleInventory: topProducts,
+      });
+    } catch {
+      return '';
+    }
+  };
 
   // Model Selection State for In-App Copilot
   const [selectedModel, setSelectedModel] = useState<string>(() => {
@@ -852,7 +893,19 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
+          {/* Live Voice Call Trigger Button (Sub-Second Gemini & GPT) */}
+          <button
+            id="btn-header-live-voice-call"
+            type="button"
+            onClick={() => setIsLiveVoiceOpen(true)}
+            title="Start Sub-Second Live Voice Call (Gemini & GPT)"
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 text-white rounded-lg text-xs font-semibold shadow-sm transition-all hover:scale-105 active:scale-95 cursor-pointer"
+          >
+            <PhoneCall className="w-3.5 h-3.5 animate-pulse" />
+            <span className="text-[11px] tracking-tight">Live Voice</span>
+          </button>
+
           <button
             onClick={handleClearHistory}
             title="Clear Chat History"
@@ -1567,6 +1620,17 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
           </button>
 
+          {/* Sub-Second Live Voice Call Trigger Button (Gemini & GPT) */}
+          <button
+            type="button"
+            id="btn-live-voice-call-trigger"
+            onClick={() => setIsLiveVoiceOpen(true)}
+            title="Start Sub-Second Live Voice Call (Gemini & GPT)"
+            className="p-2.5 rounded-xl font-medium transition-all shrink-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-800 border border-emerald-200 shadow-xs cursor-pointer"
+          >
+            <PhoneCall className="w-4 h-4 text-emerald-600" />
+          </button>
+
           {/* Text Input */}
           <input
             ref={inputRef}
@@ -1651,6 +1715,14 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           </div>
         </div>
       )}
+
+      {/* Real-Time Full-Duplex Live Voice Call Modal (Gemini 3.8 Live & GPT-4o Realtime) */}
+      <LiveVoiceCallModal
+        isOpen={isLiveVoiceOpen}
+        onClose={() => setIsLiveVoiceOpen(false)}
+        getStoreContext={getLiveStoreSummary}
+        onTranscriptReceived={handleLiveVoiceTranscript}
+      />
     </div>
   );
 };
