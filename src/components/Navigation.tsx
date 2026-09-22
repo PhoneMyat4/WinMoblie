@@ -455,7 +455,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                   </div>
                   <div>
                     <span className="text-xs font-bold text-white leading-none block">AI Copilot</span>
-                    <span className="text-[10px] text-indigo-300 font-medium">Voice & Reports</span>
+                    <span className="text-[10px] text-indigo-300 font-medium">Store Assistant</span>
                   </div>
                 </div>
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 font-semibold">
@@ -468,7 +468,7 @@ export const Navigation: React.FC<NavigationProps> = ({
               type="button"
               id="sidebar-ai-copilot-icon"
               onClick={onOpenAiAssistant}
-              title="Open AI Store Copilot (Voice & Reports)"
+              title="Open Aura AI Store Copilot"
               className="w-10 h-10 mx-auto rounded-xl bg-indigo-900/60 hover:bg-indigo-800 border border-indigo-500/40 text-indigo-200 flex items-center justify-center transition-colors cursor-pointer group"
             >
               <Bot className="w-4 h-4 group-hover:scale-110 transition-transform" />

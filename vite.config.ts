@@ -20,7 +20,7 @@ export default defineConfig(() => {
     },
     define: {
       'import.meta.env.VITE_API_TOKEN': JSON.stringify(
-        process.env.VITE_API_TOKEN || process.env.API_AUTH_TOKEN || 'pos_sec_token_9938148'
+        process.env.VITE_API_TOKEN || process.env.API_AUTH_TOKEN || ''
       ),
     },
     build: {

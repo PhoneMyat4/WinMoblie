@@ -26,15 +26,17 @@ class SyncManager {
   private listeners: Set<(state: SyncStateInfo) => void> = new Set();
   private broadcastChannel: BroadcastChannel | null = null;
   private lastWarningLogTime = 0;
-  private lastWarningMessage = '';
+  private lastWarningKey = '';
 
   private logSyncWarning(prefix: string, error: any) {
-    const message = error instanceof Error ? error.message : String(error);
+    const errText = error instanceof Error ? error.message : String(error);
+    const key = `${prefix}::${errText}`;
     const now = Date.now();
-    if (message !== this.lastWarningMessage || now - this.lastWarningLogTime > 60000) {
+    // Throttle duplicate warning logs to at most once per 60 seconds
+    if (key !== this.lastWarningKey || now - this.lastWarningLogTime > 60000) {
       console.warn(`${prefix}:`, error);
       this.lastWarningLogTime = now;
-      this.lastWarningMessage = message;
+      this.lastWarningKey = key;
     }
   }
 
@@ -144,7 +146,7 @@ class SyncManager {
         this.lastSyncedServerTimestamp = result.serverTimestamp || localTs;
         this.lastKnownLocalTimestamp = this.lastSyncedServerTimestamp;
         this.lastSyncTime = new Date();
-        this.lastWarningMessage = '';
+        this.lastWarningKey = '';
         this.setStatus('synced');
 
         // If server had newer data from another tab, apply it
@@ -183,7 +185,7 @@ class SyncManager {
       const result = await response.json();
       if (result.success) {
         this.lastSyncTime = new Date();
-        this.lastWarningMessage = '';
+        this.lastWarningKey = '';
         
         if (result.hasUpdates && result.data) {
           this.lastSyncedServerTimestamp = result.serverTimestamp;

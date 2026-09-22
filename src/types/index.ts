@@ -952,6 +952,7 @@ export interface ShopSecretsConfig {
   fbPageAccessToken?: string;
   telegramBotToken?: string;
   telegramChatId?: string;
+  telegramSecretToken?: string;
   telegramBotModel?: string;
   chatAssistantModel?: string;
   customWebhookUrl?: string;

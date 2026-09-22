@@ -4,8 +4,6 @@ import {
   TrendingUp, 
   X, 
   Send, 
-  Mic, 
-  MicOff, 
   RefreshCw, 
   CheckCircle2, 
   Maximize2, 
@@ -19,7 +17,6 @@ import {
   Check, 
   ExternalLink,
   ChevronDown,
-  Volume2,
   Wand2,
   Trash2,
   Lock,
@@ -35,9 +32,7 @@ import {
   UploadCloud,
   FileUp,
   Cpu,
-  FileDown,
-  PhoneCall,
-  Radio
+  FileDown
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Product, Sale, ExpenseRecord, PurchaseRecord, CashDrawerRecord, StockAdjustment, ShopSettings, StaffUser, StaffRole, RolePermissions, FacebookAdPostRecord } from '../../types';
@@ -46,8 +41,6 @@ import { formatCurrency, getRoleBadgeClass } from '../../utils/formatters';
 import { compressImageForOcr } from '../../utils/boxScannerService';
 import { authenticatedFetch } from '../../utils/apiClient';
 import confetti from 'canvas-confetti';
-import { LiveVoiceCallModal } from './LiveVoiceCallModal';
-import { LiveTranscriptItem } from '../../hooks/useLiveVoice';
 import { 
   exportDailyProfitDossierPdf, 
   exportDailyProfitStatementPdf, 
@@ -128,7 +121,17 @@ export interface ChatMessageItem {
   };
 }
 
-const QUICK_PROMPTS = [
+const QUICK_PROMPTS_BURMESE = [
+  { label: "📊 နေ့စဥ်အရောင်း Z-Report", prompt: "ယနေ့အတွက် Z-Report အကျဉ်းချုပ်နှင့် စုစုပေါင်းအရောင်း၊ ကုန်ကျစရိတ်များကို မြန်မာလို ရှင်းပြပေးပါရှင်။", icon: BarChart3 },
+  { label: "📱 ဖုန်းလက်ကျန်စစ်မည်", prompt: "လက်ရှိဆိုင်မှာ အသင့်ရှိတဲ့ ဖုန်းလက်ကျန်စာရင်းနှင့် ဈေးနှုန်းများကို ဖော်ပြပေးပါရှင်။", icon: Package },
+  { label: "💰 ယနေ့ အမြတ်ငွေစာရင်း", prompt: "ယနေ့အတွက် ရရှိသော အသားတင်အမြတ်ငွေနှင့် အရောင်းအခြေအနေကို တွက်ချက်ပြပေးပါရှင်။", icon: TrendingUp },
+  { label: "📄 အမြတ်ငွေ PDF ထုတ်မည်", prompt: "ယနေ့အတွက် Daily Gross Profit & P&L Audit Dossier ကို PDF အဖြစ် download ဆွဲပေးပါရှင်။", icon: Download },
+  { label: "🔍 IMEI စစ်ဆေးမည်", prompt: "ဖုန်း၏ IMEI နံပါတ်ဖြင့် အရောင်းနှင့် ပစ္စည်းမှတ်တမ်းကို စစ်ဆေးပေးပါရှင်။", icon: Wand2 },
+  { label: "⚠️ လက်ကျန်နည်းပစ္စည်းများ", prompt: "ဆိုင်တွင် လက်ကျန်နည်းနေသော ပစ္စည်းများနှင့် Dead Stock စာရင်းကို ပြပေးပါရှင်။", icon: AlertTriangle },
+  { label: "📢 Facebook ကြော်ငြာတင်မည်", prompt: "ဆိုင်မှာရှိတဲ့ လူကြိုက်များသော ဖုန်းတစ်လုံးအတွက် Facebook page မှာ တင်ဖို့ ကြော်ငြာစာ ရေးပေးပါရှင်။", icon: Share2 },
+];
+
+const QUICK_PROMPTS_ENGLISH = [
   { label: "Download Daily Profit PDF", prompt: "Please generate and download today's Daily Gross Profit & P&L Audit Dossier as a PDF report.", icon: Download },
   { label: "Annual Profit PDF", prompt: "Generate and download our Annual Profit and Loss Statement PDF report for this fiscal year.", icon: FileText },
   { label: "Scan Phone Box", prompt: "Please inspect this phone box photo, read the sticker, and extract brand, model, specs, and IMEI to register into inventory.", icon: ImageIcon },
@@ -157,12 +160,31 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   currentStaffUser,
   rolePermissions,
 }) => {
+  const [chatLanguage, setChatLanguage] = useState<'my' | 'en'>(() => {
+    try {
+      const stored = localStorage.getItem('mobileshop_copilot_lang');
+      if (stored === 'en' || stored === 'my') return stored;
+    } catch {}
+    return 'my'; // Default to Burmese (မြန်မာ)
+  });
+
   const [messages, setMessages] = useState<ChatMessageItem[]>(() => {
+    const isBurmese = (() => {
+      try {
+        const stored = localStorage.getItem('mobileshop_copilot_lang');
+        return stored !== 'en';
+      } catch {
+        return true;
+      }
+    })();
+
     return [
       {
         id: 'msg_welcome',
         role: 'assistant',
-        content: `👋 **Hello! I'm Aura, your AI Store Copilot.**\n\nI can execute live POS database operations via **OpenAI Function Calling** and **Full-Duplex Live Voice Streaming**:\n- 📞 **Live Voice Call**: Click **"Live Voice"** in the header or bottom bar to talk hands-free with sub-second latency! Easily switch between **Gemini 3.8 Live** and **GPT-4o Realtime**.\n- 📊 **Query POS Reports**: Z-Reports, Stock Aging, Dead Stock, IMEI lifecycle tracking, Category margins.\n- 📱 **Add Inventory**: Say e.g. *"Add 1 Xiaomi Redmi Note 14 Pro 8/256GB Black for $220 cost, $270 sell with IMEI 864201061234567"*\n- 🎙️ **Voice Commands**: Click the phone or mic icon to converse in real-time!`,
+        content: isBurmese
+          ? `👋 **မင်္ဂလာပါ! ကျွန်မကတော့ ဖုန်းဆိုင်အတွက် AI Store Copilot ဖြစ်တဲ့ Aura ပါရှင်။**\n\nစတိုးဆိုင်၏ POS စာရင်းများ၊ အရောင်းအဝယ်များနှင့် ပစ္စည်းလက်ကျန်များကို တိုက်ရိုက်မေးမြန်း စီမံနိုင်ပါတယ်ရှင်:\n- 📊 **အရောင်းနှင့် စာရင်းစစ်ဆေးခြင်း**: နေ့စဥ် Z-Report၊ အမြတ်ငွေစာရင်း၊ ပစ္စည်းလက်ကျန် (Stock) နှင့် IMEI ရာဇဝင်များကို မေးမြန်းနိုင်ပါတယ်။\n- 📱 **ပစ္စည်းအသစ်စာရင်းသွင်းခြင်း**: ဥပမာ *"Redmi Note 14 Pro 8/256GB အမည်းရောင် ဝယ်ဈေး ၆၀၀,၀၀၀ ကျပ်၊ ရောင်းဈေး ၆၉၀,၀၀၀ ကျပ်၊ IMEI 864201061234567 ဖြင့် စာရင်းသွင်းပေးပါ"* ဟု အမိန့်ပေးနိုင်ပါတယ်။\n- 🏷️ **ဈေးနှုန်းပြင်ဆင်ခြင်း**: ပစ္စည်းများ၏ ရောင်းဈေးများကို အလွယ်တကူ ပြင်ဆင်နိုင်ပါတယ်။\n- 📄 **PDF အစီရင်ခံစာများ ထုတ်ယူခြင်း**: Daily Profit Statement သို့မဟုတ် IMEI Audit Report များကို တိုက်ရိုက် Download ပြုလုပ်နိုင်ပါတယ်။`
+          : `👋 **Hello! I'm Aura, your AI Store Copilot.**\n\nI can execute live POS database operations via **OpenAI Function Calling**:\n- 📊 **Query POS Reports**: Daily Z-Reports, Sales Summaries, Dead Stock, Aging, and Category Margins.\n- 📱 **Add Inventory**: Say e.g. *"Add 1 Xiaomi Redmi Note 14 Pro 8/256GB Black for $220 cost, $270 sell with IMEI 864201061234567"*\n- 🏷️ **Update Prices**: Quickly adjust selling prices across products.\n- 📄 **Download PDF Reports**: Generate official Audit and Daily Profit dossiers instantly.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ];
@@ -171,47 +193,15 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const [inputQuery, setInputQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [speechTranscript, setSpeechTranscript] = useState('');
   const [copiedImei, setCopiedImei] = useState<string | null>(null);
   const [copiedCaption, setCopiedCaption] = useState<string | null>(null);
   const [apiKeyWarning, setApiKeyWarning] = useState<string | null>(null);
-  const [isLiveVoiceOpen, setIsLiveVoiceOpen] = useState(false);
 
-  // Synchronize Live Voice transcript messages into main Copilot chat history
-  const handleLiveVoiceTranscript = (item: LiveTranscriptItem) => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: item.id,
-        role: item.sender === 'user' ? 'user' : 'assistant',
-        content: item.text,
-        timestamp: item.timestamp,
-      },
-    ]);
-  };
-
-  // Build live POS context summary for real-time voice assistant
-  const getLiveStoreSummary = () => {
+  const toggleLanguage = (newLang: 'my' | 'en') => {
+    setChatLanguage(newLang);
     try {
-      const topProducts = products.slice(0, 15).map((p) => ({
-        name: p.name,
-        brand: p.brand,
-        price: p.sellingPrice,
-        stock: p.stock,
-      }));
-      return JSON.stringify({
-        shopName: settings.shopName || 'Mobile Shop',
-        currency: settings.currencySymbol || 'MMK',
-        totalProductsCount: products.length,
-        totalInventoryUnits: products.reduce((acc, p) => acc + (p.stock || 0), 0),
-        todaySalesCount: sales.length,
-        drawerClosing: cashDrawer?.actualCounted || cashDrawer?.expectedInDrawer || cashDrawer?.openingBalance || 0,
-        sampleInventory: topProducts,
-      });
-    } catch {
-      return '';
-    }
+      localStorage.setItem('mobileshop_copilot_lang', newLang);
+    } catch {}
   };
 
   // Model Selection State for In-App Copilot
@@ -247,7 +237,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
-  const recognitionRef = useRef<any>(null);
 
   // Process selected, dropped, or pasted files
   const processFiles = async (files: File[]) => {
@@ -368,71 +357,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       setTimeout(() => inputRef.current?.focus(), 150);
     }
   }, [isOpen, messages, isLoading]);
-
-  // Web Speech API Initialization
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        setSpeechTranscript('');
-      };
-
-      recognition.onresult = (event: any) => {
-        let currentTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          currentTranscript += event.results[i][0].transcript;
-        }
-        setSpeechTranscript(currentTranscript);
-        setInputQuery(currentTranscript);
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn('Speech recognition error:', event.error);
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-        // If transcript was captured, user can review or auto-send
-      };
-
-      recognitionRef.current = recognition;
-    }
-
-    return () => {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // ignore
-        }
-      }
-    };
-  }, []);
-
-  const toggleVoiceRecording = () => {
-    if (!recognitionRef.current) {
-      alert('Voice recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
-      return;
-    }
-
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-    } else {
-      try {
-        recognitionRef.current.start();
-      } catch (err) {
-        console.error('Error starting speech recognition:', err);
-      }
-    }
-  };
 
   // Client-Side PDF Generation Bridge: Executes jsPDF export routines based on AI tool output
   const triggerClientPdfExport = (config: any) => {
@@ -556,14 +480,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
     if (!userText && filesToSend.length === 0) return;
     if (isLoading) return;
 
-    // Stop voice if listening
-    if (isListening && recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-      setIsListening(false);
-    }
-
     const newMsgId = `usr_${Date.now()}`;
     const userMessageItem: ChatMessageItem = {
       id: newMsgId,
@@ -575,7 +491,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
 
     setMessages((prev) => [...prev, userMessageItem]);
     setInputQuery('');
-    setSpeechTranscript('');
     setAttachedFiles([]);
     setIsLoading(true);
 
@@ -610,6 +525,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           message: userText,
           history: historyPayload,
           model: selectedModel,
+          language: chatLanguage,
           context: {
             ...posContext,
             settings: safeSettings,
@@ -889,22 +805,38 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
                 )}
               </div>
             </div>
-            <p className="text-[11px] text-indigo-200/80 leading-none mt-0.5">Voice & Function Calling Enabled</p>
+            <p className="text-[11px] text-indigo-200/80 leading-none mt-0.5">POS Actions &amp; Function Calling</p>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5">
-          {/* Live Voice Call Trigger Button (Sub-Second Gemini & GPT) */}
-          <button
-            id="btn-header-live-voice-call"
-            type="button"
-            onClick={() => setIsLiveVoiceOpen(true)}
-            title="Start Sub-Second Live Voice Call (Gemini & GPT)"
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 text-white rounded-lg text-xs font-semibold shadow-sm transition-all hover:scale-105 active:scale-95 cursor-pointer"
-          >
-            <PhoneCall className="w-3.5 h-3.5 animate-pulse" />
-            <span className="text-[11px] tracking-tight">Live Voice</span>
-          </button>
+          {/* Language Selector: Burmese / English */}
+          <div className="flex items-center rounded-lg bg-indigo-950/70 border border-indigo-700/60 p-0.5" id="chat-header-language-toggle">
+            <button
+              type="button"
+              onClick={() => toggleLanguage('my')}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-all ${
+                chatLanguage === 'my'
+                  ? 'bg-emerald-500 text-white shadow-xs'
+                  : 'text-indigo-200 hover:text-white'
+              }`}
+              title="Aura replies in Burmese (မြန်မာဘာသာ)"
+            >
+              🇲🇲 မြန်မာ
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleLanguage('en')}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-all ${
+                chatLanguage === 'en'
+                  ? 'bg-emerald-500 text-white shadow-xs'
+                  : 'text-indigo-200 hover:text-white'
+              }`}
+              title="Aura replies in English"
+            >
+              🇺🇸 EN
+            </button>
+          </div>
 
           <button
             onClick={handleClearHistory}
@@ -1369,7 +1301,9 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
                 )}
               </div>
             </div>
-            <span className="text-[10px] text-slate-400 mt-1 px-1">{msg.timestamp}</span>
+            <div className="flex items-center gap-2 mt-1 px-1">
+              <span className="text-[10px] text-slate-400">{msg.timestamp}</span>
+            </div>
           </div>
         ))}
 
@@ -1391,8 +1325,10 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
 
       {/* Quick Prompts Bar */}
       <div className="px-3 py-2 bg-white border-t border-slate-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 mr-0.5">Quick:</span>
-        {QUICK_PROMPTS.map((item, idx) => {
+        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 mr-0.5">
+          {chatLanguage === 'my' ? 'မေးမြန်းရန်:' : 'Quick:'}
+        </span>
+        {(chatLanguage === 'my' ? QUICK_PROMPTS_BURMESE : QUICK_PROMPTS_ENGLISH).map((item, idx) => {
           const Icon = item.icon;
           return (
             <button
@@ -1407,28 +1343,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           );
         })}
       </div>
-
-      {/* Voice Listening Feedback Alert */}
-      {isListening && (
-        <div className="px-4 py-2 bg-indigo-50 border-t border-indigo-100 flex items-center justify-between text-xs text-indigo-900 animate-pulse">
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
-            <span className="font-semibold">Listening to voice command...</span>
-            <span className="text-slate-500 italic max-w-[200px] truncate">{speechTranscript || 'Speak now...'}</span>
-          </div>
-          <button
-            onClick={() => {
-              if (speechTranscript) {
-                handleSendMessage(speechTranscript);
-              }
-              toggleVoiceRecording();
-            }}
-            className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 underline"
-          >
-            Done & Send
-          </button>
-        </div>
-      )}
 
       {/* File Processing Spinner Indicator */}
       {isProcessingFiles && (
@@ -1606,31 +1520,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             <Camera className="w-4 h-4" />
           </button>
 
-          {/* Voice Mic Toggle */}
-          <button
-            type="button"
-            onClick={toggleVoiceRecording}
-            title={isListening ? 'Stop Listening' : 'Speak with Voice'}
-            className={`p-2.5 rounded-xl font-medium transition-all shrink-0 ${
-              isListening
-                ? 'bg-rose-500 text-white animate-bounce shadow-md shadow-rose-500/30'
-                : 'bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600'
-            }`}
-          >
-            {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-          </button>
-
-          {/* Sub-Second Live Voice Call Trigger Button (Gemini & GPT) */}
-          <button
-            type="button"
-            id="btn-live-voice-call-trigger"
-            onClick={() => setIsLiveVoiceOpen(true)}
-            title="Start Sub-Second Live Voice Call (Gemini & GPT)"
-            className="p-2.5 rounded-xl font-medium transition-all shrink-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-800 border border-emerald-200 shadow-xs cursor-pointer"
-          >
-            <PhoneCall className="w-4 h-4 text-emerald-600" />
-          </button>
-
           {/* Text Input */}
           <input
             ref={inputRef}
@@ -1638,11 +1527,9 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
             value={inputQuery}
             onChange={(e) => setInputQuery(e.target.value)}
             placeholder={
-              isListening 
-                ? 'Listening to voice...' 
-                : attachedFiles.length > 0 
-                  ? 'Add instructions for attached file(s)...' 
-                  : 'Ask reports, paste image, or add phone with IMEI...'
+              attachedFiles.length > 0 
+                ? (chatLanguage === 'my' ? 'တွဲထားသော ဖိုင်/ဓာတ်ပုံအတွက် ညွှန်ကြားချက် ရိုက်ထည့်ပါ...' : 'Add instructions for attached file(s)...')
+                : (chatLanguage === 'my' ? 'Z-report၊ လက်ကျန်၊ အရောင်း သို့မဟုတ် IMEI စစ်ဆေးရန် မေးမြန်းပါ...' : 'Ask reports, paste image, or add phone with IMEI...')
             }
             disabled={isLoading}
             className="flex-1 px-3.5 py-2.5 bg-slate-100/80 hover:bg-slate-100 focus:bg-white text-xs sm:text-sm text-slate-800 placeholder-slate-400 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all"
@@ -1658,7 +1545,9 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           </button>
         </form>
         <div className="flex items-center justify-between mt-1.5 px-1 text-[10px] text-slate-400">
-          <span>GPT-4o-mini Vision &amp; OCR Enabled</span>
+          <span className="flex items-center gap-1">
+            <span>GPT-4o-mini Vision &amp; OCR Enabled</span>
+          </span>
           <span>Paste screenshot or drop files</span>
         </div>
       </div>
@@ -1715,14 +1604,6 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           </div>
         </div>
       )}
-
-      {/* Real-Time Full-Duplex Live Voice Call Modal (Gemini 3.8 Live & GPT-4o Realtime) */}
-      <LiveVoiceCallModal
-        isOpen={isLiveVoiceOpen}
-        onClose={() => setIsLiveVoiceOpen(false)}
-        getStoreContext={getLiveStoreSummary}
-        onTranscriptReceived={handleLiveVoiceTranscript}
-      />
     </div>
   );
 };

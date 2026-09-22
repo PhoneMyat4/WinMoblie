@@ -3,14 +3,25 @@
  * Automatically attaches API authentication token to all backend /api/* requests.
  */
 
-export const API_AUTH_TOKEN: string =
-  (typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_API_TOKEN) ||
-  'pos_sec_token_9938148';
+export const API_AUTH_TOKEN: string = import.meta.env.VITE_API_TOKEN || '';
+
+export function getApiAuthToken(): string {
+  try {
+    const custom = localStorage.getItem('pos_custom_api_token');
+    if (custom && custom.trim()) {
+      return custom.trim();
+    }
+  } catch {
+    // localStorage not accessible
+  }
+  return API_AUTH_TOKEN;
+}
 
 export function getAuthHeaders(headers: HeadersInit = {}): Headers {
   const h = new Headers(headers);
-  if (!h.has('x-api-key') && !h.has('authorization')) {
-    h.set('x-api-key', API_AUTH_TOKEN);
+  const token = getApiAuthToken();
+  if (!h.has('x-api-key') && !h.has('authorization') && token) {
+    h.set('x-api-key', token);
   }
   return h;
 }

@@ -5,7 +5,6 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import OpenAI from 'openai';
-import { setupLiveVoiceServer } from './server/liveVoiceService';
 import { 
   openAiAssistantTools, 
   AI_SYSTEM_INSTRUCTION, 
@@ -42,26 +41,28 @@ async function startServer() {
   app.use(express.json({ limit: '5mb' }));
   app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
-  // Simple token-based API authentication middleware for all /api/* routes
+  // Secure token-based API authentication middleware for all /api/* routes
   const VALID_API_TOKENS = new Set(
     [
       process.env.API_AUTH_TOKEN,
       process.env.VITE_API_TOKEN,
-      'pos_sec_token_9938148',
     ]
       .filter(Boolean)
       .map((t) => String(t).trim())
   );
 
+  if (VALID_API_TOKENS.size === 0) {
+    console.warn(
+      '[Security Warning] No API_AUTH_TOKEN or VITE_API_TOKEN defined in environment variables. Protected /api/* endpoints will reject requests until an API key is configured.'
+    );
+  }
+
   app.use('/api', (req, res, next) => {
-    // Whitelist health check, direct Telegram webhook, and live voice endpoints
+    // Only public health check and Telegram incoming webhook are whitelisted
+    // (Telegram sends its own cryptographic secret in X-Telegram-Bot-Api-Secret-Token)
     if (
       req.path === '/health' ||
-      req.path === '/webhook/telegram' ||
-      req.path === '/setup-telegram-webhook' ||
-      req.path === '/telegram-webhook-info' ||
-      req.path === '/live-voice' ||
-      req.path.startsWith('/live-voice')
+      req.path === '/webhook/telegram'
     ) {
       return next();
     }
@@ -644,11 +645,17 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
 
       const openai = getOpenAI();
 
+      const replyLanguage = req.body.language || 'my';
+      let systemInstructionWithLang = AI_SYSTEM_INSTRUCTION;
+      if (replyLanguage === 'my') {
+        systemInstructionWithLang += `\n\n[MANDATORY BURMESE LANGUAGE POLICY - မြန်မာဘာသာဖြင့် အပြည့်အစုံ ဖြေကြားရန်]\nအသုံးပြုသူထံ အသံဖြင့်ဖြစ်စေ စာဖြင့်ဖြစ်စေ မြန်မာဘာသာ (Unicode) ဖြင့်သာ သဘာဝကျကျ ယဥ်ကျေးစွာ ပြန်လည်ဖြေကြားပေးပါ။ ဖုန်း Model နာမည်များနှင့် နည်းပညာအသုံးအနှုန်းများကို မူရင်းအတိုင်းထားပြီး ကျန်ရှင်းပြချက်များ၊ နှုတ်ခွန်းဆက်စကားများနှင့် စာရင်းများကို မြန်မာလို အပြည့်အစုံ ရှင်းပြပါ။`;
+      }
+
       // Format conversation history for OpenAI Chat Completions API
       const formattedMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         {
           role: 'system',
-          content: AI_SYSTEM_INSTRUCTION,
+          content: systemInstructionWithLang,
         },
       ];
 
@@ -1908,10 +1915,9 @@ Output a JSON response with:
   }
 
   const server = http.createServer(app);
-  setupLiveVoiceServer(server);
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Mobile Shop POS server with Live Voice running at http://0.0.0.0:${PORT}`);
+    console.log(`Mobile Shop POS server running at http://0.0.0.0:${PORT}`);
   });
 }
 

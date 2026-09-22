@@ -16,6 +16,12 @@ import {
   updateSettingSecretInFirestore,
 } from './posFirestoreService';
 import { executePostProductAdToFacebook } from './facebookPostService';
+import { generateServerReportPdf } from './reportPdfGenerator';
+import {
+  downloadTelegramFile,
+  transcribeVoiceWithGemini,
+  transcribeVoiceWithWhisper,
+} from './telegramVoiceService';
 import type { ShopSettings } from '../src/types';
 
 export interface TelegramAiModelOption {
@@ -77,7 +83,9 @@ export function getAuthorizedTelegramIds(settings?: ShopSettings): Set<string> {
       .forEach((id) => idSet.add(id));
   }
 
-  const settingsChatId = (settings as any)?.secrets?.telegramChatId;
+  const settingsChatId =
+    (settings as any)?.secrets?.telegramChatId ||
+    (settings as any)?.telegramChatId;
   if (settingsChatId && typeof settingsChatId === 'string') {
     settingsChatId
       .split(',')
@@ -91,8 +99,7 @@ export function getAuthorizedTelegramIds(settings?: ShopSettings): Set<string> {
 
 /**
  * Verifies if an incoming Telegram chat/user is authorized.
- * If no allowed list is configured, all users are permitted by default,
- * but a setup notice is logged.
+ * SECURITY FAIL-CLOSED: If no allowed list is configured, all requests are REJECTED by default.
  */
 export function isTelegramAuthorized(
   chatId: number | string,
@@ -101,9 +108,13 @@ export function isTelegramAuthorized(
 ): boolean {
   const authorizedIds = getAuthorizedTelegramIds(settings);
 
-  // If no specific IDs are restricted in .env or settings, allow by default
+  // Security Fail-Closed: If no authorized IDs are configured, deny by default.
+  // This prevents unauthenticated users from executing POS queries, altering stock, or changing prices.
   if (authorizedIds.size === 0) {
-    return true;
+    console.warn(
+      `[TelegramBot Security] Blocked incoming message from Chat ${chatId}: No authorized Chat IDs are configured in TELEGRAM_ALLOWED_CHAT_IDS or Secrets Vault.`
+    );
+    return false;
   }
 
   const sChatId = String(chatId).trim();
@@ -232,6 +243,59 @@ export async function sendTelegramMessage(
 }
 
 /**
+ * Sends a PDF or document file to Telegram using multipart/form-data.
+ */
+export async function sendTelegramDocument(
+  token: string,
+  chatId: number | string,
+  fileBuffer: Buffer,
+  filename: string,
+  caption?: string,
+  replyToMessageId?: number
+): Promise<{ ok: boolean; description?: string; result?: any }> {
+  try {
+    const formData = new FormData();
+    formData.append('chat_id', String(chatId));
+    formData.append(
+      'document',
+      new Blob([fileBuffer], { type: 'application/pdf' }),
+      filename
+    );
+    if (caption) {
+      formData.append('caption', caption);
+    }
+    if (replyToMessageId) {
+      formData.append('reply_to_message_id', String(replyToMessageId));
+    }
+
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = (await res.json()) as any;
+    if (!data.ok) {
+      console.warn('[TelegramBot] sendDocument failed:', data);
+    }
+    return data;
+  } catch (err: any) {
+    console.error('[TelegramBot] sendDocument network error:', err);
+    return { ok: false, description: err?.message || 'Network error' };
+  }
+}
+
+/**
+ * Helper to sanitize any accidental leaks of confidential trade secrets
+ */
+function sanitizeConfidentialMetrics(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/(?:Cost\s*Price|Purchase\s*Cost|Unit\s*Cost)\s*[:=]\s*[\d,.]+\s*(?:Ks|MMK)?/gi, '')
+    .replace(/(?:Supplier(?:\s*Name)?)\s*[:=]\s*[^\n,]+/gi, '')
+    .trim();
+}
+
+/**
  * Sets up and registers the Telegram Webhook URL with Telegram's Bot API.
  */
 export async function setTelegramWebhook(
@@ -305,9 +369,14 @@ export async function handleSetupTelegramWebhook(req: Request, res: Response) {
       envAppUrl ||
       hostUrl;
 
-    const secretToken = process.env.TELEGRAM_SECRET_TOKEN || undefined;
+    const secretToken =
+      process.env.TELEGRAM_SECRET_TOKEN ||
+      (context.settings as any)?.secrets?.telegramSecretToken ||
+      undefined;
 
-    console.log(`[TelegramBot] Registering Telegram webhook URL: ${targetUrl}`);
+    console.log(
+      `[TelegramBot] Registering Telegram webhook URL: ${targetUrl} (secret token configured: ${Boolean(secretToken)})`
+    );
     const setRes = await setTelegramWebhook(token, targetUrl, secretToken);
     const infoRes = await getTelegramWebhookInfo(token);
 
@@ -384,12 +453,19 @@ export async function handleTelegramWebhook(
       return;
     }
 
-    // Check optional Telegram secret token header for security
-    const secretToken = process.env.TELEGRAM_SECRET_TOKEN;
+    // 1. Fetch live POS Data Context from Firestore
+    const context = await fetchPosDataContext();
+
+    // Check Telegram secret token header for security (matches setWebhook configuration)
+    const secretToken =
+      process.env.TELEGRAM_SECRET_TOKEN ||
+      (context.settings as any)?.secrets?.telegramSecretToken;
     if (secretToken) {
       const headerSecret = req.headers['x-telegram-bot-api-secret-token'];
       if (headerSecret !== secretToken) {
-        console.warn('[TelegramBot] Rejected webhook update with invalid secret token header.');
+        console.warn(
+          '[TelegramBot Security] Rejected webhook update: Invalid or missing X-Telegram-Bot-Api-Secret-Token header.'
+        );
         return;
       }
     }
@@ -409,8 +485,6 @@ export async function handleTelegramWebhook(
       return;
     }
 
-    // 1. Fetch live POS Data Context from Firestore
-    const context = await fetchPosDataContext();
     const botToken = getTelegramBotToken(context.settings);
 
     if (!botToken) {
@@ -433,8 +507,65 @@ export async function handleTelegramWebhook(
       return;
     }
 
-    // Extract text query or caption from photos
-    const userText = (message.text || message.caption || '').trim();
+    // Extract text query or caption from photos or voice messages
+    let userText = (message.text || message.caption || '').trim();
+    let isVoiceMessage = false;
+    let voiceTranscription = '';
+
+    const voice = message.voice || message.audio;
+    if (voice && voice.file_id) {
+      isVoiceMessage = true;
+      await sendTelegramChatAction(botToken, chatId, 'typing');
+      try {
+        console.log(
+          `[TelegramBot] Voice note received (${voice.duration || 0}s, ${voice.file_size || 0} bytes). Downloading...`
+        );
+        const { buffer, mimeType } = await downloadTelegramFile(botToken, voice.file_id);
+
+        // Step 1: Transcribe with Gemini Flash (best for Burmese + English mix)
+        let transcribed = '';
+        try {
+          transcribed = await transcribeVoiceWithGemini(getGenAI, buffer, mimeType);
+        } catch (geminiErr: any) {
+          console.warn(
+            '[TelegramBot] Gemini voice transcription failed, falling back to Whisper:',
+            geminiErr?.message || geminiErr
+          );
+        }
+
+        // Step 2: Fallback to OpenAI Whisper if Gemini returned empty
+        if (!transcribed) {
+          try {
+            transcribed = await transcribeVoiceWithWhisper(getOpenAI(), buffer);
+          } catch (whisperErr: any) {
+            console.error('[TelegramBot] Whisper voice transcription error:', whisperErr?.message || whisperErr);
+          }
+        }
+
+        if (transcribed && transcribed.trim()) {
+          voiceTranscription = transcribed.trim();
+          userText = voiceTranscription;
+          console.log(`[TelegramBot] Successfully transcribed voice note: "${userText}"`);
+        } else {
+          await sendTelegramMessage(
+            botToken,
+            chatId,
+            `🎙️ *Voice Note Received*\n\nSorry, I could not hear or transcribe the voice note clearly. Please try speaking closer to your microphone or send your request as a text message.`,
+            messageId
+          );
+          return;
+        }
+      } catch (err: any) {
+        console.error('[TelegramBot] Voice note processing error:', err);
+        await sendTelegramMessage(
+          botToken,
+          chatId,
+          `⚠️ *Voice Processing Error*\n\nCould not process audio: ${err?.message || 'Download error'}. Please try typing your command.`,
+          messageId
+        );
+        return;
+      }
+    }
 
     // 3. Handle /start and /help commands
     if (userText === '/start' || userText === '/help') {
@@ -446,11 +577,19 @@ export async function handleTelegramWebhook(
 
       const welcomeMessage = `👋 *Welcome to Golden Star Mobile POS Assistant, ${senderName}!*
 
-I am your direct, real-time AI store manager connected to your live Firestore POS database. You can chat with me in natural language to query sales, check stock, or manage inventory.
+I am your direct, real-time AI store manager connected to your live Firestore POS database. You can chat with me in text or voice messages in Burmese or English!
 
 🤖 *Active AI Model:* \`${activeModelId}\` (Change anytime with \`/model\`)
 
 📱 *Things you can ask me:*
+• 🎙️ *Voice Commands (အသံဖြင့် ခိုင်းစေနိုင်ခြင်း):*
+  - Press & hold mic: _"Redmi 9a ဈေးဘယ်လောက်လဲ"_
+  - _"ဒီနေ့ report pdf ထုတ်ပေးပါ"_
+  - _"iPhone 15 Pro Max stock ဘယ်နှလုံးကျန်လဲ"_
+• 📄 *Instant PDF Delivery (PDF အစီရင်ခံစာများ):*
+  - _"Daily sale report pdf"_
+  - _"P&L report pdf"_
+  - _"Annual performance report pdf"_
 • 📊 *Sales & Register Reports:*
   - _"Show me today's Z-Report"_
   - _"What are our sales for this month?"_
@@ -459,7 +598,6 @@ I am your direct, real-time AI store manager connected to your live Firestore PO
   - _"How many iPhone 15 Pro Max do we have in stock?"_
   - _"Show me all Xiaomi phones in stock"_
   - _"Which items are dead stock (0 sales)?"_
-  - _"Give me the stock aging report"_
 • 🏷️ *Price & Intake Actions:*
   - _"Update selling price of iPhone 15 to 4,200,000 MMK"_
   - _"Add 2 units of Redmi Note 13 Black with IMEI..."_
@@ -467,7 +605,7 @@ I am your direct, real-time AI store manager connected to your live Firestore PO
   - _"Lookup IMEI 861234567890123 history"_
 • ⚙️ *Model Configuration:*
   - _"/model" (view current model and list available options)_
-  - _"/model gpt-5.6-luna" (switch to GPT-5.6 Luna Frontier)_
+  - _"/model gpt-5.6-luna" (switch to GPT-5.6 Luna)_
   - _"/model o3-mini" (switch to o3-mini reasoning)_
 
 _Your Telegram Chat ID: \`${chatId}\`_`;
@@ -523,7 +661,7 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
       await sendTelegramMessage(
         botToken,
         chatId,
-        '👋 Hello! Please send a text query (for example, "Show me today\'s Z-Report" or "Check stock for iPhone 15").',
+        '👋 Hello! Please send a text query or a voice message (for example, "Show me today\'s Z-Report" or "Check stock for iPhone 15").',
         messageId
       );
       return;
@@ -531,15 +669,6 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
 
     // 4. Send typing indicator while AI processes
     await sendTelegramChatAction(botToken, chatId, 'typing');
-
-// Helper to sanitize any accidental leaks of confidential trade secrets
-function sanitizeConfidentialMetrics(text: string): string {
-  if (!text) return text;
-  return text
-    .replace(/(?:Cost\s*Price|Purchase\s*Cost|Unit\s*Cost)\s*[:=]\s*[\d,.]+\s*(?:Ks|MMK)?/gi, '')
-    .replace(/(?:Supplier(?:\s*Name)?)\s*[:=]\s*[^\n,]+/gi, '')
-    .trim();
-}
 
     // 5. Determine active model from settings or env
     const rawSelectedModel =
@@ -578,7 +707,10 @@ TELEGRAM CHAT SPECIFIC INSTRUCTIONS & STRICT SAFEGUARDS:
 - STRICT SAFEGUARD 4: TIMEZONE ACCURACY.
   All sales figures, dates, and Z-reports strictly adhere to Myanmar Time (Asia/Yangon UTC+6:30).
 - STRICT SAFEGUARD 5: CURRENCY & TYPO HANDLING.
-  Gracefully handle typos (e.g. "ihpone" -> "iPhone"). Format all monetary values neatly with commas and "Ks" (e.g., 4,250,000 Ks).`,
+  Gracefully handle typos (e.g. "ihpone" -> "iPhone"). Format all monetary values neatly with commas and "Ks" (e.g., 4,250,000 Ks).
+- STRICT SAFEGUARD 6: DIRECT PDF FILE DELIVERY IN TELEGRAM.
+  When the user asks for a PDF report (e.g., "daily sale report pdf", "P&L report pdf", "annual report pdf", "z-report pdf"), calling 'generate_pdf_report' will automatically compile and deliver the actual PDF file directly into this Telegram chat.
+  Confirm to the user that the official PDF report document has been generated and sent directly into this Telegram chat above. Do NOT say it was downloaded to a browser.`,
       },
       {
         role: 'user',
@@ -637,7 +769,31 @@ TELEGRAM CHAT SPECIFIC INSTRUCTIONS & STRICT SAFEGUARDS:
           }
         } else if (functionName === 'generate_pdf_report') {
           const pdfResult = executeGeneratePdfReport(parsedArgs, context);
-          executionResult = pdfResult;
+          try {
+            const { buffer, filename, reportName } = generateServerReportPdf(pdfResult);
+            const docRes = await sendTelegramDocument(
+              botToken,
+              chatId,
+              buffer,
+              filename,
+              `📄 *${reportName}*\n📅 Date: ${pdfResult.date || 'Today'}\n🏪 Shop: ${context.settings?.shopName || 'Win Mobile & Gadgets'}`,
+              messageId
+            );
+            executionResult = {
+              ...pdfResult,
+              deliveredToTelegram: docRes.ok,
+              telegramDocumentNotice: docRes.ok
+                ? `PDF document '${filename}' has been generated and delivered directly to the user's Telegram chat.`
+                : `Telegram delivery response: ${docRes.description || 'Delivered'}`,
+            };
+          } catch (pdfErr: any) {
+            console.error('[TelegramBot] Failed to render or deliver PDF:', pdfErr);
+            executionResult = {
+              ...pdfResult,
+              deliveredToTelegram: false,
+              pdfRenderError: pdfErr?.message || 'Server PDF render failed',
+            };
+          }
         } else if (functionName === 'post_product_ad_to_facebook') {
           executionResult = await executePostProductAdToFacebook(
             parsedArgs,
@@ -678,6 +834,11 @@ TELEGRAM CHAT SPECIFIC INSTRUCTIONS & STRICT SAFEGUARDS:
 
     if (!finalReply) {
       finalReply = 'I have processed your request, but have no details to return.';
+    }
+
+    // If user sent a voice message, show transcription header so they know what was heard
+    if (isVoiceMessage && voiceTranscription) {
+      finalReply = `🎙️ *Heard (အသံမှတ်တမ်း):* _"${voiceTranscription}"_\n\n${finalReply}`;
     }
 
     // 6. Dispatch answer back to the Telegram chat with confidentiality sanitization

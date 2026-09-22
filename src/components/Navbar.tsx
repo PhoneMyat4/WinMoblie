@@ -204,7 +204,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   id="header-ai-copilot-btn"
                   onClick={onOpenAiAssistant}
                   className="inline-flex items-center gap-1 p-1.5 sm:px-3 sm:py-1.5 bg-gradient-to-r from-indigo-900 to-indigo-700 hover:from-indigo-800 hover:to-indigo-600 text-white text-xs font-bold rounded-xl shadow-xs border border-indigo-500/40 transition-all cursor-pointer group shrink-0"
-                  title="Open AI Store Assistant with Voice & Reports Tool Calling"
+                  title="Open Aura AI Store Copilot (Reports, Inventory & Actions)"
                 >
                   <Bot className="w-3.5 h-3.5 text-indigo-100 group-hover:scale-110 transition-transform shrink-0" />
                   <span className="hidden sm:inline">AI Copilot</span>
