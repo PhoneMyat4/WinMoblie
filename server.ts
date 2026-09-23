@@ -1933,13 +1933,32 @@ Output a JSON response with:
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Mobile Shop POS server running at http://0.0.0.0:${PORT}`);
 
-    // Automatically initialize direct Telegram bot long-polling
-    try {
-      startTelegramPolling(getOpenAI, getGenAI);
-    } catch (pollErr) {
-      console.warn('[TelegramBot] Could not auto-start polling on boot:', pollErr);
+    // Automatically initialize direct Telegram bot long-polling if not explicitly disabled
+    if (process.env.TELEGRAM_DISABLE_POLLING !== 'true') {
+      try {
+        startTelegramPolling(getOpenAI, getGenAI);
+      } catch (pollErr) {
+        console.warn('[TelegramBot] Could not auto-start polling on boot:', pollErr);
+      }
+    } else {
+      console.log('[TelegramBot] Polling is disabled via TELEGRAM_DISABLE_POLLING=true');
     }
   });
+
+  const handleShutdown = () => {
+    console.log('[Server] Shutting down gracefully...');
+    try {
+      stopTelegramPolling();
+    } catch (e) {
+      // ignore
+    }
+    server.close(() => {
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', handleShutdown);
+  process.on('SIGINT', handleShutdown);
 }
 
 startServer().catch((err) => {

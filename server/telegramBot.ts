@@ -581,6 +581,7 @@ export async function startTelegramPolling(
   (async () => {
     let offset = 0;
     let consecutiveErrors = 0;
+    let hasClearedWebhook = false;
 
     console.log('[TelegramBot Polling] Starting direct Telegram Bot long-polling loop...');
 
@@ -590,17 +591,24 @@ export async function startTelegramPolling(
         const botToken = getTelegramBotToken(context.settings);
 
         if (!botToken) {
-          await new Promise((resolve) => setTimeout(resolve, 10000));
+          await new Promise((resolve) => setTimeout(resolve, 15000));
           continue;
         }
 
-        // If a webhook is active, delete it so Telegram routes updates to getUpdates
-        const webhookInfo = await getTelegramWebhookInfo(botToken);
-        if (webhookInfo.result?.url) {
-          console.log(
-            `[TelegramBot Polling] Deleting stale webhook (${webhookInfo.result.url}) to activate direct long-polling...`
-          );
-          await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook?drop_pending_updates=false`);
+        // If a webhook is active, clear it once on startup so Telegram routes updates to getUpdates
+        if (!hasClearedWebhook) {
+          try {
+            const webhookInfo = await getTelegramWebhookInfo(botToken);
+            if (webhookInfo.result?.url) {
+              console.log(
+                `[TelegramBot Polling] Deleting stale webhook (${webhookInfo.result.url}) to activate direct long-polling...`
+              );
+              await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook?drop_pending_updates=false`);
+            }
+          } catch (whErr) {
+            // Ignore webhook check error
+          }
+          hasClearedWebhook = true;
         }
 
         const pollUrl = `https://api.telegram.org/bot${botToken}/getUpdates?offset=${offset}&timeout=20&allowed_updates=${encodeURIComponent(
@@ -612,6 +620,18 @@ export async function startTelegramPolling(
         });
 
         if (!pollRes.ok) {
+          // Handle 409 Conflict (multi-instance or concurrent getUpdates request) gracefully
+          if (pollRes.status === 409) {
+            consecutiveErrors++;
+            const jitter = Math.floor(Math.random() * 5000);
+            const backoffTime = Math.min(60000, 20000 + Math.min(consecutiveErrors, 5) * 4000 + jitter);
+            console.log(
+              `[TelegramBot Polling] Telegram updates are currently served by another active instance (HTTP 409). Yielding gracefully for ${(backoffTime / 1000).toFixed(0)}s...`
+            );
+            await new Promise((resolve) => setTimeout(resolve, backoffTime));
+            continue;
+          }
+
           const errText = await pollRes.text();
           console.warn(`[TelegramBot Polling] getUpdates HTTP ${pollRes.status}: ${errText}`);
           consecutiveErrors++;
