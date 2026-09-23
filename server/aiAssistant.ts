@@ -1554,7 +1554,7 @@ export function executeGeneratePdfReport(args: any, context: PosDataContext) {
         operatingExpenses: operatingExpensesTotal,
         netProfit: netOperatingProfit,
       },
-      message: `Successfully prepared ${reportName} for ${selectedDate}. Browser download initiated.`,
+      message: `Successfully prepared ${reportName} for ${selectedDate}. PDF report document generated.`,
     };
   }
 
@@ -1835,7 +1835,7 @@ export function executeGeneratePdfReport(args: any, context: PosDataContext) {
         margin: `${grossMarginPercent.toFixed(1)}%`,
         netOperatingProfit,
       },
-      message: `Successfully generated ${reportName}. Browser download initiated.`,
+      message: `Successfully generated ${reportName}. PDF report document generated.`,
     };
   }
 

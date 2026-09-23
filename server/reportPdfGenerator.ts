@@ -415,6 +415,76 @@ export function generateAnnualProfitStatementPdf(reportResult: any): Buffer {
 }
 
 /**
+ * Generates Tabular POS Audit Report (Z-Report, Stock Aging, Dead Stock, etc.)
+ */
+export function generateGenericAuditPdf(reportResult: any): Buffer {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const opt = reportResult.exportPdfOptions || {};
+  const settings = reportResult.data?.settings;
+  const title = opt.title || reportResult.reportName || 'POS AUDIT REPORT';
+  const subtitle = opt.subtitle || `Generated: ${new Date().toISOString().slice(0, 10)}`;
+
+  drawHeader(doc, settings, title, subtitle, 'OFFICIAL AUDIT', [59, 130, 246]);
+
+  let currentY = 46;
+
+  if (opt.summaryMetrics && Array.isArray(opt.summaryMetrics) && opt.summaryMetrics.length > 0) {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const count = opt.summaryMetrics.length;
+    const cardWidth = Math.min(42, (pageWidth - 28 - (count - 1) * 3) / count);
+
+    opt.summaryMetrics.forEach((m: any, idx: number) => {
+      const x = 14 + idx * (cardWidth + 3);
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(x, currentY, cardWidth, 14, 1.5, 1.5, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(String(m.label || '').toUpperCase(), x + 3, currentY + 4.5);
+
+      doc.setFontSize(8.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text(String(m.value || ''), x + 3, currentY + 10.5);
+    });
+
+    currentY += 18;
+  }
+
+  if (opt.headers && opt.rows && Array.isArray(opt.rows)) {
+    autoTable(doc, {
+      startY: currentY,
+      head: [opt.headers],
+      body: opt.rows,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8,
+      },
+      styles: {
+        fontSize: 7.5,
+        cellPadding: 2,
+        font: 'helvetica',
+      },
+      margin: { left: 14, right: 14 },
+    });
+  }
+
+  drawFooter(doc, settings, title);
+
+  const arrayBuffer = doc.output('arraybuffer');
+  return Buffer.from(arrayBuffer);
+}
+
+/**
  * Main dispatcher to render any report into a PDF Buffer
  */
 export function generateServerReportPdf(reportResult: any): GeneratePdfResult {
@@ -429,7 +499,9 @@ export function generateServerReportPdf(reportResult: any): GeneratePdfResult {
   const filename = `${reportType}_${cleanDate}.pdf`;
 
   let buffer: Buffer;
-  if (reportType.startsWith('annual_')) {
+  if (reportResult.exportPdfOptions) {
+    buffer = generateGenericAuditPdf(reportResult);
+  } else if (reportType.startsWith('annual_')) {
     buffer = generateAnnualProfitStatementPdf(reportResult);
   } else {
     buffer = generateDailyProfitStatementPdf(reportResult);
