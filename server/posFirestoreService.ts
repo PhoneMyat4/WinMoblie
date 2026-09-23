@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { collection, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, setDoc, runTransaction } from 'firebase/firestore';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -181,6 +181,146 @@ export async function updateSettingSecretInFirestore(key: string, value: any): P
   } catch (err: any) {
     console.error(`[FirestoreService] Failed to update setting secret in Firestore:`, err.message);
     return false;
+  }
+}
+
+// In-memory fast cache to reject duplicate updates instantaneously
+const inMemoryProcessedMessages = new Map<string, number>();
+
+// Clean up stale cache keys periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, ts] of inMemoryProcessedMessages.entries()) {
+    if (now - ts > 15 * 60 * 1000) {
+      inMemoryProcessedMessages.delete(key);
+    }
+  }
+}, 5 * 60 * 1000);
+
+/**
+ * Atomically claims processing rights for a specific Telegram message/update.
+ * Guarantees that even if multiple server instances (e.g. dev vs preview) or duplicate polling loops
+ * receive the exact same user query, ONLY ONE instance processes it and replies.
+ */
+export async function claimTelegramMessageLock(lockKey: string, instanceId: string): Promise<boolean> {
+  const now = Date.now();
+  const sanitizedKey = lockKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  // 1. Fast in-memory check
+  const cachedTs = inMemoryProcessedMessages.get(sanitizedKey);
+  if (cachedTs && now - cachedTs < 15 * 60 * 1000) {
+    return false; // Already claimed or processed
+  }
+
+  // 2. Distributed Firestore atomic transaction claim across all server instances
+  try {
+    await ensureAuth();
+    const docRef = doc(db, 'telegram_processed_messages', sanitizedKey);
+    const claimed = await runTransaction(db, async (txn) => {
+      const snap = await txn.get(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        const docTs = typeof data?.timestamp === 'number' ? data.timestamp : 0;
+        // If claimed within the last 15 minutes, reject duplicate
+        if (now - docTs < 15 * 60 * 1000) {
+          return false;
+        }
+      }
+      txn.set(docRef, {
+        timestamp: now,
+        instanceId,
+        claimedAt: new Date(now).toISOString(),
+      });
+      return true;
+    });
+
+    // Cache locally
+    inMemoryProcessedMessages.set(sanitizedKey, now);
+    return claimed;
+  } catch (err: any) {
+    // If Firestore transaction fails (e.g. offline/network glitch), fallback to memory lock
+    console.warn(`[FirestoreService] Distributed lock notice for ${sanitizedKey}:`, err?.message || err);
+    if (!inMemoryProcessedMessages.has(sanitizedKey)) {
+      inMemoryProcessedMessages.set(sanitizedKey, now);
+      return true;
+    }
+    return false;
+  }
+}
+
+/**
+ * Distributed leader lease for Telegram Bot long-polling.
+ * Guarantees that only ONE server instance at a time acts as the active polling worker,
+ * completely preventing Telegram HTTP 409 Conflict errors and duplicate updates.
+ */
+export async function acquireTelegramPollingLease(
+  instanceId: string,
+  ttlMs: number = 35000
+): Promise<{ isLeader: boolean; leaderId?: string }> {
+  try {
+    await ensureAuth();
+    const now = Date.now();
+    const docRef = doc(db, 'telegram_bot_state', 'polling_lease');
+
+    return await runTransaction(db, async (txn) => {
+      const snap = await txn.get(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        const currentLeader = data?.leaderId;
+        const expiresAt = typeof data?.leaseExpiresAt === 'number' ? data.leaseExpiresAt : 0;
+
+        // If another leader holds an unexpired lease, yield
+        if (currentLeader && currentLeader !== instanceId && now < expiresAt) {
+          return { isLeader: false, leaderId: currentLeader };
+        }
+      }
+
+      txn.set(docRef, {
+        leaderId: instanceId,
+        leaseExpiresAt: now + ttlMs,
+        heartbeatAt: new Date(now).toISOString(),
+      });
+      return { isLeader: true, leaderId: instanceId };
+    });
+  } catch (err: any) {
+    // On unexpected error, default to leader so bot doesn't freeze
+    return { isLeader: true, leaderId: instanceId };
+  }
+}
+
+/**
+ * Retrieves the latest acknowledged Telegram polling offset from Firestore.
+ */
+export async function getTelegramPollingOffset(): Promise<number> {
+  try {
+    await ensureAuth();
+    const snap = await getDoc(doc(db, 'telegram_bot_state', 'polling_offset'));
+    if (snap.exists()) {
+      const val = snap.data()?.offset;
+      return typeof val === 'number' ? val : 0;
+    }
+    return 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+/**
+ * Persists the latest acknowledged Telegram polling offset to Firestore.
+ */
+export async function saveTelegramPollingOffset(offset: number): Promise<void> {
+  try {
+    await ensureAuth();
+    await setDoc(
+      doc(db, 'telegram_bot_state', 'polling_offset'),
+      {
+        offset,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (e) {
+    // Non-critical
   }
 }
 

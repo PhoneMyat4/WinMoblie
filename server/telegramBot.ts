@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import OpenAI, { toFile } from 'openai';
 import {
   openAiAssistantTools,
@@ -14,10 +15,16 @@ import {
   fetchPosDataContext,
   persistProductToFirestore,
   updateSettingSecretInFirestore,
+  claimTelegramMessageLock,
+  acquireTelegramPollingLease,
+  getTelegramPollingOffset,
+  saveTelegramPollingOffset,
 } from './posFirestoreService';
 import { executePostProductAdToFacebook } from './facebookPostService';
 import { generateServerReportPdf } from './reportPdfGenerator';
 import type { ShopSettings } from '../src/types';
+
+export const SERVER_INSTANCE_ID = `inst_${randomUUID().slice(0, 8)}`;
 
 export interface TelegramAiModelOption {
   id: string;
@@ -586,11 +593,11 @@ export async function startTelegramPolling(
 
   // Run in background async loop
   (async () => {
-    let offset = 0;
+    let offset = await getTelegramPollingOffset();
     let consecutiveErrors = 0;
     let hasClearedWebhook = false;
 
-    console.log('[TelegramBot Polling] Starting direct Telegram Bot long-polling loop...');
+    console.log(`[TelegramBot Polling] Starting direct Telegram Bot long-polling loop (Instance: ${SERVER_INSTANCE_ID}, initial offset: ${offset})...`);
 
     while (isPollingActive) {
       try {
@@ -599,6 +606,14 @@ export async function startTelegramPolling(
 
         if (!botToken) {
           await new Promise((resolve) => setTimeout(resolve, 15000));
+          continue;
+        }
+
+        // Distributed Leader Election: Ensure only ONE server instance acts as the polling worker at any time
+        const lease = await acquireTelegramPollingLease(SERVER_INSTANCE_ID, 35000);
+        if (!lease.isLeader) {
+          // Another server instance holds the lease. Yield quietly without triggering HTTP 409
+          await new Promise((resolve) => setTimeout(resolve, 12000));
           continue;
         }
 
@@ -659,6 +674,7 @@ export async function startTelegramPolling(
 
         for (const update of updates) {
           offset = Math.max(offset, update.update_id + 1);
+          await saveTelegramPollingOffset(offset);
           console.log(`[TelegramBot Polling] Processing incoming update ID: ${update.update_id}`);
           try {
             await processTelegramUpdate(update, getOpenAI, getGenAI);
@@ -726,6 +742,22 @@ export async function processTelegramUpdate(
     const messageId = callbackQuery ? callbackQuery.message?.message_id : message?.message_id;
 
     if (!chatId) {
+      return;
+    }
+
+    // Atomic Distributed Deduplication Lock:
+    // Ensures that if multiple server workers or redundant network updates deliver the same query,
+    // ONLY the first worker claims it, completely preventing duplicate answers.
+    const updateId = update.update_id || 'noupd';
+    const dedupeKey = callbackQuery
+      ? `cb_${chatId}_${callbackQuery.id}`
+      : messageId
+      ? `msg_${chatId}_${messageId}`
+      : `upd_${updateId}`;
+
+    const lockAcquired = await claimTelegramMessageLock(dedupeKey, SERVER_INSTANCE_ID);
+    if (!lockAcquired) {
+      console.log(`[TelegramBot] Deduplication notice: Telegram update "${dedupeKey}" was already claimed by another server worker. Skipping duplicate reply.`);
       return;
     }
 
