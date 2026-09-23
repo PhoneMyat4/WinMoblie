@@ -54,6 +54,13 @@ export const REPORT_INLINE_KEYBOARD = {
 };
 
 /**
+ * Returns the reusable reply_markup JSON structure for Telegram inline report buttons.
+ */
+export function getReportInlineKeyboard() {
+  return REPORT_INLINE_KEYBOARD;
+}
+
+/**
  * Mapping table from Telegram callback_data to natural language Burmese prompts.
  * These prompts are fed directly into OpenAI/GenAI tools (e.g. query_pos_reports, query_inventory_products).
  */
@@ -943,7 +950,7 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
 
         const reply = `🤖 *Telegram AI Bot Model Selection*\n\nCurrently active model: \`${currentModel}\`\n\n*Available Models:*\n${modelList}\n\n*To switch model:*\nSend \`/model <model_id>\`\n_Example:_ \`/model gpt-5.6-luna\` or \`/model o3-mini\``;
 
-        await sendTelegramMessage(botToken, chatId, reply, messageId);
+        await sendTelegramMessage(botToken, chatId, reply, messageId, REPORT_INLINE_KEYBOARD);
         return;
       }
 
@@ -961,7 +968,8 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
         botToken,
         chatId,
         `✅ *Telegram AI Model Updated!*\n\nModel switched to: \`${targetModelId}\` (*${targetModelName}*).\n${targetModelDesc}.\n\nAll subsequent questions will now be processed using this model!`,
-        messageId
+        messageId,
+        REPORT_INLINE_KEYBOARD
       );
       return;
     }
@@ -971,7 +979,8 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
         botToken,
         chatId,
         '👋 Hello! Please send a text query or a voice message (for example, "Show me today\'s Z-Report" or "Check stock for iPhone 15").',
-        messageId
+        messageId,
+        REPORT_INLINE_KEYBOARD
       );
       return;
     }
@@ -1246,12 +1255,13 @@ TELEGRAM BOT SPECIFIC MANDATES & STRICT SAFEGUARDS:
     }
 
     // 7. Dispatch answer back to Telegram chat with confidentiality sanitization
+    // Reusable inline report buttons are attached to EVERY standard response so they are always accessible
     await sendTelegramMessage(
       botToken,
       chatId,
       sanitizeConfidentialMetrics(finalReply),
       messageId,
-      isCallbackQuery ? REPORT_INLINE_KEYBOARD : undefined
+      REPORT_INLINE_KEYBOARD
     );
   } catch (error: any) {
     console.error('[TelegramBot] Error handling Telegram update:', error);
