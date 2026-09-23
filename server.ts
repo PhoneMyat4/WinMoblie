@@ -30,6 +30,8 @@ import {
   handleTelegramWebhook,
   handleSetupTelegramWebhook,
   handleTelegramWebhookInfo,
+  startTelegramPolling,
+  stopTelegramPolling,
 } from './server/telegramBot';
 import { archiveSalesData, listArchivedFiles } from './server/archiveService';
 
@@ -117,7 +119,8 @@ async function startServer() {
   // Health check endpoint
   app.get('/api/health', (req, res) => {
     res.json({ 
-      status: 'ok', 
+      status: 'ok',
+      version: 'v2-testing-server',
       time: new Date().toISOString(),
       hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
       hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
@@ -607,6 +610,17 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
   app.get('/api/setup-telegram-webhook', handleSetupTelegramWebhook);
   app.post('/api/setup-telegram-webhook', handleSetupTelegramWebhook);
   app.get('/api/telegram-webhook-info', handleTelegramWebhookInfo);
+
+  // Direct Telegram Bot Polling Control
+  app.post('/api/telegram-polling/start', (req, res) => {
+    startTelegramPolling(getOpenAI, getGenAI);
+    res.json({ success: true, message: 'Telegram bot long-polling started.' });
+  });
+
+  app.post('/api/telegram-polling/stop', (req, res) => {
+    stopTelegramPolling();
+    res.json({ success: true, message: 'Telegram bot long-polling stopped.' });
+  });
 
   // Interactive AI Chatbot Assistant with OpenAI Tool Calling (Function Calling)
   app.post('/api/chat-assistant', async (req, res) => {
@@ -1918,6 +1932,13 @@ Output a JSON response with:
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Mobile Shop POS server running at http://0.0.0.0:${PORT}`);
+
+    // Automatically initialize direct Telegram bot long-polling
+    try {
+      startTelegramPolling(getOpenAI, getGenAI);
+    } catch (pollErr) {
+      console.warn('[TelegramBot] Could not auto-start polling on boot:', pollErr);
+    }
   });
 }
 

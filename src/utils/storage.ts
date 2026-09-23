@@ -41,7 +41,8 @@ import {
   AuditLogEntry,
   AuditActionType,
   AuditCategory,
-  AuditSeverity
+  AuditSeverity,
+  MonthlyCapitalSnapshot
 } from '../types';
 import { 
   initialSettings, 
@@ -109,6 +110,7 @@ export const STORAGE_KEYS = {
   IS_FRESH_DATABASE: 'mobileshop_fresh_db_initialized_v2',
   LAST_UPDATED: 'mobileshop_last_updated_v2',
   BRANDING_BACKUP: 'mobileshop_branding_backup_v2',
+  MONTHLY_CAPITAL_SNAPSHOTS: 'mobileshop_monthly_capital_snapshots_v2',
 };
 
 // Cross-tab broadcast channel for instantaneous reactive tab synchronization
@@ -1695,9 +1697,12 @@ export const StorageService = {
     }
     StorageService.saveExpenses(expenses);
 
-    // If deduct from drawer is checked, log cash outflow
-    if (expense.deductFromCashDrawer || expense.paymentMethod === 'cash') {
-      StorageService.recordCashTransaction('out', expense.amount, `Expense #${expense.voucherNumber}: ${expense.title}`);
+    // If funding source is Cash Drawer (or deductFromCashDrawer is explicitly true and not revenue_cash), log cash drawer outflow
+    const isCashDrawerDeduction = expense.fundingSource === 'cash_drawer' || 
+      (expense.fundingSource !== 'revenue_cash' && expense.deductFromCashDrawer);
+
+    if (isCashDrawerDeduction) {
+      StorageService.recordCashTransaction('out', expense.amount, `[Daily Sales Cash Deduction] Expense #${expense.voucherNumber}: ${expense.title}`);
     }
 
     if (triggerSync && activeStorageSyncHandler?.onExpenseUpsert) {
@@ -1897,6 +1902,21 @@ export const StorageService = {
     drawer.variance = Number((actualCounted - drawer.expectedInDrawer).toFixed(2));
     drawer.closingNotes = notes;
     StorageService.saveCashDrawer(drawer);
+  },
+
+  // Monthly Capital Snapshots
+  getMonthlyCapitalSnapshots: (): Record<string, MonthlyCapitalSnapshot> => 
+    getItem<Record<string, MonthlyCapitalSnapshot>>(STORAGE_KEYS.MONTHLY_CAPITAL_SNAPSHOTS, {}),
+
+  getMonthlyCapitalSnapshot: (monthYM: string): MonthlyCapitalSnapshot | null => {
+    const snapshots = StorageService.getMonthlyCapitalSnapshots();
+    return snapshots[monthYM] || null;
+  },
+
+  saveMonthlyCapitalSnapshot: (snapshot: MonthlyCapitalSnapshot) => {
+    const snapshots = StorageService.getMonthlyCapitalSnapshots();
+    snapshots[snapshot.monthYM] = snapshot;
+    setItem(STORAGE_KEYS.MONTHLY_CAPITAL_SNAPSHOTS, snapshots);
   },
 
   // Pre-Orders & Booking

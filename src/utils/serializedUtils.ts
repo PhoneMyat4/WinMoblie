@@ -716,10 +716,13 @@ export function calculateShiftReconciliation(
     }
   });
 
-  // 3. Cash Expenses on that date
+  // 3. Cash Expenses on that date (only from Cash Drawer, not Revenue Cash reserves)
   let expensesCashTotal = 0;
   expenses.forEach(exp => {
-    if (exp.date.slice(0, 10) === targetDate && (exp.paymentMethod === 'cash' || exp.deductFromCashDrawer)) {
+    const isDrawerExpense = exp.fundingSource === 'cash_drawer' || 
+      (exp.fundingSource !== 'revenue_cash' && (exp.paymentMethod === 'cash' || exp.deductFromCashDrawer));
+
+    if (exp.date.slice(0, 10) === targetDate && isDrawerExpense) {
       expensesCashTotal += exp.amount;
     }
   });

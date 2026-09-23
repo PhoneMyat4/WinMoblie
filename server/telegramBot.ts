@@ -38,6 +38,33 @@ export const SUPPORTED_TELEGRAM_MODELS: TelegramAiModelOption[] = [
 ];
 
 /**
+ * Interactive Telegram Inline Keyboard for Quick Report Access
+ */
+export const REPORT_INLINE_KEYBOARD = {
+  inline_keyboard: [
+    [
+      { text: '📊 Daily Sale Report', callback_data: 'cmd_daily_sale' },
+      { text: '📅 Monthly Sale Report', callback_data: 'cmd_monthly_sale' },
+    ],
+    [
+      { text: '💰 Gross Profits', callback_data: 'cmd_gross_profit' },
+      { text: '🏷️ Price List', callback_data: 'cmd_price_list' },
+    ],
+  ],
+};
+
+/**
+ * Mapping table from Telegram callback_data to natural language Burmese prompts.
+ * These prompts are fed directly into OpenAI/GenAI tools (e.g. query_pos_reports, query_inventory_products).
+ */
+export const CALLBACK_PROMPT_MAP: Record<string, string> = {
+  cmd_daily_sale: 'ဒီနေ့ အရောင်းစာရင်း (Daily Sale Report) ပြပေးပါ',
+  cmd_monthly_sale: 'ဒီလ အရောင်းစာရင်း (Monthly Sale Report) ပြပေးပါ',
+  cmd_gross_profit: 'အမြတ်အစွန်းစာရင်း (Gross Profit) ဆွဲထုတ်ပေးပါ',
+  cmd_price_list: 'ပစ္စည်းစျေးနှုန်းစာရင်း (Price List) ပြပေးပါ',
+};
+
+/**
  * Retrieves the configured Telegram Bot Token from environment or settings.
  */
 export function getTelegramBotToken(settings?: ShopSettings): string | null {
@@ -182,22 +209,31 @@ export async function sendTelegramMessage(
   token: string,
   chatId: number | string,
   text: string,
-  replyToMessageId?: number
+  replyToMessageId?: number,
+  replyMarkup?: any
 ): Promise<boolean> {
   const chunks = splitMessageIntoChunks(text);
 
-  for (const chunk of chunks) {
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const isLastChunk = i === chunks.length - 1;
+
+    const payload: any = {
+      chat_id: chatId,
+      text: chunk,
+      parse_mode: 'Markdown',
+      reply_to_message_id: replyToMessageId,
+    };
+    if (replyMarkup && isLastChunk) {
+      payload.reply_markup = replyMarkup;
+    }
+
     try {
       // 1. Attempt sending with Markdown parse_mode
       const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: chunk,
-          parse_mode: 'Markdown',
-          reply_to_message_id: replyToMessageId,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = (await res.json()) as any;
@@ -208,23 +244,38 @@ export async function sendTelegramMessage(
           `[TelegramBot] Markdown parse failed for chat ${chatId} (${data.description}), falling back to plain text.`
         );
 
+        const fallbackPayload: any = {
+          chat_id: chatId,
+          text: chunk,
+          reply_to_message_id: replyToMessageId,
+        };
+        if (replyMarkup && isLastChunk) {
+          fallbackPayload.reply_markup = replyMarkup;
+        }
+
         const fallbackRes = await fetch(
           `https://api.telegram.org/bot${token}/sendMessage`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: chatId,
-              text: chunk,
-              reply_to_message_id: replyToMessageId,
-            }),
+            body: JSON.stringify(fallbackPayload),
           }
         );
 
         const fallbackData = (await fallbackRes.json()) as any;
         if (!fallbackData.ok) {
-          console.error('[TelegramBot] Failed to send fallback message:', fallbackData);
-          return false;
+          // If failed because reply_to_message_id not found, try one more time without reply_to_message_id
+          if (replyToMessageId) {
+            delete fallbackPayload.reply_to_message_id;
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(fallbackPayload),
+            });
+          } else {
+            console.error('[TelegramBot] Failed to send fallback message:', fallbackData);
+            return false;
+          }
         }
       }
     } catch (err: any) {
@@ -234,6 +285,33 @@ export async function sendTelegramMessage(
   }
 
   return true;
+}
+
+/**
+ * Acknowledges a Telegram callback query to dismiss the loading spinner on the button.
+ */
+export async function answerTelegramCallbackQuery(
+  token: string,
+  callbackQueryId: string,
+  text?: string,
+  showAlert = false
+): Promise<boolean> {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text,
+        show_alert: showAlert,
+      }),
+    });
+    const data = (await res.json()) as any;
+    return Boolean(data.ok);
+  } catch (err: any) {
+    console.warn('[TelegramBot] Failed to answerCallbackQuery:', err?.message || err);
+    return false;
+  }
 }
 
 /**
@@ -303,7 +381,7 @@ export async function setTelegramWebhook(
   try {
     const payload: any = {
       url: webhookUrl,
-      allowed_updates: ['message', 'edited_message'],
+      allowed_updates: ['message', 'edited_message', 'callback_query'],
       drop_pending_updates: false,
     };
 
@@ -353,17 +431,25 @@ export async function handleSetupTelegramWebhook(req: Request, res: Response) {
       });
     }
 
+    const mode = (typeof req.query.mode === 'string' ? req.query.mode : typeof req.body?.mode === 'string' ? req.body.mode : '').toLowerCase();
     const queryUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
     const bodyUrl = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+
+    if (mode === 'polling' || req.query.delete === 'true' || req.body?.delete === true) {
+      console.log('[TelegramBot] Removing webhook and activating direct Long-Polling mode...');
+      const delRes = await fetch(`https://api.telegram.org/bot${token}/deleteWebhook?drop_pending_updates=false`);
+      const delData = await delRes.json();
+      return res.json({
+        success: true,
+        message: 'Telegram webhook removed. Switched to direct Long-Polling mode.',
+        telegramResponse: delData,
+      });
+    }
+
     const envAppUrl = process.env.APP_URL ? `${process.env.APP_URL.replace(/\/$/, '')}/api/webhook/telegram` : '';
     const hostUrl = req.get('host') ? `https://${req.get('host')}/api/webhook/telegram` : '';
 
-    const targetUrl =
-      queryUrl ||
-      bodyUrl ||
-      'https://winmobile777.ai.studio/api/webhook/telegram' ||
-      envAppUrl ||
-      hostUrl;
+    const targetUrl = queryUrl || bodyUrl || envAppUrl || hostUrl;
 
     const secretToken =
       process.env.TELEGRAM_SECRET_TOKEN ||
@@ -449,7 +535,6 @@ export async function handleTelegramWebhook(
       return;
     }
 
-    // 1. Fetch live POS Data Context from Firestore
     const context = await fetchPosDataContext();
 
     // Check Telegram secret token header for security (matches setWebhook configuration)
@@ -466,16 +551,152 @@ export async function handleTelegramWebhook(
       }
     }
 
-    // Process standard messages and edited messages
-    const message = update.message || update.edited_message;
-    if (!message) {
+    await processTelegramUpdate(update, getOpenAI, getGenAI);
+  } catch (error: any) {
+    console.error('[TelegramBot] Error handling webhook update:', error);
+  }
+}
+
+let isPollingActive = false;
+let pollingAbortController: AbortController | null = null;
+
+/**
+ * Starts direct Telegram Bot Long-Polling.
+ * This guarantees real-time operation in development and AI Studio preview
+ * environments where inbound webhooks may be blocked by proxies or cookie gates.
+ */
+export async function startTelegramPolling(
+  getOpenAI: () => OpenAI,
+  getGenAI: () => any
+) {
+  if (isPollingActive) {
+    console.log('[TelegramBot Polling] Long-polling is already active.');
+    return;
+  }
+
+  isPollingActive = true;
+  pollingAbortController = new AbortController();
+
+  // Run in background async loop
+  (async () => {
+    let offset = 0;
+    let consecutiveErrors = 0;
+
+    console.log('[TelegramBot Polling] Starting direct Telegram Bot long-polling loop...');
+
+    while (isPollingActive) {
+      try {
+        const context = await fetchPosDataContext();
+        const botToken = getTelegramBotToken(context.settings);
+
+        if (!botToken) {
+          await new Promise((resolve) => setTimeout(resolve, 10000));
+          continue;
+        }
+
+        // If a webhook is active, delete it so Telegram routes updates to getUpdates
+        const webhookInfo = await getTelegramWebhookInfo(botToken);
+        if (webhookInfo.result?.url) {
+          console.log(
+            `[TelegramBot Polling] Deleting stale webhook (${webhookInfo.result.url}) to activate direct long-polling...`
+          );
+          await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook?drop_pending_updates=false`);
+        }
+
+        const pollUrl = `https://api.telegram.org/bot${botToken}/getUpdates?offset=${offset}&timeout=20&allowed_updates=${encodeURIComponent(
+          JSON.stringify(['message', 'edited_message', 'callback_query'])
+        )}`;
+
+        const pollRes = await fetch(pollUrl, {
+          signal: pollingAbortController?.signal,
+        });
+
+        if (!pollRes.ok) {
+          const errText = await pollRes.text();
+          console.warn(`[TelegramBot Polling] getUpdates HTTP ${pollRes.status}: ${errText}`);
+          consecutiveErrors++;
+          const waitTime = Math.min(30000, 2000 * Math.pow(1.5, consecutiveErrors));
+          await new Promise((resolve) => setTimeout(resolve, waitTime));
+          continue;
+        }
+
+        const pollData = (await pollRes.json()) as any;
+        if (!pollData.ok || !Array.isArray(pollData.result)) {
+          consecutiveErrors++;
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          continue;
+        }
+
+        consecutiveErrors = 0;
+        const updates = pollData.result;
+
+        for (const update of updates) {
+          offset = Math.max(offset, update.update_id + 1);
+          console.log(`[TelegramBot Polling] Processing incoming update ID: ${update.update_id}`);
+          try {
+            await processTelegramUpdate(update, getOpenAI, getGenAI);
+          } catch (updateErr: any) {
+            console.error(`[TelegramBot Polling] Error processing update ${update.update_id}:`, updateErr);
+          }
+        }
+      } catch (err: any) {
+        if (err.name === 'AbortError' || !isPollingActive) {
+          console.log('[TelegramBot Polling] Polling loop stopped gracefully.');
+          break;
+        }
+        consecutiveErrors++;
+        console.error('[TelegramBot Polling] Polling loop error:', err?.message || err);
+        const waitTime = Math.min(30000, 2000 * Math.pow(1.5, consecutiveErrors));
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+      }
+    }
+  })();
+}
+
+/**
+ * Stops direct Telegram Bot Long-Polling if needed.
+ */
+export function stopTelegramPolling() {
+  if (isPollingActive) {
+    console.log('[TelegramBot Polling] Stopping long polling...');
+    isPollingActive = false;
+    pollingAbortController?.abort();
+    pollingAbortController = null;
+  }
+}
+
+/**
+ * Universal Processor for Telegram Updates (used by both Long-Polling and Webhook)
+ */
+export async function processTelegramUpdate(
+  update: any,
+  getOpenAI: () => OpenAI,
+  getGenAI: () => any
+) {
+  try {
+    if (!update || typeof update !== 'object') {
       return;
     }
 
-    const chatId = message.chat?.id;
-    const userId = message.from?.id;
-    const senderName = message.from?.first_name || message.from?.username || 'Staff User';
-    const messageId = message.message_id;
+    // 1. Fetch live POS Data Context from Firestore
+    const context = await fetchPosDataContext();
+
+    // Check for callback queries (inline button presses) or standard/edited messages
+    const callbackQuery = update.callback_query;
+    const message = update.message || update.edited_message || callbackQuery?.message;
+
+    if (!message && !callbackQuery) {
+      return;
+    }
+
+    const chatId = callbackQuery
+      ? (callbackQuery.message?.chat?.id || callbackQuery.from?.id)
+      : message?.chat?.id;
+    const userId = callbackQuery ? callbackQuery.from?.id : message?.from?.id;
+    const senderName = callbackQuery
+      ? (callbackQuery.from?.first_name || callbackQuery.from?.username || 'Staff User')
+      : (message?.from?.first_name || message?.from?.username || 'Staff User');
+    const messageId = callbackQuery ? callbackQuery.message?.message_id : message?.message_id;
 
     if (!chatId) {
       return;
@@ -485,6 +706,18 @@ export async function handleTelegramWebhook(
     if (!botToken) {
       console.error('[TelegramBot] Incoming message received but TELEGRAM_BOT_TOKEN is not set.');
       return;
+    }
+
+    // Acknowledge callback queries immediately to dismiss the Telegram button loading spinner
+    let isCallbackQuery = false;
+    let callbackData = '';
+    if (callbackQuery) {
+      isCallbackQuery = true;
+      callbackData = callbackQuery.data || '';
+      console.log(`[TelegramBot] Callback query received: "${callbackData}" from ${senderName} (Chat: ${chatId})`);
+      if (callbackQuery.id) {
+        await answerTelegramCallbackQuery(botToken, callbackQuery.id, 'အစီရင်ခံစာ ထုတ်ယူနေပါသည်...');
+      }
     }
 
     // 2. Security Check: Verify authorized Chat ID or User ID
@@ -504,17 +737,30 @@ export async function handleTelegramWebhook(
 
     const openai = getOpenAI();
 
-    // 3. Extract text query or voice message
-    let userText = (message.text || message.caption || '').trim();
+    // 3. Extract text query from Callback Query, Text message, or Voice message
+    let userText = '';
     let isVoiceMessage = false;
     let voiceTranscription = '';
+
+    if (isCallbackQuery) {
+      // Map callback_data to natural language Burmese prompt
+      const mappedPrompt = CALLBACK_PROMPT_MAP[callbackData];
+      if (mappedPrompt) {
+        userText = mappedPrompt;
+        console.log(`[TelegramBot] Mapped callback_data "${callbackData}" -> prompt: "${userText}"`);
+      } else {
+        userText = callbackData;
+      }
+    } else {
+      userText = (message?.text || message?.caption || '').trim();
+    }
 
     // =========================================================================
     // REQUIREMENT 1: VOICE MESSAGES PROCESSING VIA TELEGRAM getFile & OPENAI WHISPER
     // =========================================================================
-    const voice = req.body?.message?.voice || message?.voice || message?.audio;
+    const voice = message?.voice || message?.audio;
 
-    if (voice && voice.file_id) {
+    if (!isCallbackQuery && voice && voice.file_id) {
       console.log(
         `[TelegramBot] Voice note received from Chat ${chatId} (file_id: ${voice.file_id}, duration: ${voice.duration || 0}s). Processing...`
       );
@@ -607,8 +853,8 @@ export async function handleTelegramWebhook(
       }
     }
 
-    // 4. Handle /start and /help commands
-    if (userText === '/start' || userText === '/help') {
+    // 4. Handle /start, /menu, and /help commands
+    if (userText === '/start' || userText === '/menu' || userText === '/help') {
       const activeModelId =
         (context.settings as any)?.secrets?.telegramBotModel ||
         (context.settings as any)?.telegramBotModel ||
@@ -621,7 +867,14 @@ I am your direct, real-time AI store manager connected to your live Firestore PO
 
 🤖 *Active AI Model:* \`${activeModelId}\` (Change anytime with \`/model\`)
 
-📱 *Things you can ask me:*
+⚡ *Quick Report Access (အမြန်အစီရင်ခံစာများ ရယူရန်):*
+အောက်ပါ Interactive ခလုတ်များကို နှိပ်၍ အစီရင်ခံစာများကို ချက်ချင်း ဆွဲထုတ်နိုင်ပါသည်:
+• 📊 *Daily Sale Report* - ဒီနေ့ အရောင်းစာရင်း
+• 📅 *Monthly Sale Report* - ဒီလ အရောင်းစာရင်း
+• 💰 *Gross Profits* - အမြတ်အစွန်းစာရင်း
+• 🏷️ *Price List* - ပစ္စည်းစျေးနှုန်းစာရင်း
+
+📱 *Other Things you can ask me:*
 • 🎙️ *Voice Commands (အသံဖြင့် ခိုင်းစေနိုင်ခြင်း):*
   - Press & hold mic: _"Redmi 9a ဈေးဘယ်လောက်လဲ"_
   - _"ဒီနေ့ report pdf ထုတ်ပေးပါ"_
@@ -640,13 +893,13 @@ I am your direct, real-time AI store manager connected to your live Firestore PO
 • 🏷️ *Price & Intake Actions:*
   - _"Update selling price of iPhone 15 to 4,200,000 MMK"_
   - _"Add 2 units of Redmi Note 13 Black with IMEI..."_
-• ⚙️ *Model Configuration:*
-  - _"/model" (view current model and list available options)_
-  - _"/model gpt-5.6-luna" (switch to GPT-5.6 Luna)_
+• ⚙️ *Commands:*
+  - \`/menu\` - Reopen this Interactive Report Buttons menu
+  - \`/model\` - View current model & list available AI options
 
 _Your Telegram Chat ID: \`${chatId}\`_`;
 
-      await sendTelegramMessage(botToken, chatId, welcomeMessage, messageId);
+      await sendTelegramMessage(botToken, chatId, welcomeMessage, messageId, REPORT_INLINE_KEYBOARD);
       return;
     }
 
@@ -972,8 +1225,14 @@ TELEGRAM BOT SPECIFIC MANDATES & STRICT SAFEGUARDS:
     }
 
     // 7. Dispatch answer back to Telegram chat with confidentiality sanitization
-    await sendTelegramMessage(botToken, chatId, sanitizeConfidentialMetrics(finalReply), messageId);
+    await sendTelegramMessage(
+      botToken,
+      chatId,
+      sanitizeConfidentialMetrics(finalReply),
+      messageId,
+      isCallbackQuery ? REPORT_INLINE_KEYBOARD : undefined
+    );
   } catch (error: any) {
-    console.error('[TelegramBot] Error handling webhook update:', error);
+    console.error('[TelegramBot] Error handling Telegram update:', error);
   }
 }

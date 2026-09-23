@@ -16,7 +16,10 @@ import {
   Truck,
   Lock,
   TrendingUp,
-  ArrowUpRight
+  ArrowUpRight,
+  Banknote,
+  Wallet,
+  Building
 } from 'lucide-react';
 import { ExpenseRecord, ExpenseCategoryItem, PaymentMethod, ShopSettings } from '../../types';
 import { 
@@ -59,19 +62,20 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
 
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [fundingFilter, setFundingFilter] = useState<'all' | 'cash_drawer' | 'revenue_cash'>('all');
   const [dateRangeFilter, setDateRangeFilter] = useState<'today' | 'week' | 'month' | 'all'>('all');
   const [isNewExpenseModalOpen, setIsNewExpenseModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [viewingVoucher, setViewingVoucher] = useState<ExpenseRecord | null>(null);
 
-  // Form State
+  // Form State - 2 Categories: 'cash_drawer' (deducts from daily sales) or 'revenue_cash' (deducts from remaining cash)
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<string>(categories[0]?.id || 'utilities_electricity');
   const [amount, setAmount] = useState<number>(0);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
+  const [fundingSource, setFundingSource] = useState<'cash_drawer' | 'revenue_cash'>('cash_drawer');
+  const [revenueChannel, setRevenueChannel] = useState<PaymentMethod | 'cash'>('kpay');
   const [paidTo, setPaidTo] = useState('');
   const [paymentRef, setPaymentRef] = useState('');
-  const [deductFromCashDrawer, setDeductFromCashDrawer] = useState(true);
   const [notes, setNotes] = useState('');
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0]);
 
@@ -117,7 +121,7 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
     }
   };
 
-  // Date filtering logic
+  // Date and funding filtering logic
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
 
@@ -129,6 +133,14 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
       (e.notes && e.notes.toLowerCase().includes(searchQuery.toLowerCase()));
 
     const matchesCategory = categoryFilter === 'all' || e.category === categoryFilter;
+
+    const isCashDrawerExp = e.fundingSource === 'cash_drawer' || (e.fundingSource !== 'revenue_cash' && e.deductFromCashDrawer);
+    const isRevenueCashExp = e.fundingSource === 'revenue_cash' || (!e.deductFromCashDrawer && e.paymentMethod !== 'cash');
+
+    const matchesFunding = 
+      fundingFilter === 'all' ||
+      (fundingFilter === 'cash_drawer' && isCashDrawerExp) ||
+      (fundingFilter === 'revenue_cash' && isRevenueCashExp);
 
     let matchesDate = true;
     if (dateRangeFilter === 'today') {
@@ -142,11 +154,19 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
       matchesDate = expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear();
     }
 
-    return matchesSearch && matchesCategory && matchesDate;
+    return matchesSearch && matchesCategory && matchesFunding && matchesDate;
   });
 
   const totalExpenseSum = filteredExpenses.reduce((acc, e) => acc + e.amount, 0);
   const todayExpenseSum = expenses.filter(e => e.date.startsWith(todayStr)).reduce((acc, e) => acc + e.amount, 0);
+
+  const cashDrawerExpenseSum = filteredExpenses
+    .filter(e => e.fundingSource === 'cash_drawer' || (e.fundingSource !== 'revenue_cash' && e.deductFromCashDrawer))
+    .reduce((acc, e) => acc + e.amount, 0);
+
+  const revenueCashExpenseSum = filteredExpenses
+    .filter(e => e.fundingSource === 'revenue_cash' || (!e.deductFromCashDrawer && e.paymentMethod !== 'cash'))
+    .reduce((acc, e) => acc + e.amount, 0);
 
   // Category sum aggregation
   const categoryTotals: Record<string, number> = {};
@@ -163,6 +183,9 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
       return;
     }
 
+    const isCashDrawer = fundingSource === 'cash_drawer';
+    const effectivePaymentMethod: PaymentMethod = isCashDrawer ? 'cash' : (revenueChannel as PaymentMethod);
+
     const newExpense: ExpenseRecord = {
       id: `exp-${Date.now()}`,
       voucherNumber: `${settings.expensePrefix || 'EXP-'}${Date.now().toString().slice(-6)}`,
@@ -170,11 +193,13 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
       title,
       category,
       amount,
-      paymentMethod,
+      paymentMethod: effectivePaymentMethod,
+      fundingSource,
+      revenueCashChannel: isCashDrawer ? undefined : revenueChannel,
       paidTo: paidTo || undefined,
       paymentRef: paymentRef || undefined,
       recordedBy: settings.currentStaffName,
-      deductFromCashDrawer,
+      deductFromCashDrawer: isCashDrawer,
       notes: notes || undefined,
     };
 
@@ -184,6 +209,8 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
     // Reset Form
     setTitle('');
     setAmount(0);
+    setFundingSource('cash_drawer');
+    setRevenueChannel('kpay');
     setPaidTo('');
     setPaymentRef('');
     setNotes('');
@@ -224,7 +251,7 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
       )}
 
       {/* Top Metrics Banner */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
@@ -234,28 +261,45 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
           <p className="text-2xl font-black text-rose-600">
             {formatCurrency(totalExpenseSum, settings.currencySymbol)}
           </p>
-          <p className="text-[11px] text-slate-500 mt-1">{filteredExpenses.length} Vouchers in current view</p>
+          <p className="text-[11px] text-slate-500 mt-1">{filteredExpenses.length} Vouchers in view</p>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
-            <span>Today's Outflow</span>
-            <Calendar className="w-4 h-4 text-amber-600" />
+        <div className="bg-white p-4 rounded-2xl border border-amber-200/80 bg-amber-50/30 shadow-2xs">
+          <div className="flex items-center justify-between text-amber-700 text-xs font-semibold mb-1">
+            <span className="flex items-center gap-1.5">
+              <Banknote className="w-3.5 h-3.5" />
+              <span>Cash Drawer Outflows</span>
+            </span>
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800">Live Register</span>
           </div>
           <p className="text-2xl font-black text-slate-900">
-            {formatCurrency(todayExpenseSum, settings.currencySymbol)}
+            {formatCurrency(cashDrawerExpenseSum, settings.currencySymbol)}
           </p>
-          <p className="text-[11px] text-slate-500 mt-1">Shop operational costs today</p>
+          <p className="text-[11px] text-amber-700 font-medium mt-1">Deducted directly from daily sale revenue</p>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-indigo-200/80 bg-indigo-50/30 shadow-2xs">
+          <div className="flex items-center justify-between text-indigo-700 text-xs font-semibold mb-1">
+            <span className="flex items-center gap-1.5">
+              <Wallet className="w-3.5 h-3.5" />
+              <span>Revenue Cash Outflows</span>
+            </span>
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-800">Reserves</span>
+          </div>
+          <p className="text-2xl font-black text-indigo-950">
+            {formatCurrency(revenueCashExpenseSum, settings.currencySymbol)}
+          </p>
+          <p className="text-[11px] text-indigo-700 font-medium mt-1">Deducted from store remaining cash pool</p>
         </div>
 
         <div className="bg-gradient-to-br from-rose-900 to-rose-950 text-white p-4 rounded-2xl shadow-md flex items-center justify-between">
           <div className="min-w-0 pr-2">
-            <p className="text-xs text-rose-200 font-bold uppercase">Highest Category</p>
-            <h3 className="text-base font-black text-white mt-1 truncate">
-              {topCategoryInfo.label}
+            <p className="text-xs text-rose-200 font-bold uppercase">Expense Actions</p>
+            <h3 className="text-xs font-medium text-rose-100 mt-1 truncate">
+              Record vouchers by fund source
             </h3>
-            <p className="text-[11px] text-rose-300 mt-0.5">
-              {formatCurrency(categoryTotals[topCategoryKey] || 0, settings.currencySymbol)} spent
+            <p className="text-[11px] text-rose-300 mt-0.5 font-bold">
+              {categories.length} Categories Active
             </p>
           </div>
           <div className="flex flex-col gap-2 shrink-0">
@@ -270,7 +314,7 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
             <button
               type="button"
               onClick={() => setIsCategoryModalOpen(true)}
-              className="px-3 py-1.5 bg-rose-800/80 hover:bg-rose-800 text-rose-100 text-[11px] font-semibold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 border border-rose-700/60"
+              className="px-3 py-1 bg-rose-800/80 hover:bg-rose-800 text-rose-100 text-[11px] font-semibold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 border border-rose-700/60"
             >
               <SlidersHorizontal className="w-3 h-3" />
               <span>Custom Categories</span>
@@ -295,12 +339,51 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
         </div>
 
         <div className="flex items-center flex-wrap gap-2 w-full sm:w-auto">
+          {/* Funding Source Filter (Cash Drawer vs Revenue Cash) */}
+          <div className="flex bg-slate-100 p-1 rounded-xl">
+            <button
+              type="button"
+              onClick={() => setFundingFilter('all')}
+              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                fundingFilter === 'all'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              All Funds
+            </button>
+            <button
+              type="button"
+              onClick={() => setFundingFilter('cash_drawer')}
+              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
+                fundingFilter === 'cash_drawer'
+                  ? 'bg-amber-500 text-white shadow-xs'
+                  : 'text-amber-800 hover:text-amber-950'
+              }`}
+            >
+              <Banknote className="w-3 h-3" />
+              <span>Cash Drawer</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFundingFilter('revenue_cash')}
+              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
+                fundingFilter === 'revenue_cash'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-indigo-700 hover:text-indigo-900'
+              }`}
+            >
+              <Wallet className="w-3 h-3" />
+              <span>Revenue Cash</span>
+            </button>
+          </div>
+
           {/* Customizable Category Filter Dropdown */}
           <div className="flex items-center gap-1.5">
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-hidden max-w-[200px]"
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-hidden max-w-[180px]"
             >
               <option value="all">All Categories ({categories.length})</option>
               {categories.map(c => (
@@ -417,20 +500,38 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                       </td>
 
                       <td className="py-3 px-4">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${payInfo.badgeBg}`}>
-                            {payInfo.label}
-                          </span>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {exp.fundingSource === 'revenue_cash' ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                <Wallet className="w-2.5 h-2.5 text-indigo-500" />
+                                <span>Revenue Cash</span>
+                                <span className="text-indigo-300">•</span>
+                                <span className="uppercase">{exp.revenueCashChannel || payInfo.label}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                <Banknote className="w-2.5 h-2.5 text-amber-600" />
+                                <span>Cash Drawer</span>
+                              </span>
+                            )}
+                          </div>
                           {exp.paidTo && (
-                            <span className="text-[10px] text-slate-600 font-medium">To: {exp.paidTo}</span>
+                            <span className="text-[10px] text-slate-500 block truncate max-w-[150px]">To: {exp.paidTo}</span>
                           )}
                         </div>
                       </td>
 
                       <td className="py-3 px-4 text-slate-600">
-                        {exp.recordedBy}
-                        {exp.deductFromCashDrawer && (
-                          <span className="block text-[9px] text-emerald-600 font-semibold">• Drawer deducted</span>
+                        <p className="font-semibold text-slate-900">{exp.recordedBy}</p>
+                        {exp.fundingSource === 'revenue_cash' ? (
+                          <span className="inline-block text-[9px] text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded mt-0.5">
+                            - Remaining Cash
+                          </span>
+                        ) : (
+                          <span className="inline-block text-[9px] text-amber-800 font-bold bg-amber-50 px-1.5 py-0.5 rounded mt-0.5">
+                            - Daily Sales Cash
+                          </span>
                         )}
                       </td>
 
@@ -561,36 +662,117 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Payment Method</label>
-                  <select
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value as any)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold"
+              {/* 2-Category Payment Funding Source Selector */}
+              <div className="space-y-2 pt-1 border-t border-slate-200">
+                <label className="block font-bold text-slate-700 text-xs uppercase tracking-wider">
+                  Payment Source (Where will the money come from?) *
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Category 1: Cash Drawer */}
+                  <button
+                    type="button"
+                    onClick={() => setFundingSource('cash_drawer')}
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      fundingSource === 'cash_drawer'
+                        ? 'bg-amber-50/80 border-amber-500 ring-2 ring-amber-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
                   >
-                    <option value="cash">Cash (Drawer)</option>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <div className={`p-1.5 rounded-lg ${fundingSource === 'cash_drawer' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <Banknote className="w-4 h-4" />
+                        </div>
+                        <span className="font-bold text-sm text-slate-900">Cash Drawer</span>
+                      </div>
+                      {fundingSource === 'cash_drawer' && (
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-snug">
+                      Deducts from <strong className="text-amber-800">Daily Sales Revenue</strong> and counter register drawer.
+                    </p>
+                  </button>
+
+                  {/* Category 2: Revenue Cash */}
+                  <button
+                    type="button"
+                    onClick={() => setFundingSource('revenue_cash')}
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      fundingSource === 'revenue_cash'
+                        ? 'bg-indigo-50/80 border-indigo-500 ring-2 ring-indigo-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <div className={`p-1.5 rounded-lg ${fundingSource === 'revenue_cash' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                          <Wallet className="w-4 h-4" />
+                        </div>
+                        <span className="font-bold text-sm text-slate-900">Revenue Cash</span>
+                      </div>
+                      {fundingSource === 'revenue_cash' && (
+                        <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" />
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-snug">
+                      Deducts from <strong className="text-indigo-800">Total Remaining Cash</strong>. Counter cash drawer is NOT touched.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Sub-channel picker if Revenue Cash is chosen */}
+              {fundingSource === 'revenue_cash' && (
+                <div className="p-3.5 bg-indigo-50/60 border border-indigo-200 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-bold text-indigo-950 text-xs">
+                      Choose Payment Channel (KPay, Wave, Bank) *
+                    </label>
+                    <span className="text-[10px] text-indigo-600 font-bold uppercase">Digital Accounts</span>
+                  </div>
+                  <select
+                    value={revenueChannel}
+                    onChange={(e) => setRevenueChannel(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-white border border-indigo-300 rounded-xl font-bold text-slate-800 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  >
                     <option value="kpay">KBZPay (KPay)</option>
                     <option value="wave">WavePay</option>
                     <option value="kbz">KBZ Bank</option>
                     <option value="aya">AYA Bank</option>
                     <option value="cb">CB Bank</option>
                     <option value="yoma">Yoma Bank</option>
+                    <option value="cash">Main Reserve Cash (Safe / Back-office cash)</option>
                   </select>
+                  <p className="text-[11px] text-indigo-700">
+                    ✓ This voucher deducts strictly from your accumulated remaining cash reserves via <strong className="font-bold uppercase">{revenueChannel}</strong>.
+                  </p>
                 </div>
+              )}
 
+              {fundingSource === 'cash_drawer' && (
+                <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-900">
+                  <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Deducts directly from Today's Live Cash Drawer</p>
+                    <p className="text-[11px] text-amber-700 mt-0.5">
+                      Will deduct from daily sales revenue and generate an immediate register cash-out transaction.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Date</label>
                   <input
                     type="date"
                     value={expenseDate}
                     onChange={(e) => setExpenseDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold"
                   />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Paid To (Vendor/Person)</label>
                   <input
@@ -601,17 +783,17 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
                   />
                 </div>
+              </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Transaction Ref #</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. KP-99210"
-                    value={paymentRef}
-                    onChange={(e) => setPaymentRef(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono"
-                  />
-                </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Transaction Ref # (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. KP-99210 or Cheque #1042"
+                  value={paymentRef}
+                  onChange={(e) => setPaymentRef(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono"
+                />
               </div>
 
               <div>
@@ -623,19 +805,6 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                   onChange={(e) => setNotes(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
                 />
-              </div>
-
-              <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-                <input
-                  type="checkbox"
-                  id="deductDrawer"
-                  checked={deductFromCashDrawer}
-                  onChange={(e) => setDeductFromCashDrawer(e.target.checked)}
-                  className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer"
-                />
-                <label htmlFor="deductDrawer" className="text-slate-800 font-semibold cursor-pointer">
-                  Deduct this amount directly from Live Register Cash Drawer
-                </label>
               </div>
 
               <div className="pt-3 border-t border-slate-200 flex justify-between items-center">
@@ -700,8 +869,14 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                   <span className="font-bold">{viewingVoucher.paidTo || 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Method:</span>
-                  <span className="font-bold">{getPaymentMethodInfo(viewingVoucher.paymentMethod).label}</span>
+                  <span className="text-slate-500">Fund Source:</span>
+                  <span className="font-bold text-slate-900">
+                    {viewingVoucher.fundingSource === 'revenue_cash' ? 'Revenue Cash (Remaining Cash)' : 'Cash Drawer (Daily Sales)'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Method/Channel:</span>
+                  <span className="font-bold uppercase">{viewingVoucher.revenueCashChannel || getPaymentMethodInfo(viewingVoucher.paymentMethod).label}</span>
                 </div>
                 {viewingVoucher.paymentRef && (
                   <div className="flex justify-between">

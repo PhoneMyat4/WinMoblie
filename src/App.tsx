@@ -73,6 +73,7 @@ const VALID_TABS: AppTab[] = [
   'stock_check',
   'purchases',
   'daily_profit',
+  'monthly_profit',
   'personal_finance',
   'credit_sales',
   'expenses',
@@ -789,8 +790,9 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'daily_profit' && (
+          {(activeTab === 'daily_profit' || activeTab === 'monthly_profit') && (
             <DailyGrossProfitManager
+              key={activeTab}
               sales={sales}
               products={products}
               expenses={expenses}
@@ -799,6 +801,7 @@ export default function App() {
               currentStaffUser={currentActiveUser}
               onViewInvoice={(sale) => setSelectedInvoiceToView(sale)}
               onNavigateTab={(tab) => setActiveTab(tab)}
+              initialScope={activeTab === 'monthly_profit' ? 'monthly' : 'daily'}
             />
           )}
 

@@ -360,7 +360,7 @@ export const Navigation: React.FC<NavigationProps> = ({
             <div className="space-y-1">
               {group.items.map((tab) => {
                 const Icon = tab.icon;
-                const isActive = activeTab === tab.id;
+                const isActive = activeTab === tab.id || (tab.id === 'daily_profit' && activeTab === 'monthly_profit');
 
                 return (
                   <div

@@ -457,6 +457,7 @@ export function isTabAccessibleForUser(
     case 'pos':
       return Boolean(perms.canAccessPos);
     case 'daily_profit':
+    case 'monthly_profit':
       return Boolean(perms.canViewCostAndProfit || perms.canViewReports || user.role === 'Owner' || user.role === 'Manager');
     case 'personal_finance':
       return Boolean(user.role === 'Owner' || user.role === 'Manager' || perms.canViewCostAndProfit || perms.canRecordExpenses || perms.canViewReports);
@@ -526,11 +527,12 @@ export function getTabRequiredPermissionInfo(tab: AppTab): {
         description: 'Your staff account is restricted from opening the Point of Sale terminal and completing sales transactions.',
       };
     case 'daily_profit':
+    case 'monthly_profit':
       return {
         permissionKey: 'canViewCostAndProfit',
-        title: 'Daily Gross Profit & Financial Analysis',
+        title: 'Daily & Monthly Financial Analysis',
         requiredPermissionLabel: 'Cost & Profit Visibility (canViewCostAndProfit / canViewReports)',
-        description: 'Viewing store daily gross profit, cost of goods sold, and operating profit margins requires cost and profit permissions.',
+        description: 'Viewing store daily and monthly gross profit, capital matching, and operating margins requires cost and profit permissions.',
       };
     case 'personal_finance':
       return {

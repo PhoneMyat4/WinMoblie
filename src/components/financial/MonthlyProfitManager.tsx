@@ -27,7 +27,19 @@ import {
   Percent,
   RefreshCw,
   Clock,
-  Filter
+  Filter,
+  Scale,
+  Wallet,
+  Banknote,
+  Landmark,
+  ShieldCheck,
+  Edit3,
+  Save,
+  ArrowRight,
+  Info,
+  PlusCircle,
+  MinusCircle,
+  X
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -50,10 +62,14 @@ import {
   StaffUser, 
   ShopSettings, 
   ProductCategory,
-  AppTab 
+  AppTab,
+  MonthlyCapitalSnapshot
 } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { canonicalCategory, CANONICAL_CATEGORIES } from '../../data/categoryTaxonomy';
+import { StorageService } from '../../utils/storage';
+import { calculateRunningCapital, calculateCapitalMatchNetProfit } from '../../utils/capitalUtils';
+import { CapitalReconciliationView } from './CapitalReconciliationView';
 
 export interface MonthlyProfitManagerProps {
   sales: Sale[];
@@ -104,6 +120,24 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
 
   const [staffSortField, setStaffSortField] = useState<StaffSortField>('grossProfit');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Capital Match vs P&L Income Statement View Switcher
+  const [activeReportTab, setActiveReportTab] = useState<'capital_reconciliation' | 'pnl_income'>('capital_reconciliation');
+
+  // Monthly Capital Snapshot state
+  const [snapshots, setSnapshots] = useState<Record<string, MonthlyCapitalSnapshot>>(() => 
+    StorageService.getMonthlyCapitalSnapshots()
+  );
+  const [isCapitalModalOpen, setIsCapitalModalOpen] = useState(false);
+  const [formInitialCash, setFormInitialCash] = useState<number>(0);
+  const [formInitialStock, setFormInitialStock] = useState<number>(0);
+  const [formInjections, setFormInjections] = useState<number>(0);
+  const [formDrawings, setFormDrawings] = useState<number>(0);
+  const [formNotes, setFormNotes] = useState<string>('');
+
+  // Cash Drawer & Credit Sales for Balance Sheet calculations
+  const cashDrawer = useMemo(() => StorageService.getCashDrawer(), []);
+  const creditSales = useMemo(() => StorageService.getCreditSales(), []);
 
   // Available Years extracted from sales and expenses
   const availableYears = useMemo(() => {
@@ -201,7 +235,17 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
     });
 
     const grossProfit = grossRevenue - totalCogs;
-    const totalExpenses = mExpenses.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+    
+    // Distinguish standard operating expenses from inventory scrap write-offs
+    const operatingExpenses = mExpenses
+      .filter(e => !e.isInventoryAssetLoss)
+      .reduce((acc, curr) => acc + (curr.amount || 0), 0);
+
+    const inventoryScrapLosses = mExpenses
+      .filter(e => e.isInventoryAssetLoss)
+      .reduce((acc, curr) => acc + (curr.amount || 0), 0);
+
+    const totalExpenses = operatingExpenses + inventoryScrapLosses;
     const netOperatingProfit = grossProfit - totalExpenses;
     const grossMarginPct = grossRevenue > 0 ? (grossProfit / grossRevenue) * 100 : 0;
     const netMarginPct = grossRevenue > 0 ? (netOperatingProfit / grossRevenue) * 100 : 0;
@@ -212,6 +256,8 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
       grossRevenue,
       totalCogs,
       grossProfit,
+      operatingExpenses,
+      inventoryScrapLosses,
       totalExpenses,
       netOperatingProfit,
       grossMarginPct,
@@ -222,6 +268,74 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
   // Selected Month & Previous Month Financials
   const currentMonthData = useMemo(() => calculateMonthFinancials(selectedMonth), [selectedMonth, sales, expenses, productCostMap]);
   const prevMonthData = useMemo(() => calculateMonthFinancials(previousMonthStr), [previousMonthStr, sales, expenses, productCostMap]);
+
+  // Live Running Capital Breakdown for the selected month
+  const currentRunningCapital = useMemo(() => {
+    return calculateRunningCapital(products, cashDrawer, creditSales, expenses, sales, selectedMonth);
+  }, [products, cashDrawer, creditSales, expenses, sales, selectedMonth]);
+
+  // Active snapshot for the selected month
+  const currentSnapshot = useMemo(() => {
+    return snapshots[selectedMonth] || null;
+  }, [snapshots, selectedMonth]);
+
+  // Starting Capital Values
+  const initialCash = currentSnapshot ? currentSnapshot.initialCash : 0;
+  const initialStock = currentSnapshot ? currentSnapshot.initialStockValuation : 0;
+  const initialTotalCapital = currentSnapshot ? currentSnapshot.initialTotalCapital : 0;
+  const capitalInjections = currentSnapshot?.capitalInjections || 0;
+  const ownerDrawings = currentSnapshot?.ownerDrawings || 0;
+
+  // Capital Match Calculation: Net Profit = (Ending Capital + Drawings) - (Initial Capital + Injections)
+  const capitalMatchResult = useMemo(() => {
+    return calculateCapitalMatchNetProfit(
+      initialTotalCapital,
+      currentRunningCapital.totalRunningCapital,
+      capitalInjections,
+      ownerDrawings
+    );
+  }, [initialTotalCapital, currentRunningCapital.totalRunningCapital, capitalInjections, ownerDrawings]);
+
+  // Handlers for starting capital snapshot modal
+  const handleOpenCapitalModal = () => {
+    if (currentSnapshot) {
+      setFormInitialCash(currentSnapshot.initialCash);
+      setFormInitialStock(currentSnapshot.initialStockValuation);
+      setFormInjections(currentSnapshot.capitalInjections || 0);
+      setFormDrawings(currentSnapshot.ownerDrawings || 0);
+      setFormNotes(currentSnapshot.notes || '');
+    } else {
+      // Auto-suggest using live drawer float and live stock valuation
+      setFormInitialCash(cashDrawer?.openingFloat || cashDrawer?.openingBalance || 0);
+      setFormInitialStock(currentRunningCapital.remainingStockValuation);
+      setFormInjections(0);
+      setFormDrawings(0);
+      setFormNotes(`Starting capital snapshot for ${selectedMonth}`);
+    }
+    setIsCapitalModalOpen(true);
+  };
+
+  const handleSaveCapitalSnapshot = () => {
+    const totalInit = (Number(formInitialCash) || 0) + (Number(formInitialStock) || 0);
+    const newSnapshot: MonthlyCapitalSnapshot = {
+      id: `cap-${selectedMonth}`,
+      monthYM: selectedMonth,
+      initialCash: Number(formInitialCash) || 0,
+      initialStockValuation: Number(formInitialStock) || 0,
+      initialTotalCapital: totalInit,
+      capitalInjections: Number(formInjections) || 0,
+      ownerDrawings: Number(formDrawings) || 0,
+      notes: formNotes,
+      recordedBy: settings.currentStaffName || 'Store Manager',
+      updatedAt: new Date().toISOString(),
+    };
+
+    StorageService.saveMonthlyCapitalSnapshot(newSnapshot);
+    setSnapshots(StorageService.getMonthlyCapitalSnapshots());
+    setIsCapitalModalOpen(false);
+    setToastMessage(`Saved starting capital snapshot for ${selectedMonth}`);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
   // Month-Over-Month (MoM) Growth percentage calculator
   const calcMomGrowth = (current: number, previous: number) => {
@@ -667,6 +781,55 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
         </div>
       </div>
 
+      {/* Sub-Navigation Tabs: Capital Match vs Income Statement */}
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+        <button
+          type="button"
+          onClick={() => setActiveReportTab('capital_reconciliation')}
+          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            activeReportTab === 'capital_reconciliation'
+              ? 'bg-indigo-600 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Scale className="w-4 h-4" />
+          <span>Capital Match & Balance Sheet (အရင်းအနှီးကိုက်ညှိခြင်း)</span>
+          <span className="px-1.5 py-0.5 rounded text-[9px] bg-indigo-500 text-white font-extrabold tracking-wider">NEW</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveReportTab('pnl_income')}
+          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            activeReportTab === 'pnl_income'
+              ? 'bg-slate-900 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" />
+          <span>Income Statement & Daily Trajectory (P&L)</span>
+        </button>
+      </div>
+
+      {activeReportTab === 'capital_reconciliation' ? (
+        <CapitalReconciliationView
+          selectedMonth={selectedMonth}
+          currentMonthData={currentMonthData}
+          currentRunningCapital={currentRunningCapital}
+          currentSnapshot={currentSnapshot}
+          initialTotalCapital={initialTotalCapital}
+          initialCash={initialCash}
+          initialStock={initialStock}
+          capitalInjections={capitalInjections}
+          ownerDrawings={ownerDrawings}
+          capitalMatchResult={capitalMatchResult}
+          currencySymbol={currencySymbol}
+          onOpenCapitalModal={handleOpenCapitalModal}
+          products={products}
+          onNavigateTab={onNavigateTab}
+        />
+      ) : (
+        <>
       {/* 1. Month-Over-Month KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
         {/* Card 1: Gross Revenue */}
@@ -1270,6 +1433,151 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
           )}
         </div>
       </div>
+        </>
+      )}
+
+      {/* Month Starting Capital Snapshot Modal */}
+      {isCapitalModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-indigo-100 text-indigo-700 rounded-xl">
+                  <Scale className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">
+                    Set Month Starting Capital Snapshot
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Target Month: <strong className="text-indigo-600">{selectedMonth}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCapitalModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* Cash Float */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Initial Cash in Hand & Reserves ({currencySymbol})
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formInitialCash || ''}
+                  onChange={(e) => setFormInitialCash(Number(e.target.value))}
+                  placeholder="e.g. 200000"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:outline-indigo-600"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">Starting physical cash drawer float & store reserve cash.</p>
+              </div>
+
+              {/* Initial Stock at Cost */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Initial Inventory Valuation at Cost ({currencySymbol})
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formInitialStock || ''}
+                  onChange={(e) => setFormInitialStock(Number(e.target.value))}
+                  placeholder="e.g. 800000"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:outline-indigo-600"
+                />
+                <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1">
+                  <span>Valued strictly at product purchase unit cost.</span>
+                  <button
+                    type="button"
+                    onClick={() => setFormInitialStock(currentRunningCapital.remainingStockValuation)}
+                    className="text-indigo-600 hover:underline font-semibold cursor-pointer"
+                  >
+                    Use Live Cost ({formatCurrency(currentRunningCapital.remainingStockValuation, currencySymbol)})
+                  </button>
+                </div>
+              </div>
+
+              {/* Computed Initial Capital */}
+              <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-2xl flex items-center justify-between">
+                <span className="font-bold text-indigo-900">Total Starting Capital (A):</span>
+                <span className="text-base font-black text-indigo-900">
+                  {formatCurrency((Number(formInitialCash) || 0) + (Number(formInitialStock) || 0), currencySymbol)}
+                </span>
+              </div>
+
+              {/* Capital Injections & Drawings */}
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Capital Injections (+)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formInjections || ''}
+                    onChange={(e) => setFormInjections(Number(e.target.value))}
+                    placeholder="0"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:outline-indigo-600"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Additional capital added during month</p>
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Owner Drawings (−)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formDrawings || ''}
+                    onChange={(e) => setFormDrawings(Number(e.target.value))}
+                    placeholder="0"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:outline-indigo-600"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Profit withdrawn for personal use</p>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Audit Notes</label>
+                <input
+                  type="text"
+                  value={formNotes}
+                  onChange={(e) => setFormNotes(e.target.value)}
+                  placeholder="Optional calibration notes"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:outline-indigo-600"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsCapitalModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCapitalSnapshot}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Capital Snapshot</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
