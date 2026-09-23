@@ -881,7 +881,8 @@ export async function processTelegramUpdate(
         process.env.TELEGRAM_AI_MODEL ||
         'gpt-5.6-luna';
 
-      const welcomeMessage = `👋 *Welcome to Golden Star Mobile POS Assistant, ${senderName}!*
+      const shopName = context.settings?.shopName || 'Win Mobile';
+      const welcomeMessage = `👋 *Welcome to ${shopName} POS Assistant, ${senderName}!*
 
 I am your direct, real-time AI store manager connected to your live Firestore POS database. You can chat with me in text or voice messages in Burmese or English!
 

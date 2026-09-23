@@ -1855,7 +1855,7 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
                 </div>
 
                 <FacebookPostPreview
-                  pageName={settings.socialMediaConfig?.pageName || settings.shopName || 'Golden Star Mobile'}
+                  pageName={settings.socialMediaConfig?.pageName || settings.shopName || 'Win Mobile'}
                   caption={socialState.draftCaption}
                   selectedMedia={selectedMediaItems}
                   settings={settings}

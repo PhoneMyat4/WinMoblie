@@ -322,8 +322,8 @@ export const StorageService = {
       s.currentStaffId = 'owner';
       s.currentStaffRole = 'Owner';
     }
-    if (s.invoiceCustomization?.qrAccountName === 'Ko Aung Kyaw (Golden Star)' || s.invoiceCustomization?.qrAccountName === 'Ko Aung Kyaw (Shop Account)') {
-      s.invoiceCustomization.qrAccountName = 'Shop Account (Golden Star)';
+    if (s.invoiceCustomization?.qrAccountName === 'Ko Aung Kyaw (Golden Star)' || s.invoiceCustomization?.qrAccountName === 'Ko Aung Kyaw (Shop Account)' || s.invoiceCustomization?.qrAccountName === 'Shop Account (Golden Star)') {
+      s.invoiceCustomization.qrAccountName = 'Shop Account (Win Mobile)';
     }
 
     return s;

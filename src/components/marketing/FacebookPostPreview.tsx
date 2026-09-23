@@ -34,7 +34,7 @@ export const FacebookPostPreview: React.FC<FacebookPostPreviewProps> = ({
   const [isLiked, setIsLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(48);
 
-  const displayPageName = pageName || settings?.shopName || 'Golden Star Mobile';
+  const displayPageName = pageName || settings?.shopName || 'Win Mobile';
   const logoUrl = settings?.invoiceCustomization?.shopLogoUrl;
 
   const handleLikeToggle = () => {

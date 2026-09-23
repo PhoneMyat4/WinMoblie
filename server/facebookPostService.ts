@@ -90,7 +90,7 @@ export async function generateSocialAdCaption(params: {
 }): Promise<string> {
   const { product, settings, goal = 'new_arrival', tone = 'exciting_retail', openai, genai } = params;
 
-  const storeName = settings?.shopName || 'Golden Star Mobile & Gadgets';
+  const storeName = settings?.shopName || 'Win Mobile & Gadgets';
   const currency = settings?.currencySymbol || 'MMK';
   const hotline = settings?.phone || settings?.whatsappNumber || '09-798123456';
   const address = settings?.address ? `${settings.address}, ${settings.cityCountry || ''}` : 'Yangon, Myanmar';
@@ -777,7 +777,7 @@ export async function executePostProductAdToFacebook(
     imageUrl,
     sampleImageUrl: targetProduct.imageUrl,
     pageId: pageId || 'FB-PAGE-DEMO',
-    pageName: pageName || 'Golden Star Mobile Official',
+    pageName: pageName || settings?.shopName || 'Win Mobile Official',
     status: 'preview_ready',
     sellingPrice: targetProduct.sellingPrice,
     specsSummary,

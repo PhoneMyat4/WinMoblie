@@ -228,7 +228,7 @@ export function exportGptCostComparisonPdf(settings?: Partial<ShopSettings>) {
     doc.setFontSize(7);
     doc.setTextColor(148, 163, 184);
     doc.text(
-      `Golden Star Mobile POS • Confidential Strategic Cost Audit • Page ${i} of ${totalPages}`,
+      `Mobile POS • Confidential Strategic Cost Audit • Page ${i} of ${totalPages}`,
       pageWidth / 2,
       pageHeight - 8,
       { align: 'center' }

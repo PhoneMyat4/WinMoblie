@@ -40,7 +40,7 @@ export const initialExpenseCategories: ExpenseCategoryItem[] = [
 export const initialStaffUsers: StaffUser[] = [];
 
 export const initialSettings: ShopSettings = {
-  shopName: 'Golden Star Mobile & Gadgets',
+  shopName: 'Win Mobile & Gadgets',
   tagline: 'Smartphones, Original Accessories & Wholesale Gadgets',
   logoUrl: '',
   invoiceLogoUrl: '',
@@ -50,8 +50,8 @@ export const initialSettings: ShopSettings = {
   phone: '09-798123456',
   whatsappNumber: '+959798123456',
   viberNumber: '09-798123456',
-  telegramContact: '@goldenstarmobile',
-  email: 'sales@goldenstarmobile.com',
+  telegramContact: '@winmobile',
+  email: 'sales@winmobile.com',
   taxRegistrationNumber: 'MM-YGN-884920',
   currencySymbol: 'Ks',
   currencyCode: 'MMK',
@@ -67,7 +67,7 @@ export const initialSettings: ShopSettings = {
   currentStaffId: 'owner',
   enableSoundEffects: true,
   invoiceCustomization: {
-    headerTitle: 'GOLDEN STAR MOBILE',
+    headerTitle: 'WIN MOBILE',
     subHeader: 'Smartphones & Genuine Gadgets Retail',
     addressLine1: 'No. (124), Anawrahta Road, Kyauktada Township',
     addressLine2: 'Near Sule Pagoda',
@@ -75,11 +75,11 @@ export const initialSettings: ShopSettings = {
     phone1: '09-798123456',
     phone2: '09-974567890',
     viberNumber: '09-798123456',
-    telegramUsername: '@goldenstarmobile',
-    facebookPage: 'facebook.com/goldenstarmobile.ygn',
+    telegramUsername: '@winmobile',
+    facebookPage: 'facebook.com/winmobile.ygn',
     showQrCode: true,
     qrType: 'kpay',
-    qrAccountName: 'Shop Account (Golden Star)',
+    qrAccountName: 'Shop Account (Win Mobile)',
     qrAccountNumber: '09-798123456',
     qrCustomText: 'Scan to Pay via KPay / Wave',
     showImeiDetails: true,

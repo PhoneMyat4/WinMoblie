@@ -400,7 +400,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                           {custom.qrCustomText || 'Scan to Pay with KPay / Wave'}
                         </div>
                         <div className="text-[11px] text-slate-700 truncate font-semibold mt-0.5">
-                          {custom.qrAccountName || 'Golden Star Mobile'}
+                          {custom.qrAccountName || settings.shopName || 'Win Mobile'}
                         </div>
                         <div className="text-[11px] font-mono font-bold text-purple-700 mt-0.5">
                           {custom.qrAccountNumber || settings.phone}

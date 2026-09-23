@@ -1914,7 +1914,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             </label>
             <input
               type="text"
-              placeholder="e.g. Golden Star Mobile Store"
+              placeholder="e.g. Win Mobile Store"
               value={formData.socialMediaConfig?.pageName || ''}
               onChange={(e) =>
                 setFormData((prev) => ({
