@@ -171,6 +171,8 @@ export default function App() {
     try {
       const storedSettings = StorageService.getSettings();
       if (storedSettings?.secrets && ((storedSettings.secrets as any).openAiApiKey || (storedSettings.secrets as any).geminiApiKey)) {
+        delete (storedSettings.secrets as any).openAiApiKey;
+        delete (storedSettings.secrets as any).geminiApiKey;
         StorageService.saveSettings(storedSettings);
         setSettings(StorageService.getSettings());
       }
@@ -299,6 +301,17 @@ export default function App() {
     localStorage.removeItem('mobileshop_auth_active');
     FirebaseAuthService.logout();
     firestoreSync.stopRealtimeSync();
+
+    // Clear session staff identity from local settings so next session requires clean authentication
+    const currentLatest = StorageService.getSettings();
+    const updated = {
+      ...currentLatest,
+      currentStaffId: '',
+      currentStaffName: '',
+      currentStaffRole: 'Cashier' as const,
+    };
+    StorageService.saveSettings(updated, true);
+    setSettings(updated);
   };
 
   // Handlers
@@ -589,26 +602,33 @@ export default function App() {
 
   // Current Active Staff and Access Authorization
   const currentActiveUser: StaffUser = useMemo(() => {
-    const fallbackUser: StaffUser = {
-      id: 'staff-owner-1',
-      username: 'owner',
-      name: 'Shop Owner',
-      role: 'Owner',
-      phone: '09-123456789',
-      pin: '1234',
-      password: 'password123',
-      active: true
+    // Unprivileged locked fallback: never default to Owner or weak credentials
+    const guestUser: StaffUser = {
+      id: 'staff-unauthenticated',
+      username: 'unauthenticated',
+      name: 'Unauthenticated User',
+      role: 'Cashier',
+      phone: '',
+      pin: '',
+      active: false
     };
     if (!Array.isArray(staffUsers) || staffUsers.length === 0) {
-      return fallbackUser;
+      return guestUser;
     }
-    return (
-      staffUsers.find(u => u && u.id === settings.currentStaffId) || 
-      staffUsers.find(u => u && u.name === settings.currentStaffName) || 
-      staffUsers.find(u => Boolean(u)) || 
-      fallbackUser
-    );
+    const matched =
+      staffUsers.find(u => u && u.id === settings.currentStaffId && u.active !== false) || 
+      staffUsers.find(u => u && u.name === settings.currentStaffName && u.active !== false);
+
+    // If session staff is valid and active, use it; otherwise fall back safely to guest (never pick arbitrary user)
+    return matched || guestUser;
   }, [staffUsers, settings.currentStaffId, settings.currentStaffName]);
+
+  // If session staff is invalid or unauthenticated, automatically enforce lock screen
+  useEffect(() => {
+    if (currentActiveUser.id === 'staff-unauthenticated' && !isLocked) {
+      setIsLocked(true);
+    }
+  }, [currentActiveUser.id, isLocked]);
 
   const effectiveUserPerms = useMemo(() => {
     return getEffectiveUserPermissions(currentActiveUser, rolePermissions);

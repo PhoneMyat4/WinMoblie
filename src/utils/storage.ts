@@ -316,11 +316,11 @@ export const StorageService = {
     } catch {
       // ignore
     }
-    // Purge mock staff identity references if still set to Ko Aung Kyaw (Owner)
+    // Purge mock staff identity references if still set to legacy test accounts
     if (s.currentStaffId === 'staff-1' || s.currentStaffName === 'Ko Aung Kyaw (Owner)') {
-      s.currentStaffName = 'Store Owner';
-      s.currentStaffId = 'owner';
-      s.currentStaffRole = 'Owner';
+      s.currentStaffName = '';
+      s.currentStaffId = '';
+      s.currentStaffRole = 'Cashier';
     }
     if (s.invoiceCustomization?.qrAccountName === 'Ko Aung Kyaw (Golden Star)' || s.invoiceCustomization?.qrAccountName === 'Ko Aung Kyaw (Shop Account)' || s.invoiceCustomization?.qrAccountName === 'Shop Account (Golden Star)') {
       s.invoiceCustomization.qrAccountName = 'Shop Account (Win Mobile)';
@@ -398,7 +398,7 @@ export const StorageService = {
         u.role === 'Inventory_Staff' ? 'stock' :
         `cashier${idx + 1}`
       ),
-      password: u.password || u.pin || 'password123',
+      password: u.password || u.pin || '',
       restrictWorkingHours: u.role === 'Owner' ? false : Boolean(u.restrictWorkingHours),
       workStartTime: u.workStartTime || (u.restrictWorkingHours ? '07:30' : undefined),
       workEndTime: u.workEndTime || (u.restrictWorkingHours ? '19:00' : undefined),
@@ -915,6 +915,163 @@ export const StorageService = {
 
   // Sales
   getSales: (): Sale[] => getItem(STORAGE_KEYS.SALES, initialSales),
+
+  generateNextInvoiceNumber: (prefix?: string): string => {
+    const existingSales = StorageService.getSales();
+    const existingNumbers = new Set(existingSales.map(s => (s.invoiceNumber || '').trim().toUpperCase()));
+    
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+    const basePrefix = (prefix && prefix.trim()) || 'INV-';
+
+    let candidate = '';
+    let attempts = 0;
+    do {
+      const rand = Math.floor(1000 + Math.random() * 9000);
+      candidate = `${basePrefix}${year}${month}${day}-${time}-${rand}`;
+      attempts++;
+      if (attempts > 50) {
+        candidate = `${basePrefix}${year}${month}${day}-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+        break;
+      }
+    } while (existingNumbers.has(candidate.toUpperCase()));
+
+    return candidate;
+  },
+
+  generateNextCreditNumber: (): string => {
+    const existingCredits = StorageService.getCreditSales();
+    const existingNumbers = new Set(existingCredits.map(c => (c.creditNumber || '').trim().toUpperCase()));
+    
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+
+    let candidate = '';
+    let attempts = 0;
+    do {
+      const rand = Math.floor(1000 + Math.random() * 9000);
+      candidate = `CR-${year}${month}${day}-${time}-${rand}`;
+      attempts++;
+      if (attempts > 50) {
+        candidate = `CR-${year}${month}${day}-${Date.now()}`;
+        break;
+      }
+    } while (existingNumbers.has(candidate.toUpperCase()));
+
+    return candidate;
+  },
+
+  generateNextCreditReceiptNumber: (): string => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    return `CR-REC-${year}${month}${day}-${time}-${rand}`;
+  },
+
+  deductStockForSale: (
+    cartItems: Array<{
+      product: Product;
+      quantity: number;
+      selectedImei?: string;
+      selectedImei2?: string;
+    }>
+  ): { success: boolean; error?: string; updatedProducts: Product[] } => {
+    // 1. Fetch FRESH current products directly from storage to eliminate stale React component state
+    const currentProducts = StorageService.getProducts();
+    const updatedProducts = [...currentProducts];
+
+    // 2. Validate availability across all cart items before making any modifications
+    for (const item of cartItems) {
+      const productIndex = updatedProducts.findIndex(p => p.id === item.product.id);
+      if (productIndex === -1) {
+        return {
+          success: false,
+          error: `Product "${item.product.name}" is no longer available in store inventory.`,
+          updatedProducts: currentProducts,
+        };
+      }
+
+      const currentProd = updatedProducts[productIndex];
+      const totalQtyNeeded = cartItems
+        .filter(c => c.product.id === item.product.id)
+        .reduce((sum, c) => sum + c.quantity, 0);
+
+      const quarantined = currentProd.quarantinedStock || 0;
+      const sellableStock = Math.max(0, currentProd.stock - quarantined);
+
+      if (totalQtyNeeded > sellableStock) {
+        return {
+          success: false,
+          error: `Stock conflict: Only ${sellableStock} sellable unit(s) available for "${currentProd.name}". (Total required: ${totalQtyNeeded}, Quarantined: ${quarantined}). Another terminal may have just sold units.`,
+          updatedProducts: currentProducts,
+        };
+      }
+
+      // Check serialized IMEIs
+      if (item.selectedImei) {
+        const hasImei1 = currentProd.imeiList?.includes(item.selectedImei) ||
+          currentProd.imeiPairs?.some(p => p.imei1 === item.selectedImei);
+        if (!hasImei1) {
+          return {
+            success: false,
+            error: `IMEI Conflict: IMEI "${item.selectedImei}" for "${currentProd.name}" was already sold or removed on another terminal!`,
+            updatedProducts: currentProducts,
+          };
+        }
+      }
+
+      if (item.selectedImei2) {
+        const hasImei2 = currentProd.imeiList?.includes(item.selectedImei2) ||
+          currentProd.imeiPairs?.some(p => p.imei2 === item.selectedImei2);
+        if (!hasImei2) {
+          return {
+            success: false,
+            error: `IMEI Conflict: Secondary IMEI "${item.selectedImei2}" for "${currentProd.name}" was already sold or removed on another terminal!`,
+            updatedProducts: currentProducts,
+          };
+        }
+      }
+    }
+
+    // 3. Apply deductions cleanly to updatedProducts
+    for (const item of cartItems) {
+      const prodIndex = updatedProducts.findIndex(p => p.id === item.product.id);
+      if (prodIndex === -1) continue;
+
+      const prod = updatedProducts[prodIndex];
+      const soldItemsOfProd = cartItems.filter(c => c.product.id === prod.id);
+      const totalQtySold = soldItemsOfProd.reduce((s, i) => s + i.quantity, 0);
+      const usedImeis = soldItemsOfProd.map(i => i.selectedImei).filter(Boolean) as string[];
+      const usedImei2s = soldItemsOfProd.map(i => i.selectedImei2).filter(Boolean) as string[];
+      const allUsedImeis = [...usedImeis, ...usedImei2s];
+
+      const updatedImeiList = prod.imeiList ? prod.imeiList.filter(im => !allUsedImeis.includes(im)) : undefined;
+      const updatedImeiPairs = prod.imeiPairs
+        ? prod.imeiPairs.filter(p => !usedImeis.includes(p.imei1) && (!p.imei2 || !usedImei2s.includes(p.imei2)))
+        : undefined;
+
+      updatedProducts[prodIndex] = {
+        ...prod,
+        stock: Math.max(0, prod.stock - totalQtySold),
+        imeiList: updatedImeiList,
+        imeiPairs: updatedImeiPairs,
+      };
+    }
+
+    return {
+      success: true,
+      updatedProducts,
+    };
+  },
   saveSales: (sales: Sale[], triggerSync = false) => {
     setItem(STORAGE_KEYS.SALES, sales);
     if (triggerSync && activeStorageSyncHandler?.onSalesBatch) {

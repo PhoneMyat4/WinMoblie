@@ -37,7 +37,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
   const [reason, setReason] = useState<StockAdjustment['reason']>('damaged');
   const [reasonNotes, setReasonNotes] = useState<string>('');
   const [performedBy, setPerformedBy] = useState<string>(
-    currentStaffUser?.name || (staffUsers[0]?.name) || 'Stock Controller'
+    currentStaffUser?.name || 'Authorized Staff'
   );
   const [selectedImeisToRemove, setSelectedImeisToRemove] = useState<string[]>([]);
   const [newImeisToAdd, setNewImeisToAdd] = useState<string>('');

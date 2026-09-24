@@ -6,6 +6,7 @@ import {
   setDoc, 
   deleteDoc,
   writeBatch, 
+  runTransaction,
   onSnapshot, 
   query, 
   limit, 
@@ -1155,6 +1156,141 @@ export class FirestoreSyncService {
 
   public isPaused(): boolean {
     return this.isSyncPaused;
+  }
+
+  // ==========================================
+  // ATOMIC TRANSACTIONS & MULTI-DEVICE CONCURRENCY
+  // ==========================================
+
+  /**
+   * Executes an atomic sale checkout.
+   * If Firestore is connected, performs an atomic runTransaction with read-before-write validation
+   * to guarantee that another terminal hasn't concurrently sold the same IMEI or consumed stock.
+   */
+  public async executeAtomicSaleTransaction({
+    sale,
+    creditRecord,
+    cartItems,
+    updatedCustomer,
+  }: {
+    sale: Sale;
+    creditRecord?: CreditSaleRecord;
+    cartItems: Array<{
+      product: Product;
+      quantity: number;
+      selectedImei?: string;
+      selectedImei2?: string;
+    }>;
+    updatedCustomer?: Customer;
+  }): Promise<{ success: boolean; error?: string; updatedProducts: Product[] }> {
+    // 1. Perform local validation first against fresh storage
+    const localResult = StorageService.deductStockForSale(cartItems);
+    if (!localResult.success) {
+      return localResult;
+    }
+
+    // 2. If online and authenticated with Firebase, execute atomic Firestore transaction
+    if (FirebaseAuthService.isAuthenticated() && typeof navigator !== 'undefined' && navigator.onLine) {
+      try {
+        await runTransaction(db, async (transaction) => {
+          // Distinct products involved in this transaction
+          const distinctProductIds = Array.from(new Set(cartItems.map(i => i.product.id)));
+          const productDocs: { id: string; ref: any; data: Product }[] = [];
+
+          // All reads MUST execute before any writes in Firestore transactions
+          for (const prodId of distinctProductIds) {
+            const productRef = doc(db, 'products', prodId);
+            const productSnap = await transaction.get(productRef);
+            if (productSnap.exists()) {
+              productDocs.push({
+                id: prodId,
+                ref: productRef,
+                data: productSnap.data() as Product,
+              });
+            }
+          }
+
+          // Concurrency validation against Firestore live cloud state
+          for (const prodInfo of productDocs) {
+            const liveProd = prodInfo.data;
+            const soldItemsOfProd = cartItems.filter(c => c.product.id === prodInfo.id);
+            const totalQtySold = soldItemsOfProd.reduce((s, i) => s + i.quantity, 0);
+            const quarantined = liveProd.quarantinedStock || 0;
+            const liveSellable = Math.max(0, (liveProd.stock || 0) - quarantined);
+
+            if (totalQtySold > liveSellable) {
+              throw new Error(
+                `Cloud Stock Conflict: "${liveProd.name}" only has ${liveSellable} sellable units in cloud database. Another terminal may have just finalized a sale.`
+              );
+            }
+
+            const usedImeis = soldItemsOfProd.map(i => i.selectedImei).filter(Boolean) as string[];
+            const usedImei2s = soldItemsOfProd.map(i => i.selectedImei2).filter(Boolean) as string[];
+            const allUsedImeis = [...usedImeis, ...usedImei2s];
+
+            // Verify IMEIs are still available in cloud database
+            for (const imei of usedImeis) {
+              const hasImei = liveProd.imeiList?.includes(imei) || liveProd.imeiPairs?.some(p => p.imei1 === imei);
+              if (!hasImei) {
+                throw new Error(
+                  `Multi-Device Conflict: IMEI "${imei}" for "${liveProd.name}" was already sold or transferred on another terminal!`
+                );
+              }
+            }
+
+            for (const imei2 of usedImei2s) {
+              const hasImei2 = liveProd.imeiList?.includes(imei2) || liveProd.imeiPairs?.some(p => p.imei2 === imei2);
+              if (!hasImei2) {
+                throw new Error(
+                  `Multi-Device Conflict: Secondary IMEI "${imei2}" for "${liveProd.name}" was already sold on another terminal!`
+                );
+              }
+            }
+
+            // Calculate updated cloud state
+            const newStock = Math.max(0, (liveProd.stock || 0) - totalQtySold);
+            const updatedImeiList = liveProd.imeiList ? liveProd.imeiList.filter(im => !allUsedImeis.includes(im)) : undefined;
+            const updatedImeiPairs = liveProd.imeiPairs
+              ? liveProd.imeiPairs.filter(p => !usedImeis.includes(p.imei1) && (!p.imei2 || !usedImei2s.includes(p.imei2)))
+              : undefined;
+
+            transaction.update(prodInfo.ref, sanitizeForFirestore({
+              stock: newStock,
+              imeiList: updatedImeiList || [],
+              imeiPairs: updatedImeiPairs || [],
+              lastModifiedAt: new Date().toISOString(),
+            }));
+          }
+
+          // Write sale record in same atomic transaction
+          const saleDocRef = doc(db, 'sales', sale.id);
+          transaction.set(saleDocRef, sanitizeForFirestore(sale));
+
+          // Write credit record if present
+          if (creditRecord) {
+            const creditDocRef = doc(db, 'creditSales', creditRecord.id);
+            transaction.set(creditDocRef, sanitizeForFirestore(creditRecord));
+          }
+
+          // Update customer if present
+          if (updatedCustomer?.id) {
+            const custDocRef = doc(db, 'customers', updatedCustomer.id);
+            transaction.set(custDocRef, sanitizeForFirestore(updatedCustomer), { merge: true });
+          }
+        });
+
+        this.updateStatus({ lastSyncedAt: new Date(), error: null });
+      } catch (cloudErr: any) {
+        console.error('[FirestoreSync] Atomic transaction failed:', cloudErr);
+        return {
+          success: false,
+          error: cloudErr.message || 'Atomic transaction failed due to a database concurrency conflict. Please try again.',
+          updatedProducts: StorageService.getProducts(),
+        };
+      }
+    }
+
+    return localResult;
   }
 
   // ==========================================

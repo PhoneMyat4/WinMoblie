@@ -37,7 +37,7 @@ export const PriceChangeModal: React.FC<PriceChangeModalProps> = ({
   const [reason, setReason] = useState<PriceChangeReason>('market_adjustment');
   const [reasonNotes, setReasonNotes] = useState<string>('');
   const [performedBy, setPerformedBy] = useState<string>(
-    currentStaffUser?.name || (staffUsers[0]?.name) || 'Store Manager'
+    currentStaffUser?.name || 'Authorized Staff'
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 

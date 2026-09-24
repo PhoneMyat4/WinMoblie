@@ -64,6 +64,7 @@ import { PosProductHoverPreview, PosProductMobileDetailModal } from './PosProduc
 import { PreOrderSearchModal } from '../modals/PreOrderSearchModal';
 import { PreOrderFormModal } from '../modals/PreOrderFormModal';
 import { StorageService } from '../../utils/storage';
+import { firestoreSync } from '../../services/firestoreSyncService';
 import { AppLink } from '../common/AppLink';
 import { 
   lookupProductByCode, 
@@ -144,6 +145,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [isQuickCustomerOpen, setIsQuickCustomerOpen] = useState<boolean>(false);
+  const [isCheckingOut, setIsCheckingOut] = useState<boolean>(false);
 
   // Product Hover Pop-Up (Desktop) & Mobile Detail Modal State
   const [hoveredProduct, setHoveredProduct] = useState<Product | null>(null);
@@ -666,12 +668,39 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
       return;
     }
     const item = cart[index];
-    if (newQty > item.product.stock) {
-      alert(`Max stock available is ${item.product.stock}.`);
+    if (!item) return;
+
+    // Retrieve fresh product reference from current products state to check latest quarantinedStock & stock
+    const freshProduct = products.find(p => p.id === item.product.id) || item.product;
+    const quarantined = freshProduct.quarantinedStock || 0;
+    const sellableStock = Math.max(0, freshProduct.stock - quarantined);
+
+    if (newQty > sellableStock) {
+      if (scannerSoundEnabled) playErrorBeep();
+      setScanToast({
+        type: 'error',
+        text: `Sellable Stock Limit: ${freshProduct.name}`,
+        subtext: quarantined > 0 
+          ? `Max sellable stock is ${sellableStock} unit(s) (${quarantined} unit(s) quarantined for damage/inspection).`
+          : `Only ${sellableStock} unit(s) available in store inventory.`
+      });
       return;
     }
+
+    const isPhone = isPhoneCategory(freshProduct.category);
+    if (isPhone && newQty > 1) {
+      if (scannerSoundEnabled) playErrorBeep();
+      setScanToast({
+        type: 'error',
+        text: 'Serialized Item Limit',
+        subtext: 'Phones are serialized with individual IMEIs and must be added individually.'
+      });
+      return;
+    }
+
     const updated = [...cart];
     updated[index].quantity = newQty;
+    updated[index].product = freshProduct;
     setCart(updated);
   };
 
@@ -886,7 +915,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
     setIsQuickCustomerOpen(false);
   };
 
-  const handleSalePaymentConfirmed = (paymentInfo: {
+  const handleSalePaymentConfirmed = async (paymentInfo: {
     paymentMethod: PaymentMethod;
     amountPaid: number;
     balanceDue: number;
@@ -894,7 +923,10 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
     pointsEarned: number;
     pointsRedeemed: number;
   }) => {
-    const invoiceNumber = `${settings.invoicePrefix}${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    if (isCheckingOut) return;
+    setIsCheckingOut(true);
+
+    const invoiceNumber = StorageService.generateNextInvoiceNumber(settings.invoicePrefix);
 
     const saleItems = cart.map(item => ({
       productId: item.product.id,
@@ -942,27 +974,15 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
       depositDeducted: activePreOrderFulfillment?.depositAmount,
     };
 
-    // Fulfill pre-order in storage if active
-    if (activePreOrderFulfillment) {
-      StorageService.updatePreOrderStatus(activePreOrderFulfillment.id, 'Completed', {
-        fulfilledSaleId: newSale.id,
-        fulfilledInvoiceNumber: newSale.invoiceNumber,
-        fulfilledBy: settings.currentStaffName || 'Cashier',
-      });
-      refreshPreOrdersFromStorage();
-      if (onClearActivePreOrder) {
-        onClearActivePreOrder();
-      }
-    }
-
     // If Credit Sale (Accounts Receivable), generate and store CreditSaleRecord
+    let creditRecord: CreditSaleRecord | undefined;
     if (paymentInfo.paymentMethod === 'credit') {
       const downPayment = paymentInfo.paymentDetails?.downPayment || 0;
       const principalCredit = Math.max(0, grandTotal - downPayment);
-      const creditNumber = `CR-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const creditNumber = StorageService.generateNextCreditNumber();
       const dueDate = paymentInfo.paymentDetails?.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-      const creditRecord: CreditSaleRecord = {
+      creditRecord = {
         id: `credit-${Date.now()}`,
         creditNumber,
         saleId: newSale.id,
@@ -1011,32 +1031,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
         notes: paymentInfo.paymentDetails?.notes,
         promissoryAgreementTerms: paymentInfo.paymentDetails?.promissoryAgreementTerms,
       };
-
-      StorageService.saveCreditSale(creditRecord);
     }
-
-    // Deduct stock and remove used IMEIs from products
-    const updatedProducts = products.map(prod => {
-      const soldItemsOfProd = cart.filter(c => c.product.id === prod.id);
-      if (soldItemsOfProd.length === 0) return prod;
-
-      const totalQtySold = soldItemsOfProd.reduce((s, i) => s + i.quantity, 0);
-      const usedImeis = soldItemsOfProd.map(i => i.selectedImei).filter(Boolean) as string[];
-      const usedImei2s = soldItemsOfProd.map(i => i.selectedImei2).filter(Boolean) as string[];
-      const allUsedImeis = [...usedImeis, ...usedImei2s];
-
-      const updatedImeiList = prod.imeiList ? prod.imeiList.filter(im => !allUsedImeis.includes(im)) : undefined;
-      const updatedImeiPairs = prod.imeiPairs 
-        ? prod.imeiPairs.filter(p => !usedImeis.includes(p.imei1) && (!p.imei2 || !usedImei2s.includes(p.imei2))) 
-        : undefined;
-
-      return {
-        ...prod,
-        stock: Math.max(0, prod.stock - totalQtySold),
-        imeiList: updatedImeiList,
-        imeiPairs: updatedImeiPairs,
-      };
-    });
 
     // Update customer stats
     let updatedCust: Customer | undefined;
@@ -1049,13 +1044,57 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
       };
     }
 
-    onCompleteSale(newSale, updatedProducts, updatedCust);
-    setIsPaymentModalOpen(false);
-    setCompletedSale(newSale);
-    setActivePreOrderFulfillment(null);
-    lastFulfilledPreOrderIdRef.current = null;
-    setCart([]);
-    setOrderDiscount(0);
+    try {
+      // ATOMIC TRANSACTION: Concurrency protection across multiple terminals & live stock validation
+      const checkoutResult = await firestoreSync.executeAtomicSaleTransaction({
+        sale: newSale,
+        creditRecord,
+        cartItems: cart,
+        updatedCustomer: updatedCust,
+      });
+
+      if (!checkoutResult.success) {
+        setIsCheckingOut(false);
+        if (scannerSoundEnabled) playErrorBeep();
+        setScanToast({
+          type: 'error',
+          text: 'Sale Blocked (Concurrency Conflict)',
+          subtext: checkoutResult.error || 'Inventory stock or serial number conflict detected with another terminal.',
+        });
+        alert(`Transaction could not be completed:\n\n${checkoutResult.error || 'Inventory conflict detected.'}\n\nPlease review current stock.`);
+        return;
+      }
+
+      if (creditRecord) {
+        StorageService.saveCreditSale(creditRecord);
+      }
+
+      // Fulfill pre-order in storage if active
+      if (activePreOrderFulfillment) {
+        StorageService.updatePreOrderStatus(activePreOrderFulfillment.id, 'Completed', {
+          fulfilledSaleId: newSale.id,
+          fulfilledInvoiceNumber: newSale.invoiceNumber,
+          fulfilledBy: settings.currentStaffName || 'Cashier',
+        });
+        refreshPreOrdersFromStorage();
+        if (onClearActivePreOrder) {
+          onClearActivePreOrder();
+        }
+      }
+
+      onCompleteSale(newSale, checkoutResult.updatedProducts, updatedCust);
+      setIsPaymentModalOpen(false);
+      setCompletedSale(newSale);
+      setActivePreOrderFulfillment(null);
+      lastFulfilledPreOrderIdRef.current = null;
+      setCart([]);
+      setOrderDiscount(0);
+    } catch (err: any) {
+      console.error('Checkout error:', err);
+      alert(`Checkout failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsCheckingOut(false);
+    }
   };
 
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState<boolean>(false);
@@ -2658,6 +2697,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
             depositAmount: activePreOrderFulfillment.depositAmount,
             fullPrice: activePreOrderFulfillment.fullPrice,
           } : null}
+          isProcessing={isCheckingOut}
           onClose={() => setIsPaymentModalOpen(false)}
           onConfirmSale={handleSalePaymentConfirmed}
         />

@@ -175,7 +175,7 @@ export const CreditSalesManager: React.FC<CreditSalesManagerProps> = ({
       return;
     }
 
-    const receiptVoucherNumber = `CR-REC-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const receiptVoucherNumber = StorageService.generateNextCreditReceiptNumber();
     const repaymentRecord: CreditRepaymentRecord = {
       id: `repay-${Date.now()}`,
       creditSaleId: creditToRepay.id,

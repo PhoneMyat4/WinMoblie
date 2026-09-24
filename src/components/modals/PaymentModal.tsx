@@ -34,6 +34,7 @@ interface PaymentModalProps {
     depositAmount: number;
     fullPrice: number;
   } | null;
+  isProcessing?: boolean;
   onClose: () => void;
   onConfirmSale: (paymentInfo: {
     paymentMethod: PaymentMethod;
@@ -98,6 +99,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   customer,
   settings,
   preOrderFulfillment,
+  isProcessing = false,
   onClose,
   onConfirmSale,
 }) => {
@@ -750,13 +752,21 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           <button
             type="button"
             onClick={handleComplete}
-            disabled={(method === 'cash' && cashShortage > 0) || (method === 'credit' && !customer)}
+            disabled={isProcessing || (method === 'cash' && cashShortage > 0) || (method === 'credit' && !customer)}
             className={`inline-flex items-center gap-2 px-6 py-2.5 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer ${
               method === 'credit' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-emerald-600 hover:bg-emerald-700'
             }`}
           >
-            <Check className="w-4 h-4" />
-            {method === 'credit' ? 'Confirm Credit Sale & Create Promissory Note' : 'Confirm Payment & Print Receipt'}
+            {isProcessing ? (
+              <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin mr-1" />
+            ) : (
+              <Check className="w-4 h-4" />
+            )}
+            {isProcessing 
+              ? 'Verifying & Finalizing Sale...' 
+              : method === 'credit' 
+                ? 'Confirm Credit Sale & Create Promissory Note' 
+                : 'Confirm Payment & Print Receipt'}
           </button>
         </div>
 

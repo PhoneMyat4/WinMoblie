@@ -62,9 +62,9 @@ export const initialSettings: ShopSettings = {
   warrantyPolicy: '• 1 Year Official Brand Warranty for Brand New phones\n• 7 Days Checking Warranty for Used / Secondhand phones\n• 6 Months Warranty for Original Chargers & Power Banks\n• No warranty for physical drop damage or water ingress.',
   receiptFooterMessage: 'ဝယ်ယူအားပေးမှုအတွက် အထူးကျေးဇူးတင်ရှိပါသည်။ (Thank You for Shopping with Us!)',
   loyaltyPointsPerDollar: 0.001, // 1 pt per 1,000 Ks
-  currentStaffName: 'Store Owner',
-  currentStaffRole: 'Owner',
-  currentStaffId: 'owner',
+  currentStaffName: '',
+  currentStaffRole: 'Cashier',
+  currentStaffId: '',
   enableSoundEffects: true,
   invoiceCustomization: {
     headerTitle: 'WIN MOBILE',

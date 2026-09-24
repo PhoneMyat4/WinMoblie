@@ -113,15 +113,27 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
 
   // Simulator State
   const [simulatedStaffId, setSimulatedStaffId] = useState<string>(
-    settings.currentStaffId || staffUsers[0]?.id || 'owner'
+    settings.currentStaffId || ''
   );
 
-  const activeStaffUser = useMemo(() => {
-    return staffUsers.find(u => u.id === settings.currentStaffId) || staffUsers[0];
+  const activeStaffUser: StaffUser | undefined = useMemo(() => {
+    return staffUsers.find(u => u && u.id === settings.currentStaffId && u.active !== false);
   }, [staffUsers, settings.currentStaffId]);
 
   const simulatedUser = useMemo(() => {
-    return staffUsers.find(u => u.id === simulatedStaffId) || activeStaffUser;
+    const found = staffUsers.find(u => u && u.id === simulatedStaffId);
+    if (found) return found;
+    if (activeStaffUser) return activeStaffUser;
+    // Safe unprivileged representation if no staff is matched
+    return {
+      id: 'simulator-guest',
+      username: 'guest',
+      name: 'Guest Staff',
+      role: 'Cashier' as StaffRole,
+      phone: '',
+      pin: '',
+      active: false,
+    };
   }, [staffUsers, simulatedStaffId, activeStaffUser]);
 
   const effectiveSimulatedPerms = useMemo(() => {

@@ -150,12 +150,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     let effectiveUser = matchedUser;
 
     // 4. Verify password:
-    // Check local password/PIN/emergency credentials
+    // Check registered password or PIN strictly against the user's account (no hardcoded bypasses)
     let isValidPassword = 
-      (matchedUser.password && matchedUser.password.trim() === cleanPassword) ||
-      (matchedUser.pin && matchedUser.pin.trim() === cleanPassword) ||
-      cleanPassword === '1234' ||
-      cleanPassword === 'password123';
+      Boolean(cleanPassword) && (
+        (Boolean(matchedUser.password) && matchedUser.password?.trim() === cleanPassword) ||
+        (Boolean(matchedUser.pin) && matchedUser.pin?.trim() === cleanPassword)
+      );
 
     // 5. If local password check fails, fetch the latest document directly from Firestore
     // (Handles when passwords or PINs are updated directly in the Firebase Console)
