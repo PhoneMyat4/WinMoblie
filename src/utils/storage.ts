@@ -42,7 +42,8 @@ import {
   AuditActionType,
   AuditCategory,
   AuditSeverity,
-  MonthlyCapitalSnapshot
+  MonthlyCapitalSnapshot,
+  CapitalCashTransfer
 } from '../types';
 import { 
   initialSettings, 
@@ -111,6 +112,8 @@ export const STORAGE_KEYS = {
   LAST_UPDATED: 'mobileshop_last_updated_v2',
   BRANDING_BACKUP: 'mobileshop_branding_backup_v2',
   MONTHLY_CAPITAL_SNAPSHOTS: 'mobileshop_monthly_capital_snapshots_v2',
+  CASH_TRANSFERS: 'mobileshop_cash_transfers_v2',
+  HIDE_FINANCIAL_DIGITS: 'mobileshop_hide_financial_digits_v2',
 };
 
 // Cross-tab broadcast channel for instantaneous reactive tab synchronization
@@ -1122,7 +1125,9 @@ export const StorageService = {
       imei2?: string;
     }[];
     reason: string;
+    refundFundingSource?: 'cash_drawer' | 'digital_cash_pool';
     refundMethod: string;
+    digitalChannel?: string;
     restockItems: boolean;
     totalRefundAmount: number;
     staffName: string;
@@ -1226,6 +1231,9 @@ export const StorageService = {
     sale.refundedBy = params.staffName;
     sale.totalRefundedAmount = (sale.totalRefundedAmount || 0) + params.totalRefundAmount;
 
+    const fundingSource = params.refundFundingSource || 
+      (params.refundMethod && params.refundMethod.toLowerCase().includes('cash') && !params.refundMethod.toLowerCase().includes('kpay') ? 'cash_drawer' : 'digital_cash_pool');
+
     // Record in refund history
     const refundRecord: RefundRecord = {
       id: `ref-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -1235,6 +1243,8 @@ export const StorageService = {
       items: refundItemsList,
       reason: params.reason,
       refundMethod: params.refundMethod,
+      refundFundingSource: fundingSource,
+      digitalChannel: params.digitalChannel || (fundingSource === 'digital_cash_pool' ? params.refundMethod : undefined),
       restockItems: params.restockItems,
       totalRefundAmount: params.totalRefundAmount,
       refundedBy: params.staffName,
@@ -1250,14 +1260,33 @@ export const StorageService = {
       activeStorageSyncHandler.onSaleUpsert(sale);
     }
 
-    // If refund method is Cash, deduct from Cash Register Drawer
-    if (params.refundMethod.toLowerCase().includes('cash')) {
+    // If funding source is Cash Drawer, deduct from daily shift Cash Register Drawer
+    if (fundingSource === 'cash_drawer') {
       StorageService.recordCashTransaction(
         'out', 
         params.totalRefundAmount, 
-        `Refund Invoice #${sale.invoiceNumber} (${params.reason}) - ${params.itemsToRefund.length} item(s)`
+        `Refund Invoice #${sale.invoiceNumber} (${params.reason}) - ${params.itemsToRefund.length} item(s) [Physical Cash Drawer]`
       );
     }
+
+    // Log in Audit Trail
+    StorageService.addAuditLog({
+      actionType: 'SALE_REFUNDED',
+      category: 'sales',
+      severity: 'warning',
+      summary: `Refunded ${params.totalRefundAmount.toLocaleString()} Ks for #${sale.invoiceNumber} via ${fundingSource === 'cash_drawer' ? 'Daily Cash Drawer' : `Digital Pool [${params.refundMethod}]`}`,
+      details: {
+        targetId: sale.id,
+        invoiceNumber: sale.invoiceNumber,
+        amount: params.totalRefundAmount,
+        paymentMethod: params.refundMethod,
+        metadata: {
+          fundingSource,
+          itemsCount: params.itemsToRefund.length
+        }
+      },
+      staffId: params.staffName || 'admin'
+    });
   },
   refundSale: (saleId: string, refundReason: string, staffName: string) => {
     const sales = StorageService.getSales();
@@ -1599,6 +1628,22 @@ export const StorageService = {
 
     if (data.paymentMethod === 'cash' && data.amountPaid > 0) {
       StorageService.recordCashTransaction('out', data.amountPaid, `PO #${target.purchaseOrderNumber} Payment to ${target.supplierName}`);
+    }
+
+    if (data.amountPaid > 0) {
+      StorageService.addAuditLog({
+        actionType: 'PURCHASE_CONFIRMED',
+        category: 'purchases',
+        severity: 'info',
+        summary: `PO #${target.purchaseOrderNumber} settled ${data.amountPaid.toLocaleString()} Ks via ${data.paymentMethod.toUpperCase()} (${data.paymentMethod === 'cash' ? 'Cash Drawer' : 'Digital Cash Pool'}) to ${target.supplierName}`,
+        details: {
+          targetId: target.id,
+          targetName: target.purchaseOrderNumber,
+          amount: data.amountPaid,
+          notes: `Settled via ${data.paymentMethod.toUpperCase()} from ${data.paymentMethod === 'cash' ? 'Cash Drawer' : 'Digital Cash Pool'}`
+        },
+        staffId: data.confirmedBy || 'admin'
+      });
     }
   },
   receivePurchaseOrder: (
@@ -2074,6 +2119,87 @@ export const StorageService = {
     const snapshots = StorageService.getMonthlyCapitalSnapshots();
     snapshots[snapshot.monthYM] = snapshot;
     setItem(STORAGE_KEYS.MONTHLY_CAPITAL_SNAPSHOTS, snapshots);
+  },
+
+  // Capital Cash Transfers (Physical Drawer <-> Digital Cash Pool)
+  getCashTransfers: (): CapitalCashTransfer[] => 
+    getItem<CapitalCashTransfer[]>(STORAGE_KEYS.CASH_TRANSFERS, []),
+
+  saveCashTransfers: (transfers: CapitalCashTransfer[]) => 
+    setItem(STORAGE_KEYS.CASH_TRANSFERS, transfers),
+
+  getHideFinancialDigits: (): boolean => 
+    getItem<boolean>(STORAGE_KEYS.HIDE_FINANCIAL_DIGITS, false),
+
+  setHideFinancialDigits: (hide: boolean) => {
+    setItem(STORAGE_KEYS.HIDE_FINANCIAL_DIGITS, hide);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('pos_financial_privacy_change', { detail: { hide } }));
+    }
+  },
+
+  recordCapitalCashTransfer: (params: {
+    from: 'cash_drawer' | 'digital_cash_pool';
+    to: 'cash_drawer' | 'digital_cash_pool';
+    amount: number;
+    digitalChannel?: string;
+    reasonNotes?: string;
+    performedBy: string;
+  }): CapitalCashTransfer => {
+    const transfers = StorageService.getCashTransfers();
+    const now = new Date().toISOString();
+    const newTransfer: CapitalCashTransfer = {
+      id: `xfer-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: now,
+      from: params.from,
+      to: params.to,
+      amount: Math.max(0, params.amount),
+      digitalChannel: params.digitalChannel || 'general',
+      reasonNotes: params.reasonNotes,
+      performedBy: params.performedBy || 'Owner/Staff',
+    };
+
+    transfers.unshift(newTransfer);
+    StorageService.saveCashTransfers(transfers);
+
+    const channelLabel = (params.digitalChannel || 'Digital Pool').toUpperCase();
+    const noteText = params.reasonNotes ? ` (${params.reasonNotes})` : '';
+
+    if (params.from === 'cash_drawer' && params.to === 'digital_cash_pool') {
+      // Cash taken out of physical drawer and deposited into digital pool (bank/kpay)
+      StorageService.recordCashTransaction(
+        'out',
+        params.amount,
+        `Transferred to Digital Cash Pool [${channelLabel}]${noteText}`
+      );
+    } else if (params.from === 'digital_cash_pool' && params.to === 'cash_drawer') {
+      // Digital funds withdrawn or moved into physical cash drawer
+      StorageService.recordCashTransaction(
+        'in',
+        params.amount,
+        `Transferred from Digital Cash Pool [${channelLabel}] to Drawer${noteText}`
+      );
+    }
+
+    StorageService.addAuditLog({
+      actionType: params.from === 'cash_drawer' ? 'CASH_DRAWER_OUT' : 'CASH_DRAWER_IN',
+      category: 'cash_drawer',
+      severity: 'info',
+      summary: `Transferred ${params.amount.toLocaleString()} Ks from ${params.from === 'cash_drawer' ? 'Cash Drawer' : 'Digital Pool'} to ${params.to === 'cash_drawer' ? 'Cash Drawer' : 'Digital Pool'} [${channelLabel}]`,
+      details: {
+        amount: params.amount,
+        targetType: 'cash_transfer',
+        notes: params.reasonNotes,
+        metadata: {
+          from: params.from,
+          to: params.to,
+          digitalChannel: params.digitalChannel
+        }
+      },
+      staffId: params.performedBy || 'admin'
+    });
+
+    return newTransfer;
   },
 
   // Pre-Orders & Booking
@@ -3236,23 +3362,67 @@ export const StorageService = {
 
     // Business synchronization hook
     if (tx.syncWithBusiness) {
+      const fundingSource = tx.businessFundingSource || 'cash_drawer';
+      const channel = tx.digitalChannel || 'kpay';
+
       if (tx.type === 'drawing_from_business') {
-        const drawingExpense: ExpenseRecord = {
-          id: tx.linkedShopExpenseId || `exp-draw-${Date.now()}`,
-          voucherNumber: `DRAW-${Date.now().toString().slice(-6)}`,
-          title: `[Owner Drawing] ${tx.title}`,
-          category: 'other_general',
-          amount: tx.amount,
-          date: tx.date,
-          paymentMethod: 'cash',
-          notes: `Personal Drawing taken by owner: ${tx.notes || ''}`,
-          recordedBy: 'Owner',
-          deductFromCashDrawer: true,
-        };
-        tx.linkedShopExpenseId = drawingExpense.id;
-        StorageService.saveExpense(drawingExpense);
+        if (fundingSource === 'cash_drawer') {
+          const drawingExpense: ExpenseRecord = {
+            id: tx.linkedShopExpenseId || `exp-draw-${Date.now()}`,
+            voucherNumber: `DRAW-${Date.now().toString().slice(-6)}`,
+            title: `[Owner Drawing] ${tx.title} (Cash Drawer)`,
+            category: 'other_general',
+            amount: tx.amount,
+            date: tx.date,
+            paymentMethod: 'cash',
+            fundingSource: 'cash_drawer',
+            notes: `Personal Drawing withdrawn from physical cash drawer by owner: ${tx.notes || ''}`,
+            recordedBy: 'Owner',
+            deductFromCashDrawer: true,
+          };
+          tx.linkedShopExpenseId = drawingExpense.id;
+          StorageService.saveExpense(drawingExpense);
+        } else {
+          const drawingExpense: ExpenseRecord = {
+            id: tx.linkedShopExpenseId || `exp-draw-${Date.now()}`,
+            voucherNumber: `DRAW-${Date.now().toString().slice(-6)}`,
+            title: `[Owner Drawing] ${tx.title} (Digital Pool [${channel.toUpperCase()}])`,
+            category: 'other_general',
+            amount: tx.amount,
+            date: tx.date,
+            paymentMethod: channel as any,
+            fundingSource: 'revenue_cash',
+            notes: `Personal Drawing withdrawn from Digital Cash Pool [${channel.toUpperCase()}] by owner: ${tx.notes || ''}`,
+            recordedBy: 'Owner',
+            deductFromCashDrawer: false,
+          };
+          tx.linkedShopExpenseId = drawingExpense.id;
+          StorageService.saveExpense(drawingExpense);
+        }
       } else if (tx.type === 'injection_to_business') {
-        StorageService.recordCashTransaction('in', tx.amount, `[Owner Capital Injection] ${tx.title}`);
+        if (fundingSource === 'cash_drawer') {
+          StorageService.recordCashTransaction('in', tx.amount, `[Owner Capital Injection] ${tx.title} (Cash Drawer)`);
+        } else {
+          // Capital injection directly into Digital Cash Pool (Bank/e-Wallet)
+          StorageService.addAuditLog({
+            actionType: 'SETTINGS_UPDATED',
+            category: 'settings',
+            severity: 'info',
+            summary: `Owner deposited ${tx.amount.toLocaleString()} Ks capital injection into Digital Cash Pool [${channel.toUpperCase()}]`,
+            details: {
+              targetId: tx.id,
+              amount: tx.amount,
+              paymentMethod: channel,
+              notes: tx.notes,
+              metadata: {
+                flowType: 'injection_to_business',
+                fundingSource: 'digital_cash_pool',
+                channel
+              }
+            },
+            staffId: 'Owner'
+          });
+        }
       }
     }
   },

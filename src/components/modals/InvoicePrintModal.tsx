@@ -39,7 +39,9 @@ interface InvoicePrintModalProps {
       imei2?: string;
     }[];
     reason: string;
+    refundFundingSource?: 'cash_drawer' | 'digital_cash_pool';
     refundMethod: string;
+    digitalChannel?: string;
     restockItems: boolean;
     totalRefundAmount: number;
     staffName: string;
@@ -77,7 +79,9 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
       imei2?: string;
     }[];
     reason: string;
+    refundFundingSource?: 'cash_drawer' | 'digital_cash_pool';
     refundMethod: string;
+    digitalChannel?: string;
     restockItems: boolean;
     totalRefundAmount: number;
     staffName: string;

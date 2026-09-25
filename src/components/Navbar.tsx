@@ -17,7 +17,9 @@ import {
   ExternalLink,
   RefreshCw,
   Cloud,
-  Check
+  Check,
+  ArrowLeft,
+  ArrowRight
 } from 'lucide-react';
 import { ShopSettings, CashDrawerRecord, StaffRole, StaffUser, RolePermissions } from '../types';
 import { formatCurrency } from '../utils/formatters';
@@ -32,6 +34,8 @@ interface NavbarProps {
   currentStaffUser?: StaffUser;
   rolePermissions?: Record<StaffRole, RolePermissions>;
   syncInfo?: SyncStateInfo & { triggerManualSync: () => void };
+  canGoBack?: boolean;
+  canGoForward?: boolean;
   onOpenNewSale: () => void;
   onOpenPurchases: () => void;
   onOpenExpenses: () => void;
@@ -52,6 +56,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentStaffUser,
   rolePermissions,
   syncInfo,
+  canGoBack = false,
+  canGoForward = false,
   onOpenNewSale,
   onOpenPurchases,
   onOpenExpenses,
@@ -134,6 +140,32 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="font-bold text-slate-900 text-xs sm:text-sm truncate max-w-[100px] xs:max-w-[140px]">
                 {settings.shopName}
               </span>
+            </div>
+
+            {/* Browser History Navigation Controls (Back / Forward) */}
+            <div className="flex items-center bg-slate-100/90 p-0.5 rounded-xl border border-slate-200/90 shadow-2xs shrink-0">
+              <button
+                type="button"
+                id="browser-nav-back-btn"
+                onClick={() => window.history.back()}
+                disabled={!canGoBack}
+                title="Go Back (Browser Back / Alt + Left)"
+                aria-label="Navigate back"
+                className="p-1 sm:p-1.5 rounded-lg text-slate-700 hover:text-slate-950 hover:bg-white active:bg-slate-200 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-all cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </button>
+              <button
+                type="button"
+                id="browser-nav-forward-btn"
+                onClick={() => window.history.forward()}
+                disabled={!canGoForward}
+                title="Go Forward (Browser Forward / Alt + Right)"
+                aria-label="Navigate forward"
+                className="p-1 sm:p-1.5 rounded-lg text-slate-700 hover:text-slate-950 hover:bg-white active:bg-slate-200 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-all cursor-pointer"
+              >
+                <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </button>
             </div>
           </div>
 

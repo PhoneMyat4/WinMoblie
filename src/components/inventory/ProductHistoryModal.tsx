@@ -22,6 +22,7 @@ import {
   Clock, 
   Tag, 
   ShieldCheck, 
+  ShieldAlert,
   User, 
   FileText,
   CheckCircle2,
@@ -43,7 +44,8 @@ import {
   ShopSettings,
   ProductHistoryEvent,
   ProductHistoryEventType,
-  StaffUser
+  StaffUser,
+  DamageLog
 } from '../../types';
 import { 
   getProductHistoryTimeline, 
@@ -60,6 +62,7 @@ import { exportToCsv } from '../../utils/reportUtils';
 import { StorageService } from '../../utils/storage';
 import { StockAdjustmentModal } from '../modals/StockAdjustmentModal';
 import { PriceChangeModal } from '../modals/PriceChangeModal';
+import { QuarantineReportModal } from './QuarantineReportModal';
 
 interface ProductHistoryModalProps {
   product: Product;
@@ -68,6 +71,7 @@ interface ProductHistoryModalProps {
   stockAdjustments: StockAdjustment[];
   stockAudits?: StockAuditSession[];
   priceChanges?: PriceChangeRecord[];
+  damageLogs?: DamageLog[];
   settings: ShopSettings;
   staffUsers?: StaffUser[];
   currentStaffUser?: StaffUser;
@@ -83,6 +87,7 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
   stockAdjustments: initialStockAdjustments,
   stockAudits = [],
   priceChanges: initialPriceChanges,
+  damageLogs: initialDamageLogs,
   settings,
   staffUsers = [],
   currentStaffUser,
@@ -97,6 +102,9 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
   const [localPriceChanges, setLocalPriceChanges] = useState<PriceChangeRecord[]>(
     initialPriceChanges && initialPriceChanges.length > 0 ? initialPriceChanges : StorageService.getPriceChanges()
   );
+  const [localDamageLogs, setLocalDamageLogs] = useState<DamageLog[]>(
+    initialDamageLogs && initialDamageLogs.length > 0 ? initialDamageLogs : StorageService.getDamageLogs()
+  );
 
   const [selectedEventType, setSelectedEventType] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -106,6 +114,7 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
   // Quick Action Modal States
   const [isStockAdjustmentOpen, setIsStockAdjustmentOpen] = useState<boolean>(false);
   const [isPriceChangeOpen, setIsPriceChangeOpen] = useState<boolean>(false);
+  const [isQuarantineModalOpen, setIsQuarantineModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -122,9 +131,43 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
       purchases, 
       localAdjustments, 
       stockAudits,
-      localPriceChanges
+      localPriceChanges,
+      localDamageLogs
     );
-  }, [currentProduct, sales, purchases, localAdjustments, stockAudits, localPriceChanges]);
+  }, [currentProduct, sales, purchases, localAdjustments, stockAudits, localPriceChanges, localDamageLogs]);
+
+  // Derived Item Created or Added Date
+  const itemAddedDate = useMemo(() => {
+    if (currentProduct.createdAt) return currentProduct.createdAt;
+    const createEv = fullTimeline.find(e => e.type === 'creation');
+    if (createEv) return createEv.timestamp;
+    if (fullTimeline.length > 0) {
+      const sorted = [...fullTimeline].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      if (sorted[0]?.timestamp) return sorted[0].timestamp;
+    }
+    return currentProduct.lastRestockedAt || null;
+  }, [currentProduct, fullTimeline]);
+
+  // Activity category counts for quick-filter tabs
+  const categoryCounts = useMemo(() => {
+    const counts = {
+      all: fullTimeline.length,
+      price_change: 0,
+      pos_sale: 0,
+      purchase_stock_in: 0,
+      stock_adjustment: 0,
+      quarantine_damage: 0,
+      sale_refund: 0,
+      physical_audit: 0,
+      creation: 0,
+    };
+    fullTimeline.forEach(e => {
+      if (e.type in counts) {
+        counts[e.type as keyof typeof counts]++;
+      }
+    });
+    return counts;
+  }, [fullTimeline]);
 
   const metrics = useMemo(() => {
     return getProductLifecycleMetrics(currentProduct, fullTimeline);
@@ -194,6 +237,18 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
     }
     const delta = priceRecord.priceDelta;
     showToast(`Price updated to ${updatedProduct.sellingPrice.toLocaleString()} Ks (${delta >= 0 ? '+' : ''}${delta.toLocaleString()} Ks). Activity recorded in history.`);
+  };
+
+  // Handle Confirmed Stock Quarantine (Damaged / Lost Unit)
+  const handleConfirmQuarantine = (updatedProduct: Product) => {
+    setCurrentProduct(updatedProduct);
+    setLocalAdjustments(StorageService.getStockAdjustments());
+    setLocalDamageLogs(StorageService.getDamageLogs());
+    if (onProductUpdated) {
+      onProductUpdated(updatedProduct);
+    }
+    showToast(`Stock Quarantine Confirmed: 1 unit of "${updatedProduct.name}" isolated from sellable inventory.`);
+    setIsQuarantineModalOpen(false);
   };
 
   const handleExportCsv = () => {
@@ -286,6 +341,22 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
           dotColor: 'bg-purple-500',
           accentBorder: 'border-l-purple-500'
         };
+      case 'quarantine_damage':
+        return {
+          label: 'Quarantine / Damaged',
+          bg: 'bg-rose-50 text-rose-800 border-rose-200',
+          icon: ShieldAlert,
+          dotColor: 'bg-rose-600',
+          accentBorder: 'border-l-rose-600'
+        };
+      case 'creation':
+        return {
+          label: 'Catalog Registered',
+          bg: 'bg-indigo-50 text-indigo-800 border-indigo-200',
+          icon: Calendar,
+          dotColor: 'bg-indigo-600',
+          accentBorder: 'border-l-indigo-600'
+        };
       default:
         return {
           label: 'System Activity',
@@ -336,17 +407,61 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
                   <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 text-xs font-medium border border-slate-700">
                     {cond.label}
                   </span>
+
+                  {/* Item Created or Added Date Badge */}
+                  <span 
+                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 text-xs font-medium border border-emerald-700/60 shadow-2xs"
+                    title={itemAddedDate ? `Item registered in system on ${formatDateTime(itemAddedDate)}` : 'Initial catalog entry'}
+                  >
+                    <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Added: <strong className="font-mono text-white">{itemAddedDate ? formatDate(itemAddedDate) : 'Catalog Setup'}</strong></span>
+                  </span>
+
+                  {/* Quarantined Stock Warning Badge */}
+                  {Boolean(currentProduct.quarantinedStock && currentProduct.quarantinedStock > 0) && (
+                    <span 
+                      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-rose-500/20 text-rose-300 text-xs font-bold border border-rose-500/40 shadow-2xs"
+                      title={`${currentProduct.quarantinedStock} unit(s) currently isolated in damage/loss quarantine`}
+                    >
+                      <ShieldAlert className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                      <span>{currentProduct.quarantinedStock} In Quarantine</span>
+                    </span>
+                  )}
                 </div>
+
                 <h3 className="font-bold text-white text-lg tracking-tight mt-1 truncate">
                   {currentProduct.name}
                 </h3>
-                <p className="text-xs text-slate-400 font-mono mt-0.5">
-                  SKU: <span className="text-indigo-300 font-bold">{currentProduct.sku || 'N/A'}</span> • Barcode: <span className="text-slate-300">{currentProduct.barcode}</span>
-                </p>
+
+                <div className="flex items-center gap-2 flex-wrap text-xs text-slate-400 font-mono mt-0.5">
+                  <span>SKU: <strong className="text-indigo-300 font-bold">{currentProduct.sku || 'N/A'}</strong></span>
+                  <span>•</span>
+                  <span>Barcode: <strong className="text-slate-300">{currentProduct.barcode}</strong></span>
+                  {itemAddedDate && (
+                    <>
+                      <span>•</span>
+                      <span className="text-slate-300">Added Date: <strong className="text-white font-mono">{formatDateTime(itemAddedDate)}</strong></span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Quarantine Action Trigger */}
+              <button
+                type="button"
+                id="btn-quarantine-item-header"
+                onClick={() => setIsQuarantineModalOpen(true)}
+                disabled={currentProduct.stock <= 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                title={currentProduct.stock <= 0 ? 'No sellable stock to quarantine' : 'Quarantine damaged or lost stock item'}
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-200" />
+                <span className="hidden sm:inline">Quarantine (Damaged/Loss)</span>
+                <span className="sm:hidden">Quarantine</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleExportCsv}
@@ -384,14 +499,14 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
           {/* Scrollable Content Body */}
           <div className="p-6 overflow-y-auto space-y-6 text-slate-800">
 
-            {/* Quick Activity Triggers Bar: Adjust Stock & Change Price */}
+            {/* Quick Activity Triggers Bar: Adjust Stock & Change Price & Quarantine */}
             <div className="flex items-center justify-between p-3.5 bg-gradient-to-r from-amber-50/70 via-indigo-50/50 to-rose-50/50 border border-slate-200 rounded-2xl flex-wrap gap-3">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-slate-700">Quick Inventory Activities:</span>
-                <span className="text-xs text-slate-500 hidden sm:inline">Log real-time price updates or physical stock adjustments</span>
+                <span className="text-xs text-slate-500 hidden sm:inline">Log real-time price updates, physical stock adjustments, or isolate damaged/lost units</span>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() => setIsPriceChangeOpen(true)}
@@ -404,13 +519,47 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsStockAdjustmentOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-xs shadow-rose-200 transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-xs shadow-indigo-200 transition-all cursor-pointer"
                 >
                   <Sliders className="w-3.5 h-3.5" />
                   <span>Adjust Stock</span>
                 </button>
+
+                <button
+                  type="button"
+                  id="btn-quarantine-item-activity-bar"
+                  onClick={() => setIsQuarantineModalOpen(true)}
+                  disabled={currentProduct.stock <= 0}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-xs shadow-xs shadow-rose-200 transition-all cursor-pointer"
+                  title={currentProduct.stock <= 0 ? 'No sellable stock to quarantine' : 'Report unit as damaged or lost to isolate into quarantine'}
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-200" />
+                  <span>Quarantine Stock (Damaged / Loss)</span>
+                </button>
               </div>
             </div>
+
+            {/* Active Quarantine Banner if product has quarantined units */}
+            {Boolean(currentProduct.quarantinedStock && currentProduct.quarantinedStock > 0) && (
+              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between text-xs text-rose-900 gap-3 flex-wrap animate-fade-in">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                    <ShieldAlert className="w-4 h-4 text-rose-600" />
+                  </div>
+                  <div>
+                    <strong className="block font-bold">Quarantine Isolation Active: {currentProduct.quarantinedStock} unit(s)</strong>
+                    <span className="text-rose-700">These units have been removed from sellable inventory due to reported damage, defects, or loss.</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedEventType('quarantine_damage')}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shrink-0 cursor-pointer shadow-xs transition-colors"
+                >
+                  View Quarantine Logs
+                </button>
+              </div>
+            )}
 
             {/* 360° Life-cycle KPI Metric Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -423,9 +572,16 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
                 <p className="text-xl font-black text-indigo-950">
                   {currentProduct.stock} Units
                 </p>
-                <p className="text-[10px] text-slate-500 mt-0.5 font-mono">
-                  Valuation: {formatCurrency(currentProduct.stock * currentProduct.costPrice, settings.currencySymbol)}
-                </p>
+                <div className="flex items-center justify-between flex-wrap gap-1 mt-0.5">
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    Valuation: {formatCurrency(currentProduct.stock * currentProduct.costPrice, settings.currencySymbol)}
+                  </span>
+                  {Boolean(currentProduct.quarantinedStock && currentProduct.quarantinedStock > 0) && (
+                    <span className="text-[10px] font-bold text-rose-600 bg-rose-100/80 px-1.5 py-0.2 rounded-md">
+                      {currentProduct.quarantinedStock} quarantined
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Retail Price & Margin */}
@@ -459,11 +615,11 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
               {/* Stock Movement & Adjustments */}
               <div className="p-3.5 bg-rose-50/60 border border-rose-100 rounded-2xl">
                 <div className="flex items-center justify-between text-slate-500 text-[11px] font-bold mb-1">
-                  <span>Adjustments & Write-offs</span>
+                  <span>Adjustments & Quarantine</span>
                   <Sliders className="w-3.5 h-3.5 text-rose-600" />
                 </div>
                 <p className="text-xl font-black text-rose-950">
-                  {stockAdjustmentsCount} Logs
+                  {stockAdjustmentsCount + categoryCounts.quarantine_damage} Logs
                 </p>
                 <p className="text-[10px] text-rose-700 font-medium mt-0.5">
                   Net adjusted: {metrics.totalAdjustedQty >= 0 ? `+${metrics.totalAdjustedQty}` : metrics.totalAdjustedQty} units
@@ -471,7 +627,7 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
               </div>
             </div>
 
-            {/* Filter & Search Bar */}
+            {/* Filter & Search Bar with Category Tabs */}
             <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 sm:p-4 space-y-3">
               <div className="flex flex-col sm:flex-row items-center gap-3">
                 {/* Search */}
@@ -479,27 +635,29 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
-                    placeholder="Search price revision, adjustment reason, invoice #, PO #, IMEI..."
+                    placeholder="Search price revision, adjustment, invoice #, PO #, damage log, IMEI..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                   />
                 </div>
 
-                {/* Event Type Filter */}
+                {/* Event Type Filter Dropdown */}
                 <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
                   <select
                     value={selectedEventType}
                     onChange={(e) => setSelectedEventType(e.target.value)}
                     className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20"
                   >
-                    <option value="all">All Activities ({fullTimeline.length})</option>
-                    <option value="price_change">🏷️ Price Changes ({priceChangesCount})</option>
-                    <option value="stock_adjustment">⚙️ Stock Adjustments ({localAdjustments.filter(a => a.productId === currentProduct.id).length})</option>
-                    <option value="purchase_stock_in">📦 Stock-In / Purchases</option>
-                    <option value="pos_sale">🛒 POS Sales</option>
-                    <option value="sale_refund">↩️ Returns / Refunds</option>
-                    <option value="physical_audit">📋 Physical Stock Audits</option>
+                    <option value="all">All Activities ({categoryCounts.all})</option>
+                    <option value="price_change">🏷️ Price Changes ({categoryCounts.price_change})</option>
+                    <option value="pos_sale">🛒 Sold (POS) ({categoryCounts.pos_sale})</option>
+                    <option value="purchase_stock_in">📦 Stock-In / Purchases ({categoryCounts.purchase_stock_in})</option>
+                    <option value="stock_adjustment">⚙️ Stock Adjustments ({categoryCounts.stock_adjustment})</option>
+                    <option value="quarantine_damage">🛡️ Quarantine / Damage ({categoryCounts.quarantine_damage})</option>
+                    <option value="sale_refund">↩️ Returns / Refunds ({categoryCounts.sale_refund})</option>
+                    <option value="physical_audit">📋 Physical Stock Audits ({categoryCounts.physical_audit})</option>
+                    <option value="creation">📅 Catalog Added / Created ({categoryCounts.creation})</option>
                   </select>
 
                   {/* Date range pickers */}
@@ -519,6 +677,45 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
                     title="Filter end date"
                   />
                 </div>
+              </div>
+
+              {/* Activity Categories Quick Filter Pills */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-1 text-xs">
+                <span className="text-[11px] font-bold text-slate-400 shrink-0 uppercase tracking-wider mr-1">Filter Activities:</span>
+                {[
+                  { id: 'all', label: 'All', count: categoryCounts.all },
+                  { id: 'price_change', label: 'Price Changes', count: categoryCounts.price_change, icon: Tag },
+                  { id: 'pos_sale', label: 'Sold', count: categoryCounts.pos_sale, icon: ShoppingCart },
+                  { id: 'purchase_stock_in', label: 'Stock-In', count: categoryCounts.purchase_stock_in, icon: Truck },
+                  { id: 'stock_adjustment', label: 'Adjustments', count: categoryCounts.stock_adjustment, icon: Sliders },
+                  { id: 'quarantine_damage', label: 'Quarantine / Loss', count: categoryCounts.quarantine_damage, icon: ShieldAlert },
+                  { id: 'sale_refund', label: 'Returns', count: categoryCounts.sale_refund, icon: RotateCcw },
+                  { id: 'physical_audit', label: 'Audits', count: categoryCounts.physical_audit, icon: ClipboardCheck },
+                  { id: 'creation', label: 'Created / Added', count: categoryCounts.creation, icon: Calendar },
+                ].map(tab => {
+                  const isSelected = selectedEventType === tab.id;
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setSelectedEventType(tab.id)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs shrink-0 transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white shadow-xs shadow-indigo-200'
+                          : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80'
+                      }`}
+                    >
+                      {Icon && <Icon className="w-3.5 h-3.5" />}
+                      <span>{tab.label}</span>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                        isSelected ? 'bg-indigo-500/50 text-white' : 'bg-slate-100 text-slate-600 font-semibold'
+                      }`}>
+                        {tab.count}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -763,6 +960,18 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
           onConfirm={handleConfirmPriceChange}
           staffUsers={staffUsers}
           currentStaffUser={currentStaffUser}
+        />
+      )}
+
+      {/* Embedded Stock Quarantine (Damaged / Loss) Modal */}
+      {isQuarantineModalOpen && (
+        <QuarantineReportModal
+          isOpen={isQuarantineModalOpen}
+          onClose={() => setIsQuarantineModalOpen(false)}
+          products={StorageService.getProducts()}
+          settings={settings}
+          preSelectedProduct={currentProduct}
+          onSuccess={handleConfirmQuarantine}
         />
       )}
     </>

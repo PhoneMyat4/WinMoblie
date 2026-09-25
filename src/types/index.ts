@@ -57,6 +57,8 @@ export type StaffRole = 'Owner' | 'Manager' | 'Cashier' | 'Inventory_Staff';
 export type UserRole = StaffRole;
 
 export interface RolePermissions {
+  canAccessDashboard?: boolean; // Controls access to Executive Dashboard overview
+  canAccessDailyAndAnnualProfit?: boolean; // Controls access to Daily & Annual Profit tab
   canAccessPos: boolean;
   canGiveDiscount: boolean;
   canEditPrice: boolean;
@@ -208,12 +210,17 @@ export type ProductHistoryEventType =
   | 'physical_audit'
   | 'price_change'
   | 'imei_status_change'
-  | 'spec_update';
+  | 'spec_update'
+  | 'quarantine_damage';
 
 export interface ProductHistoryEvent {
   id: string;
   productId: string;
   productName: string;
+  productBrand?: string;
+  productCategory?: string;
+  productSku?: string;
+  productBarcode?: string;
   timestamp: string;
   type: ProductHistoryEventType;
   title: string;
@@ -405,6 +412,7 @@ export interface Product {
   description?: string;
   imageUrl?: string;
   lastRestockedAt?: string;
+  createdAt?: string;
 }
 
 export interface CartItem {
@@ -460,6 +468,8 @@ export interface RefundRecord {
   items: RefundItem[];
   reason: string;
   refundMethod: string;
+  refundFundingSource?: 'cash_drawer' | 'digital_cash_pool';
+  digitalChannel?: string;
   restockItems: boolean;
   totalRefundAmount: number;
   refundedBy: string;
@@ -682,11 +692,19 @@ export type ExpenseFundingSource = 'cash_drawer' | 'revenue_cash';
 export interface MonthlyCapitalSnapshot {
   id: string; // e.g. "cap-2026-09"
   monthYM: string; // "2026-09"
-  initialCash: number; // Starting Cash at month beginning
-  initialStockValuation: number; // Starting Inventory valuation at cost
+  initialCash: number; // Starting Cash at month beginning (total of physical + digital)
+  initialPhysicalCash?: number; // Starting physical cash in drawer / safe float
+  initialDigitalCash?: number; // Starting digital cash pool (KPay, Wave, Bank accounts)
+  initialStockValuation: number; // Starting Inventory valuation at cost (total of physical + digital)
+  initialPhysicalStockValuation?: number; // Starting physical devices & accessories stock at cost
+  initialDigitalStockValuation?: number; // Starting digital products / telecom e-load / virtual float at cost
   initialTotalCapital: number; // initialCash + initialStockValuation
-  capitalInjections?: number; // Additional capital injected during the month
-  ownerDrawings?: number; // Capital / profit drawn by owner during month
+  capitalInjections?: number; // Additional capital injected during the month (total of physical + digital)
+  capitalInjectionsPhysical?: number; // Physical cash injection into drawer / safe
+  capitalInjectionsDigital?: number; // Digital cash pool injection into KPay / Bank
+  ownerDrawings?: number; // Capital / profit drawn by owner during month (total of physical + digital)
+  ownerDrawingsPhysical?: number; // Physical cash drawing from drawer / safe
+  ownerDrawingsDigital?: number; // Digital cash drawing from KPay / Bank
   notes?: string;
   recordedBy?: string;
   updatedAt: string;
@@ -695,12 +713,29 @@ export interface MonthlyCapitalSnapshot {
 export interface RunningCapitalBreakdown {
   cashInDrawer: number; // Physical cash in cash drawer
   digitalBankBalances: number; // KPay, Wave, Bank accounts
-  totalRemainingCash: number; // cashInDrawer + digitalBankBalances (net of revenue cash expenses)
+  totalRemainingCash: number; // cashInDrawer + digitalBankBalances (net of digital expenses & supplier purchases)
   remainingStockValuation: number; // Sellable stock at cost price
   quarantinedStockValuation: number; // Damaged items in quarantine
   accountsReceivable: number; // Outstanding credit sales balance yet to be collected
   totalRunningCapital: number; // Total true business capital = totalRemainingCash + remainingStockValuation + accountsReceivable
   unpaidExpensesLiability?: number;
+  digitalPurchasesOutflow?: number; // PO supplier payments disbursed from digital accounts
+  digitalRefundsOutflow?: number; // Customer refunds disbursed from digital cash pool
+  digitalInjectionsNet?: number; // Owner capital injections deposited into digital cash pool
+  digitalSalesRevenue?: number;
+  revenueCashExpenses?: number;
+  digitalTransfersNet?: number; // Net transfer inflows into digital cash pool from physical cash drawer
+}
+
+export interface CapitalCashTransfer {
+  id: string;
+  timestamp: string;
+  from: 'cash_drawer' | 'digital_cash_pool';
+  to: 'cash_drawer' | 'digital_cash_pool';
+  amount: number;
+  digitalChannel?: PaymentMethod | string; // 'kpay' | 'wave' | 'kbz' | 'aya' | 'cb' | 'yoma' | 'other'
+  reasonNotes?: string;
+  performedBy: string;
 }
 
 export interface ExpenseRecord {
@@ -1387,6 +1422,8 @@ export interface PersonalTransaction {
   receiptPhotoUrl?: string;
   // Business link flags
   syncWithBusiness?: boolean;
+  businessFundingSource?: 'cash_drawer' | 'digital_cash_pool'; // Physical Cash Drawer vs Digital Cash Pool
+  digitalChannel?: string; // Specific channel e.g. 'kpay' | 'wave' | 'kbz' | 'aya' | 'cb' | 'yoma' | 'other'
   linkedShopExpenseId?: string;
   linkedCashDrawerRecord?: boolean;
   createdAt: string;
@@ -1484,6 +1521,7 @@ export type AuditActionType =
   | 'DAMAGE_RESOLVED'
   // Purchases
   | 'PURCHASE_CREATED'
+  | 'PURCHASE_CONFIRMED'
   | 'PURCHASE_RECEIVED'
   | 'PURCHASE_DELETED'
   // Cash Drawer & Operational Expenses

@@ -11,6 +11,8 @@ export interface PermissionDefinition {
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
   Owner: {
+    canAccessDashboard: true,
+    canAccessDailyAndAnnualProfit: true,
     canAccessPos: true,
     canGiveDiscount: true,
     canEditPrice: true,
@@ -42,6 +44,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canViewPayroll: true,
   },
   Manager: {
+    canAccessDashboard: true,
+    canAccessDailyAndAnnualProfit: true,
     canAccessPos: true,
     canGiveDiscount: true,
     canEditPrice: true,
@@ -73,6 +77,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canViewPayroll: true,
   },
   Cashier: {
+    canAccessDashboard: true,
+    canAccessDailyAndAnnualProfit: false,
     canAccessPos: true,
     canGiveDiscount: true,
     canEditPrice: false,
@@ -104,6 +110,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canViewPayroll: false,
   },
   Inventory_Staff: {
+    canAccessDashboard: false,
+    canAccessDailyAndAnnualProfit: false,
     canAccessPos: false,
     canGiveDiscount: false,
     canEditPrice: false,
@@ -243,6 +251,14 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
 
   // Financials & Accounting
   {
+    key: 'canAccessDailyAndAnnualProfit',
+    label: 'Daily & Annual Profit Tab',
+    category: 'financials',
+    categoryLabel: 'Financials & Reports',
+    desc: 'Access Daily Gross Profit, Monthly & Annual Profit analysis, itemized margins, COGS, and Capital Reconciliation suite.',
+    riskLevel: 'critical',
+  },
+  {
     key: 'canRecordExpenses',
     label: 'Record Expenses',
     category: 'financials',
@@ -320,6 +336,14 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   },
 
   // System & Security
+  {
+    key: 'canAccessDashboard',
+    label: 'Dashboard Overview Access',
+    category: 'system',
+    categoryLabel: 'Security & Access Control',
+    desc: 'Access the main store overview dashboard, KPI metric cards, and operational quick links.',
+    riskLevel: 'standard',
+  },
   {
     key: 'canManageStaff',
     label: 'Staff Roles & Security',
@@ -453,12 +477,20 @@ export function isTabAccessibleForUser(
 
   switch (tab) {
     case 'dashboard':
-      return true; // Dashboard overview is accessible to all logged-in staff
+      return Boolean(
+        perms.canAccessDashboard !== undefined 
+          ? perms.canAccessDashboard 
+          : (user.role === 'Owner' || user.role === 'Manager' || user.role === 'Cashier')
+      );
     case 'pos':
       return Boolean(perms.canAccessPos);
     case 'daily_profit':
     case 'monthly_profit':
-      return Boolean(perms.canViewCostAndProfit || perms.canViewReports || user.role === 'Owner' || user.role === 'Manager');
+      return Boolean(
+        perms.canAccessDailyAndAnnualProfit !== undefined
+          ? perms.canAccessDailyAndAnnualProfit
+          : (perms.canViewCostAndProfit || perms.canViewReports || user.role === 'Owner' || user.role === 'Manager')
+      );
     case 'personal_finance':
       return Boolean(user.role === 'Owner' || user.role === 'Manager' || perms.canViewCostAndProfit || perms.canRecordExpenses || perms.canViewReports);
     case 'credit_sales':
@@ -519,6 +551,13 @@ export function getTabRequiredPermissionInfo(tab: AppTab): {
   description: string;
 } {
   switch (tab) {
+    case 'dashboard':
+      return {
+        permissionKey: 'canAccessDashboard',
+        title: 'Executive Store Dashboard',
+        requiredPermissionLabel: 'Dashboard Access (canAccessDashboard)',
+        description: 'Your staff account is restricted from viewing the executive store dashboard, KPI performance metrics, and sales overview.',
+      };
     case 'pos':
       return {
         permissionKey: 'canAccessPos',
@@ -529,9 +568,9 @@ export function getTabRequiredPermissionInfo(tab: AppTab): {
     case 'daily_profit':
     case 'monthly_profit':
       return {
-        permissionKey: 'canViewCostAndProfit',
-        title: 'Daily & Monthly Financial Analysis',
-        requiredPermissionLabel: 'Cost & Profit Visibility (canViewCostAndProfit / canViewReports)',
+        permissionKey: 'canAccessDailyAndAnnualProfit',
+        title: 'Daily & Annual Financial Profit Suite',
+        requiredPermissionLabel: 'Profit Analysis Access (canAccessDailyAndAnnualProfit / canViewCostAndProfit)',
         description: 'Viewing store daily and monthly gross profit, capital matching, and operating margins requires cost and profit permissions.',
       };
     case 'personal_finance':

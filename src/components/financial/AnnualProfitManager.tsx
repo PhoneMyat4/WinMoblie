@@ -45,7 +45,8 @@ import {
   AppTab, 
   StaffUser 
 } from '../../types';
-import { formatCurrency, getCategoryLabel } from '../../utils/formatters';
+import { formatCurrency as rawFormatCurrency, getCategoryLabel } from '../../utils/formatters';
+import { useFinancialPrivacy, PrivacyToggleButton } from '../../utils/useFinancialPrivacy';
 import { 
   AnnualFinancialData, 
   MonthlyFinancialSummary, 
@@ -118,6 +119,10 @@ export const AnnualProfitManager: React.FC<AnnualProfitManagerProps> = ({
   const [activeTab, setActiveTab] = useState<AnnualViewTab>('overview');
   const [isPdfMenuOpen, setIsPdfMenuOpen] = useState(false);
   const [compareWithPriorYear, setCompareWithPriorYear] = useState(true);
+
+  // Financial Privacy Masking for Sensitive Profit Digits
+  const { hideDigits, toggleHideDigits, formatAmount } = useFinancialPrivacy();
+  const formatCurrency = (amount: number, symbol?: string) => formatAmount(amount, symbol);
 
   // Product cost map fallback
   const productCostMap = useMemo(() => {
@@ -530,8 +535,16 @@ export const AnnualProfitManager: React.FC<AnnualProfitManagerProps> = ({
               )}
             </div>
 
-            {/* Export Actions */}
+            {/* Export Actions & Privacy Mode */}
             <div className="flex items-center gap-1.5">
+              {/* Privacy Eye Toggle Button */}
+              <PrivacyToggleButton
+                hideDigits={hideDigits}
+                onToggle={toggleHideDigits}
+                variant="outline"
+                size="sm"
+              />
+
               {/* PDF Dropdown Button */}
               <div className="relative">
                 <div className="inline-flex rounded-xl shadow-2xs">
@@ -931,7 +944,7 @@ export const AnnualProfitManager: React.FC<AnnualProfitManagerProps> = ({
                     tick={{ fontSize: 10, fill: '#64748b' }} 
                     tickLine={false} 
                     axisLine={false}
-                    tickFormatter={(v) => v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}
+                    tickFormatter={(v) => hideDigits ? '•••' : v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}
                   />
                   <Tooltip 
                     formatter={(val: any, name: any) => [

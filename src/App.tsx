@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Product, 
   Sale, 
@@ -135,36 +135,127 @@ export default function App() {
     return !isAuth;
   });
 
-  // UI Navigation State - initialized from URL parameters
-  const [activeTab, setActiveTab] = useState<AppTab>(getInitialTab);
+  // UI Navigation State - initialized from URL parameters & browser history
+  const [activeTab, setActiveTabState] = useState<AppTab>(getInitialTab);
+  
+  // Navigation stack depth tracking to power browser back/forward buttons
+  const [navIndex, setNavIndex] = useState<number>(() => {
+    if (typeof window !== 'undefined' && window.history.state && typeof window.history.state.index === 'number') {
+      return window.history.state.index;
+    }
+    return 0;
+  });
+  const [maxNavIndex, setMaxNavIndex] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = sessionStorage.getItem('mobileshop_nav_max_index');
+      if (stored !== null) {
+        return Math.max(0, Number(stored) || 0);
+      }
+      if (window.history.state && typeof window.history.state.index === 'number') {
+        return window.history.state.index;
+      }
+    }
+    return 0;
+  });
+
   const [selectedInvoiceToView, setSelectedInvoiceToView] = useState<Sale | null>(null);
   const [historyModalProduct, setHistoryModalProduct] = useState<Product | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [isAiChatOpen, setIsAiChatOpen] = useState<boolean>(false);
 
-  // Sync activeTab with browser URL search params
+  // Initialize and ensure initial browser history state is recorded with current tab and index 0
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('tab') !== activeTab) {
-      params.set('tab', activeTab);
-      const newUrl = `${window.location.pathname}?${params.toString()}`;
-      window.history.replaceState({ tab: activeTab }, '', newUrl);
+    const currentParams = new URLSearchParams(window.location.search);
+    const initialParam = currentParams.get('tab') as AppTab | null;
+    const initialTab = initialParam && VALID_TABS.includes(initialParam) ? initialParam : activeTab;
+    
+    const url = new URL(window.location.href);
+    if (!url.searchParams.get('tab')) {
+      url.searchParams.set('tab', initialTab);
     }
-  }, [activeTab]);
+    
+    const currentState = window.history.state;
+    const currentIdx = currentState && typeof currentState.index === 'number' ? currentState.index : 0;
+    
+    window.history.replaceState({ tab: initialTab, index: currentIdx }, '', url.toString());
+    setNavIndex(currentIdx);
+    setMaxNavIndex((prev) => Math.max(prev, currentIdx));
+  }, []);
 
-  // Support browser Back/Forward navigation
+  // Update active tab with full browser history support
+  // When a user selects a tab, window.history.pushState records the navigation in the browser stack
+  const setActiveTab = useCallback((nextTabOrFn: AppTab | ((prev: AppTab) => AppTab), replace: boolean = false) => {
+    setActiveTabState((prevTab) => {
+      const nextTab = typeof nextTabOrFn === 'function' ? nextTabOrFn(prevTab) : nextTabOrFn;
+      if (nextTab === prevTab) return prevTab;
+      if (!VALID_TABS.includes(nextTab)) return prevTab;
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', nextTab);
+      url.hash = '';
+
+      setNavIndex((prevIndex) => {
+        const nextIndex = replace ? prevIndex : prevIndex + 1;
+        if (replace) {
+          window.history.replaceState({ tab: nextTab, index: nextIndex }, '', url.toString());
+        } else {
+          window.history.pushState({ tab: nextTab, index: nextIndex }, '', url.toString());
+          setMaxNavIndex(nextIndex);
+          try {
+            sessionStorage.setItem('mobileshop_nav_max_index', String(nextIndex));
+          } catch {
+            // ignore
+          }
+        }
+        return nextIndex;
+      });
+
+      return nextTab;
+    });
+  }, []);
+
+  // Support native browser Back/Forward buttons and keyboard shortcuts (Alt+Left, Alt+Right, PopStateEvent)
   useEffect(() => {
-    const handlePopState = () => {
-      const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get('tab') as AppTab | null;
-      if (tabParam && VALID_TABS.includes(tabParam)) {
-        setActiveTab(tabParam);
+    const handlePopState = (event: PopStateEvent) => {
+      let targetTab: AppTab = 'dashboard';
+      let targetIndex: number | null = null;
+
+      if (event.state && typeof event.state.tab === 'string' && VALID_TABS.includes(event.state.tab as AppTab)) {
+        targetTab = event.state.tab as AppTab;
+        if (typeof event.state.index === 'number') {
+          targetIndex = event.state.index;
+        }
+      } else {
+        const params = new URLSearchParams(window.location.search);
+        const tabParam = params.get('tab') as AppTab | null;
+        if (tabParam && VALID_TABS.includes(tabParam)) {
+          targetTab = tabParam;
+        }
+      }
+
+      // Close open modal overlays on history pop to avoid floating over different tab views
+      setSelectedInvoiceToView(null);
+      setHistoryModalProduct(null);
+      setCashInOutModalType(null);
+      setBarcodeModalProduct(null);
+
+      // Directly update tab state without calling pushState (since browser already updated its stack)
+      setActiveTabState(targetTab);
+
+      if (targetIndex !== null) {
+        setNavIndex(targetIndex);
+      } else {
+        setNavIndex((prev) => Math.max(0, prev - 1));
       }
     };
+
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  const canGoBack = navIndex > 0;
+  const canGoForward = navIndex < maxNavIndex;
 
   // Security enforcement: purge any legacy client-stored AI API keys from localStorage
   useEffect(() => {
@@ -282,6 +373,17 @@ export default function App() {
       } else if (user.role === 'Inventory_Staff') {
         setActiveTab('inventory');
       }
+    }
+
+    if (!isTabAccessibleForUser(activeTab, user, rolePermissions)) {
+      const fallbackTab: AppTab = isTabAccessibleForUser('dashboard', user, rolePermissions)
+        ? 'dashboard'
+        : isTabAccessibleForUser('pos', user, rolePermissions)
+          ? 'pos'
+          : isTabAccessibleForUser('inventory', user, rolePermissions)
+            ? 'inventory'
+            : 'sales_history';
+      setActiveTab(fallbackTab);
     }
   };
 
@@ -468,18 +570,24 @@ export default function App() {
       imei2?: string;
     }[];
     reason: string;
+    refundFundingSource?: 'cash_drawer' | 'digital_cash_pool';
     refundMethod: string;
+    digitalChannel?: string;
     restockItems: boolean;
     totalRefundAmount: number;
     staffName: string;
     notes?: string;
   }) => {
     StorageService.processItemRefund(params);
+    // Refresh live cash drawer state so UI reacts immediately
+    setCashDrawer(StorageService.getCashDrawer());
+    setSales(StorageService.getSales());
+    setProducts(StorageService.getProducts());
     AuditLogger.logSale(
       { id: params.saleId, totalAmount: params.totalRefundAmount },
       currentActiveUser,
       true,
-      `${params.reason} (Method: ${params.refundMethod}, Restock: ${params.restockItems ? 'Yes' : 'No'})`
+      `${params.reason} (Source: ${params.refundFundingSource === 'cash_drawer' ? 'Daily Cash Drawer' : 'Digital Cash Pool'}, Method: ${params.refundMethod}, Restock: ${params.restockItems ? 'Yes' : 'No'})`
     );
   };
 
@@ -540,7 +648,14 @@ export default function App() {
     AuditLogger.logAuth('OPERATOR_SWITCH', freshUser, `Terminal operator switched to ${freshUser.name} (${freshUser.role})`);
 
     if (!isTabAccessibleForUser(activeTab, freshUser, rolePermissions)) {
-      setActiveTab('dashboard');
+      const fallbackTab: AppTab = isTabAccessibleForUser('dashboard', freshUser, rolePermissions)
+        ? 'dashboard'
+        : isTabAccessibleForUser('pos', freshUser, rolePermissions)
+          ? 'pos'
+          : isTabAccessibleForUser('inventory', freshUser, rolePermissions)
+            ? 'inventory'
+            : 'sales_history';
+      setActiveTab(fallbackTab);
     }
   };
 
@@ -681,6 +796,8 @@ export default function App() {
           currentStaffUser={currentActiveUser}
           rolePermissions={rolePermissions}
           syncInfo={syncInfo}
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
           onOpenNewSale={() => setActiveTab('pos')}
           onOpenPurchases={() => setActiveTab('purchases')}
           onOpenExpenses={() => setActiveTab('expenses')}
@@ -762,6 +879,12 @@ export default function App() {
             <InventoryManager
               products={products}
               settings={settings}
+              sales={sales}
+              purchases={purchases}
+              stockAdjustments={stockAdjustments}
+              stockAudits={stockAudits}
+              priceChanges={priceChanges}
+              staffUsers={staffUsers}
               onSaveProduct={handleSaveProduct}
               onBulkSaveProducts={handleBulkSaveProducts}
               onDeleteProduct={handleDeleteProduct}
@@ -833,6 +956,10 @@ export default function App() {
               sales={sales}
               expenses={expenses}
               onNavigateTab={(tab) => setActiveTab(tab)}
+              onRefreshStoreData={() => {
+                setCashDrawer(StorageService.getCashDrawer());
+                setExpenses(StorageService.getExpenses());
+              }}
             />
           )}
 

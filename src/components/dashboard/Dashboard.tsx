@@ -26,7 +26,8 @@ import {
   Wallet,
   Banknote,
   Landmark,
-  Layers
+  Layers,
+  ArrowRightLeft
 } from 'lucide-react';
 import { Product, Sale, PurchaseRecord, ExpenseRecord, CashDrawerRecord, ShopSettings, StaffUser, StaffRole, RolePermissions } from '../../types';
 import { formatCurrency, formatDateTime, getPaymentMethodInfo, formatSalePaymentBreakdown } from '../../utils/formatters';
@@ -34,6 +35,8 @@ import { getEffectiveUserPermissions } from '../../utils/permissionUtils';
 import { StorageService } from '../../utils/storage';
 import { calculateRunningCapital } from '../../utils/capitalUtils';
 import { AppLink } from '../common/AppLink';
+import { CashPoolTransferModal } from '../financial/CashPoolTransferModal';
+import { useFinancialPrivacy, PrivacyToggleButton } from '../../utils/useFinancialPrivacy';
 
 interface DashboardProps {
   products: Product[];
@@ -88,11 +91,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const todayPurchases = purchases.filter(p => p.date.startsWith(todayStr));
   const todayPurchasesTotal = todayPurchases.reduce((acc, p) => acc + p.grandTotal, 0);
 
+  const [isTransferModalOpen, setIsTransferModalOpen] = React.useState(false);
+  const [transferRefreshCount, setTransferRefreshCount] = React.useState(0);
+  const { hideDigits, toggleHideDigits, formatAmount } = useFinancialPrivacy();
+
   // Live Running Business Capital (Stock at cost + Liquid Cash + Receivables)
   const creditSales = React.useMemo(() => StorageService.getCreditSales(), []);
+  const currentLiveDrawer = React.useMemo(() => StorageService.getCashDrawer(), [cashDrawer, transferRefreshCount]);
   const runningCapital = React.useMemo(() => {
-    return calculateRunningCapital(products, cashDrawer, creditSales, expenses, sales);
-  }, [products, cashDrawer, creditSales, expenses, sales]);
+    return calculateRunningCapital(products, currentLiveDrawer, creditSales, expenses, sales, undefined, purchases);
+  }, [products, currentLiveDrawer, creditSales, expenses, sales, purchases, transferRefreshCount]);
 
   // Inventory stats
   const lowStockProducts = products.filter(p => {
@@ -169,6 +177,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         <div className="grid grid-cols-2 sm:flex sm:items-center flex-wrap gap-2 w-full sm:w-auto">
+          {/* Privacy Eye Toggle Button */}
+          <PrivacyToggleButton
+            hideDigits={hideDigits}
+            onToggle={toggleHideDigits}
+            variant="outline"
+            size="sm"
+          />
+
           {/* Business Reports Button/Link */}
           {effectivePerms.canViewReports && (
             <AppLink
@@ -252,6 +268,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <span>Notice Board & Chat</span>
             <ExternalLink className="w-3 h-3 opacity-70 hidden sm:inline shrink-0" />
           </AppLink>
+
+          {/* Transfer Cash between Drawer & Digital Pool */}
+          <button
+            type="button"
+            onClick={() => setIsTransferModalOpen(true)}
+            id="dash-transfer-cash-action-btn"
+            className="inline-flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer text-center"
+            title="Transfer / Adjust Cash between Physical Drawer & Digital Pool"
+          >
+            <ArrowRightLeft className="w-4 h-4 shrink-0 text-indigo-600" />
+            <span>Transfer Cash ⇄</span>
+          </button>
         </div>
       </div>
 
@@ -313,7 +341,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               <div className="flex items-baseline gap-3">
                 <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-                  {formatCurrency(runningCapital.totalRunningCapital, settings.currencySymbol)}
+                  {formatAmount(runningCapital.totalRunningCapital, settings.currencySymbol)}
                 </h2>
                 <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-500/30">
                   Live Solvency
@@ -330,14 +358,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="p-2 space-y-1">
                 <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold">
                   <Banknote className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Remaining Cash</span>
+                  <span>Total Remaining Cash</span>
                 </div>
                 <p className="text-sm sm:text-base font-black text-amber-300">
-                  {formatCurrency(runningCapital.totalRemainingCash, settings.currencySymbol)}
+                  {formatAmount(runningCapital.totalRemainingCash, settings.currencySymbol)}
                 </p>
-                <p className="text-[10px] text-slate-400">
-                  Drawer: {formatCurrency(runningCapital.cashInDrawer, settings.currencySymbol)}
-                </p>
+                <div className="text-[10px] text-slate-400 space-y-0.5 font-medium">
+                  <p className="flex justify-between items-center">
+                    <span>Drawer:</span>
+                    <span className="text-slate-200 font-semibold">{formatAmount(runningCapital.cashInDrawer, settings.currencySymbol)}</span>
+                  </p>
+                  <p className="flex justify-between items-center">
+                    <span>Digital:</span>
+                    <span className="text-slate-200 font-semibold">{formatAmount(runningCapital.digitalBankBalances, settings.currencySymbol)}</span>
+                  </p>
+                </div>
               </div>
 
               {/* Pillar 2: Inventory Valuation */}
@@ -347,7 +382,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <span>Stock at Cost</span>
                 </div>
                 <p className="text-sm sm:text-base font-black text-emerald-300">
-                  {formatCurrency(runningCapital.remainingStockValuation, settings.currencySymbol)}
+                  {formatAmount(runningCapital.remainingStockValuation, settings.currencySymbol)}
                 </p>
                 <p className="text-[10px] text-slate-400">
                   {products.length} catalog items
@@ -361,7 +396,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <span>Receivables</span>
                 </div>
                 <p className="text-sm sm:text-base font-black text-cyan-300">
-                  {formatCurrency(runningCapital.accountsReceivable, settings.currencySymbol)}
+                  {formatAmount(runningCapital.accountsReceivable, settings.currencySymbol)}
                 </p>
                 <p className="text-[10px] text-slate-400">
                   Customer credits
@@ -369,14 +404,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
             </div>
 
-            {/* Action button */}
-            <button
-              type="button"
-              onClick={() => onNavigateTab('monthly_profit')}
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0 border border-indigo-400/40"
-            >
-              <span>Monthly Capital Match →</span>
-            </button>
+            {/* Actions Stack: Transfer Cash above Monthly Capital Match */}
+            <div className="flex flex-col gap-2 shrink-0 justify-center sm:min-w-[175px]">
+              <button
+                type="button"
+                onClick={() => setIsTransferModalOpen(true)}
+                className="w-full px-3.5 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-white font-bold text-xs rounded-xl border border-amber-400/40 shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                title="Transfer funds between Cash Drawer & Digital Pool"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5 text-amber-300" />
+                <span>Transfer Cash ⇄</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onNavigateTab('monthly_profit')}
+                className="w-full px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 border border-indigo-400/40 whitespace-nowrap"
+                title="Open Monthly Capital Match & Balance Sheet Reconciliation"
+              >
+                <span>Monthly Capital Match →</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -393,7 +441,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
           <p className="text-2xl font-black text-slate-900">
-            {formatCurrency(todayRevenue, settings.currencySymbol)}
+            {formatAmount(todayRevenue, settings.currencySymbol)}
           </p>
           <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 text-slate-500">
             <span>{todaySales.length} Orders completed</span>
@@ -421,10 +469,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
           {effectivePerms.canViewCostAndProfit ? (
             <>
               <p className="text-2xl font-black text-emerald-600">
-                {formatCurrency(todayGrossProfit, settings.currencySymbol)}
+                {formatAmount(todayGrossProfit, settings.currencySymbol)}
               </p>
               <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 text-slate-500">
-                <span>COGS: {formatCurrency(todayCost, settings.currencySymbol)}</span>
+                <span>COGS: {formatAmount(todayCost, settings.currencySymbol)}</span>
                 <span className="text-indigo-600 font-bold group-hover:underline flex items-center gap-0.5">
                   Analyze P&L →
                 </span>
@@ -451,7 +499,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
           <p className="text-2xl font-black text-rose-600">
-            {formatCurrency(todayExpensesTotal, settings.currencySymbol)}
+            {formatAmount(todayExpensesTotal, settings.currencySymbol)}
           </p>
           <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 text-slate-500">
             <span>{todayExpenses.length} Vouchers recorded</span>
@@ -476,11 +524,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             </div>
             <p className="text-2xl font-black text-emerald-400">
-              {formatCurrency(cashDrawer.expectedInDrawer, settings.currencySymbol)}
+              {formatAmount(cashDrawer.expectedInDrawer, settings.currencySymbol)}
             </p>
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 pt-2 border-t border-slate-800">
-            <span>Float: {formatCurrency(cashDrawer.openingBalance || cashDrawer.openingFloat, settings.currencySymbol)}</span>
+            <span>Float: {formatAmount(cashDrawer.openingBalance || cashDrawer.openingFloat, settings.currencySymbol)}</span>
             <AppLink 
               tab="cash_drawer"
               toTab={onNavigateTab}
@@ -523,7 +571,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 return (
                   <div key={day.dateStr} className="flex-1 flex flex-col items-center gap-1.5 group">
                     <div className="text-[10px] font-bold text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity truncate">
-                      {formatCurrency(day.revenue, settings.currencySymbol)}
+                      {formatAmount(day.revenue, settings.currencySymbol)}
                     </div>
                     <div className="w-full bg-slate-100 rounded-t-lg h-32 flex items-end p-1">
                       <div
@@ -574,7 +622,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         {info.label} ({data.count})
                       </span>
                       <span className="font-mono font-bold text-slate-900">
-                        {formatCurrency(data.total, settings.currencySymbol)} ({percent}%)
+                        {formatAmount(data.total, settings.currencySymbol)} ({percent}%)
                       </span>
                     </div>
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -592,7 +640,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
             <span>Total Inflow:</span>
             <span className="font-bold text-slate-900 font-mono">
-              {formatCurrency(
+              {formatAmount(
                 sales.filter(s => s.status === 'completed').reduce((a, s) => a + s.grandTotal, 0),
                 settings.currencySymbol
               )}
@@ -640,7 +688,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-slate-900 truncate">{prod.name}</p>
                     <p className="text-[10px] text-slate-500 font-mono">
-                      SKU: {prod.sku} • Cost: {formatCurrency(prod.costPrice, settings.currencySymbol)}
+                      SKU: {prod.sku} • Cost: {formatAmount(prod.costPrice, settings.currencySymbol)}
                     </p>
                   </div>
 
@@ -705,7 +753,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                   <div className="text-right shrink-0">
                     <p className="text-xs font-black text-slate-900 font-mono">
-                      {formatCurrency(item.revenue, settings.currencySymbol)}
+                      {formatAmount(item.revenue, settings.currencySymbol)}
                     </p>
                     <p className="text-[10px] text-emerald-600 font-semibold">Revenue</p>
                   </div>
@@ -781,7 +829,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             {payInfo.label}
                           </span>
                           <div className="text-[10px] font-bold text-purple-900 font-mono">
-                            {formatSalePaymentBreakdown(sale, settings.currencySymbol)}
+                            {hideDigits ? 'Cash •••••• + Digital ••••••' : formatSalePaymentBreakdown(sale, settings.currencySymbol)}
                           </div>
                         </div>
                       ) : (
@@ -792,7 +840,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </td>
 
                     <td className="py-3 px-4 text-right font-black text-slate-900 font-mono">
-                      {formatCurrency(sale.grandTotal, settings.currencySymbol)}
+                      {formatAmount(sale.grandTotal, settings.currencySymbol)}
                     </td>
 
                     <td className="py-3 px-4 text-center">
@@ -903,6 +951,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </AppLink>
         </div>
       </div>
+
+      {/* Cash Pool Transfer Modal */}
+      <CashPoolTransferModal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        onTransferred={() => setTransferRefreshCount(c => c + 1)}
+        settings={settings}
+      />
 
     </div>
   );

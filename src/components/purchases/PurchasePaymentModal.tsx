@@ -16,12 +16,17 @@ import {
   Eye,
   Paperclip,
   ExternalLink,
-  FileText
+  FileText,
+  Banknote,
+  Wallet,
+  ArrowRightLeft
 } from 'lucide-react';
 import { PurchaseRecord, PaymentMethod, StaffRole, ShopSettings } from '../../types';
 import { formatCurrency, getPaymentMethodInfo } from '../../utils/formatters';
 import { exportPurchaseOrderPdf, exportPurchasePaymentVoucherPdf } from '../../utils/purchasePdfExport';
 import { compressImageToBase64 } from '../../utils/imageCompression';
+import { StorageService } from '../../utils/storage';
+import { calculateRunningCapital } from '../../utils/capitalUtils';
 
 interface PurchasePaymentModalProps {
   purchase: PurchaseRecord;
@@ -64,8 +69,44 @@ export const PurchasePaymentModal: React.FC<PurchasePaymentModalProps> = ({
   const [isSupplierVoucherZoomed, setIsSupplierVoucherZoomed] = useState<boolean>(false);
   const [approvalNotes, setApprovalNotes] = useState<string>(purchase.approvalNotes || '');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [transferSuccess, setTransferSuccess] = useState<string | null>(null);
 
   const effectiveAmountPaid = isFullyPaid ? purchase.grandTotal : customAmountPaid;
+
+  // Compute live capital & liquid balances
+  const liveCapital = React.useMemo(() => {
+    const prods = StorageService.getProducts();
+    const drawer = StorageService.getCashDrawer();
+    const credits = StorageService.getCreditSales();
+    const exps = StorageService.getExpenses();
+    const sls = StorageService.getSales();
+    const pur = StorageService.getPurchases();
+    return calculateRunningCapital(prods, drawer, credits, exps, sls, undefined, pur);
+  }, [transferSuccess]);
+
+  const availableDigital = liveCapital.digitalBankBalances || 0;
+  const availableDrawer = liveCapital.cashInDrawer || 0;
+  const isDigital = paymentMethod !== 'cash';
+  const hasDigitalDeficit = isDigital && effectiveAmountPaid > availableDigital;
+  const digitalDeficit = hasDigitalDeficit ? effectiveAmountPaid - availableDigital : 0;
+
+  const handleQuickTransferFromDrawer = (amountToTransfer: number) => {
+    try {
+      StorageService.recordCapitalCashTransfer({
+        from: 'cash_drawer',
+        to: 'digital_cash_pool',
+        amount: amountToTransfer,
+        digitalChannel: paymentMethod,
+        reasonNotes: `Automated transfer for PO #${purchase.purchaseOrderNumber} payout`,
+        performedBy: currentStaffName || 'Authorized Staff'
+      });
+      setTransferSuccess(`Transferred ${formatCurrency(amountToTransfer, settings.currencySymbol)} from Cash Drawer to Digital Cash Pool successfully!`);
+      setErrorMessage(null);
+      setTimeout(() => setTransferSuccess(null), 4000);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to transfer from drawer.');
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -278,10 +319,66 @@ export const PurchasePaymentModal: React.FC<PurchasePaymentModalProps> = ({
                 );
               })}
             </div>
-            {paymentMethod === 'cash' && (
-              <p className="text-[11px] text-amber-600 bg-amber-50 p-2 rounded-lg border border-amber-200 mt-1">
-                * Choosing Cash will automatically log a cash-out transaction in today's Cash Drawer register upon confirmation.
+            {paymentMethod === 'cash' ? (
+              <p className="text-[11px] text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-200 mt-1.5 flex items-center gap-2">
+                <Banknote className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>
+                  * Sourced from <strong>Cash Drawer (Physical Cash)</strong>. Automatically logs an outflow transaction in today's register upon confirmation.
+                </span>
               </p>
+            ) : (
+              <div className="space-y-2 mt-1.5">
+                <p className="text-[11px] text-indigo-800 bg-indigo-50/80 p-2.5 rounded-xl border border-indigo-200 flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2">
+                    <Wallet className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>
+                      * Sourced from <strong>Digital Cash Pool ({getPaymentMethodInfo(paymentMethod).label})</strong> under <strong>Total Remaining Cash</strong>.
+                    </span>
+                  </span>
+                  <span className="text-[10px] font-bold text-indigo-900 bg-white px-2 py-0.5 rounded border border-indigo-200 shrink-0">
+                    Avail: {formatCurrency(availableDigital, settings.currencySymbol)}
+                  </span>
+                </p>
+
+                {/* Transfer Success Alert */}
+                {transferSuccess && (
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-[11px] font-medium flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{transferSuccess}</span>
+                  </div>
+                )}
+
+                {/* Insufficient Digital Balance Warning with Quick Transfer */}
+                {hasDigitalDeficit && (
+                  <div className="p-3 bg-amber-50 border-2 border-amber-300 rounded-2xl space-y-2.5 animate-in fade-in">
+                    <div className="flex items-start gap-2.5">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5 text-xs">
+                        <p className="font-extrabold text-amber-900">
+                          ⚠️ Insufficient Digital Cash Pool Balance
+                        </p>
+                        <p className="text-[11px] text-amber-800 leading-snug">
+                          Digital Cash Pool has <strong className="text-amber-950 font-mono">{formatCurrency(availableDigital, settings.currencySymbol)}</strong>, but this payment requires <strong className="text-amber-950 font-mono">{formatCurrency(effectiveAmountPaid, settings.currencySymbol)}</strong> (Short by <strong className="text-rose-700 font-mono">{formatCurrency(digitalDeficit, settings.currencySymbol)}</strong>).
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <span className="text-[11px] text-amber-800">
+                        Counter Cash Drawer: <strong>{formatCurrency(availableDrawer, settings.currencySymbol)}</strong> available
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickTransferFromDrawer(digitalDeficit)}
+                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                      >
+                        <ArrowRightLeft className="w-3.5 h-3.5" />
+                        <span>Transfer {formatCurrency(digitalDeficit, settings.currencySymbol)} from Cash Drawer</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 

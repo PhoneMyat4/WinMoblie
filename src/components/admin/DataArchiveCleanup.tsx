@@ -388,6 +388,20 @@ export const DataArchiveCleanup: React.FC<DataArchiveCleanupProps> = ({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
+              onClick={() => applyPreset(0)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors cursor-pointer"
+            >
+              All History (Up to Today)
+            </button>
+            <button
+              type="button"
+              onClick={() => applyPreset(7)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
+            >
+              Older than 7 Days
+            </button>
+            <button
+              type="button"
               onClick={() => applyPreset(30)}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
             >

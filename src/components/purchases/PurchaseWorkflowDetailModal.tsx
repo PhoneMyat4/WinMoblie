@@ -282,7 +282,10 @@ export const PurchaseWorkflowDetailModal: React.FC<PurchaseWorkflowDetailModalPr
                 </span>
                 <span className="font-bold text-slate-900 capitalize">{purchase.paymentMethod}</span>
               </div>
-              <span className={`text-[10px] font-bold uppercase ${
+              <span className="text-[10px] text-slate-500 font-medium block">
+                {purchase.paymentMethod === 'cash' ? 'Cash Drawer (Physical Cash)' : 'Digital Cash Pool (Remaining Cash)'}
+              </span>
+              <span className={`text-[10px] font-bold uppercase mt-0.5 block ${
                 purchase.paymentStatus === 'paid' ? 'text-emerald-700' : 'text-amber-700'
               }`}>
                 {purchase.paymentStatus === 'paid' ? 'Fully Paid' : `Balance Due: ${formatCurrency(purchase.balanceDue, settings.currencySymbol)}`}

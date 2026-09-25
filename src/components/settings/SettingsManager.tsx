@@ -37,7 +37,9 @@ import {
   ArrowDownCircle,
   Server,
   Sliders,
-  Archive
+  Archive,
+  BookOpen,
+  FileDown
 } from 'lucide-react';
 import { ShopSettings, SystemHealthReport, CleanupResult, Sale } from '../../types';
 import { StorageService } from '../../utils/storage';
@@ -53,6 +55,9 @@ import { LogoSizeAdjusterModal } from './LogoSizeAdjusterModal';
 import { processLogoImage } from '../../utils/imageCompression';
 import { FirebaseStorageService } from '../../services/firebaseStorageService';
 import { processFaviconImage, updateDocumentFavicon } from '../../utils/favicon';
+import { exportUserManualPdf } from '../../utils/userManualPdfExport';
+import { downloadUserManualMarkdownFile, USER_MANUAL_METADATA } from '../../data/userManualContent';
+import { UserManualModal } from './UserManualModal';
 
 interface SettingsManagerProps {
   settings: ShopSettings;
@@ -63,7 +68,7 @@ interface SettingsManagerProps {
   onArchiveSalesComplete?: (deletedSaleIds: string[]) => void;
 }
 
-export type SettingsSection = 'all' | 'secrets' | 'store' | 'facebook' | 'system' | 'firebase' | 'archive';
+export type SettingsSection = 'all' | 'secrets' | 'store' | 'facebook' | 'system' | 'firebase' | 'archive' | 'manual';
 
 export const SettingsManager: React.FC<SettingsManagerProps> = ({
   settings,
@@ -106,6 +111,31 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [customFaviconUrl, setCustomFaviconUrl] = useState<string>('');
   const [isUploadingFavicon, setIsUploadingFavicon] = useState<boolean>(false);
   const [faviconStatusMessage, setFaviconStatusMessage] = useState<string | null>(null);
+
+  // 4. Staff Operations & Training Manual (PDF Export & In-App SOP Reader)
+  const [isManualModalOpen, setIsManualModalOpen] = useState<boolean>(false);
+  const [isExportingManualPdf, setIsExportingManualPdf] = useState<boolean>(false);
+  const [manualExportSuccess, setManualExportSuccess] = useState<boolean>(false);
+
+  const handleExportManualPdf = () => {
+    try {
+      setIsExportingManualPdf(true);
+      setTimeout(() => {
+        exportUserManualPdf({ settings: formData, staffName: 'Authorized Store Management' });
+        setIsExportingManualPdf(false);
+        setManualExportSuccess(true);
+        setTimeout(() => setManualExportSuccess(false), 4500);
+      }, 250);
+    } catch (err) {
+      console.error('[SettingsManager] Failed to export manual PDF:', err);
+      setIsExportingManualPdf(false);
+      alert('Failed to generate User Manual PDF. Please try again.');
+    }
+  };
+
+  const handleDownloadManualMarkdown = () => {
+    downloadUserManualMarkdownFile(formData.shopName || settings.shopName || 'Mobile_Store');
+  };
 
   const syncInfo = usePeriodicSync(2000);
 
@@ -809,7 +839,148 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
           <Archive className="w-3.5 h-3.5 text-amber-600" />
           <span>Data Archiving & Cleanup</span>
         </button>
+
+        <button
+          type="button"
+          id="tab-user-manual"
+          onClick={() => setActiveSection('manual')}
+          className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer whitespace-nowrap ${
+            activeSection === 'manual'
+              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-xs'
+              : 'bg-indigo-50/90 border border-indigo-200 text-indigo-900 hover:bg-indigo-100'
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+          <span>Staff Training & SOP Manual</span>
+          <span className="px-1.5 py-0.2 bg-indigo-200/80 text-indigo-800 text-[10px] rounded-full font-bold">PDF</span>
+        </button>
       </div>
+
+      {/* =========================================================
+          OPERATIONS & STAFF TRAINING MANUAL (PDF EXPORT & SOP)
+         ========================================================= */}
+      {(activeSection === 'all' || activeSection === 'store' || activeSection === 'manual') && (
+        <div id="section-staff-manual" className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-7 text-white shadow-xl border border-indigo-900/40 space-y-6">
+          <div className="flex flex-col md:flex-row md:items-start justify-between gap-5">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 text-indigo-400 border border-indigo-400/30 flex items-center justify-center shrink-0 mt-1 shadow-inner">
+                <BookOpen className="w-6 h-6 text-indigo-300" />
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-wider font-extrabold px-2.5 py-0.5 rounded-full bg-indigo-500/30 text-indigo-300 border border-indigo-400/40">
+                    Official SOP &amp; Operations Manual
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 font-medium">
+                    {USER_MANUAL_METADATA.version}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    Doc ID: {USER_MANUAL_METADATA.documentControlId}
+                  </span>
+                </div>
+                <h3 className="text-xl font-black text-white tracking-tight">
+                  Mobile Shop Operations &amp; Staff Training Manual (PDF)
+                </h3>
+                <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                  Official operational training manual extracted directly from the system codebase. Standard Operating Procedures (SOP) cover Role-Based Permissions (Owners, Managers, Cashiers, Inventory Staff), POS counter checkout, serial IMEI tracking, 3-phase RMA damage quarantine, daily/annual profit calculations, and cash drawer shift closures.
+                </p>
+              </div>
+            </div>
+
+            {/* Direct Action Buttons */}
+            <div className="flex flex-wrap items-center sm:flex-col sm:items-end gap-2.5 shrink-0">
+              <button
+                type="button"
+                id="btn-export-manual-pdf"
+                onClick={handleExportManualPdf}
+                disabled={isExportingManualPdf}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-600/30 hover:shadow-indigo-600/50 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isExportingManualPdf ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Rendering PDF...</span>
+                  </>
+                ) : (
+                  <>
+                    <FileDown className="w-4 h-4 text-white" />
+                    <span>Export Manual (PDF)</span>
+                  </>
+                )}
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  id="btn-preview-manual-modal"
+                  onClick={() => setIsManualModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 hover:text-white text-xs font-bold transition-all border border-white/10 cursor-pointer"
+                >
+                  <Eye className="w-3.5 h-3.5 text-indigo-300" />
+                  <span>Read in App</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-download-manual-md"
+                  onClick={handleDownloadManualMarkdown}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-semibold transition-all border border-white/10 cursor-pointer"
+                  title="Download raw Markdown format"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-400" />
+                  <span>.MD</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Success Banner */}
+          {manualExportSuccess && (
+            <div className="bg-emerald-500/20 border border-emerald-400/40 rounded-2xl p-3 flex items-center justify-between text-emerald-200 text-xs animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Operations Manual PDF generated and downloaded to your device! Formatted for high-resolution A4 printing and employee compliance sign-off.</span>
+              </div>
+              <span className="font-bold text-[11px] text-emerald-300">Ready to Print</span>
+            </div>
+          )}
+
+          {/* 4 Feature Highlights Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-white/10 text-xs">
+            <div className="bg-white/5 rounded-2xl p-3.5 border border-white/5 space-y-1">
+              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">1. RBAC &amp; PIN Security</span>
+              <p className="font-semibold text-white text-xs">4 Operational Roles</p>
+              <p className="text-[11px] text-slate-400 leading-tight">
+                Permission matrix for Owner, Manager, Cashier, Inventory Staff with 4-digit PIN override.
+              </p>
+            </div>
+
+            <div className="bg-white/5 rounded-2xl p-3.5 border border-white/5 space-y-1">
+              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">2. Core POS Workflows</span>
+              <p className="font-semibold text-white text-xs">Sales, Returns &amp; Credit</p>
+              <p className="text-[11px] text-slate-400 leading-tight">
+                Dual-IMEI serialized sales, item restocking vs quarantine returns, credit installment plans, pre-orders.
+              </p>
+            </div>
+
+            <div className="bg-white/5 rounded-2xl p-3.5 border border-white/5 space-y-1">
+              <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">3. Inventory &amp; Logistics</span>
+              <p className="font-semibold text-white text-xs">IMEI &amp; 3-Phase RMA</p>
+              <p className="text-[11px] text-slate-400 leading-tight">
+                Serial status progression, bulk CSV import/export, barcode audit cycle counts, vendor warranty dispatch.
+              </p>
+            </div>
+
+            <div className="bg-white/5 rounded-2xl p-3.5 border border-white/5 space-y-1">
+              <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block">4. Financials &amp; Shifts</span>
+              <p className="font-semibold text-white text-xs">Daily/Annual P&amp;L Ledgers</p>
+              <p className="text-[11px] text-slate-400 leading-tight">
+                Real-COGS profit formula, cash drawer opening/closing variance, multi-account store &amp; personal wallets.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {(activeSection === 'all' || activeSection === 'store') && (
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -2403,6 +2574,15 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* In-App Interactive User Manual & SOP Reader Modal */}
+      {isManualModalOpen && (
+        <UserManualModal
+          isOpen={isManualModalOpen}
+          onClose={() => setIsManualModalOpen(false)}
+          settings={formData}
+        />
       )}
 
     </div>

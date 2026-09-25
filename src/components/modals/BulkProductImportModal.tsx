@@ -687,6 +687,12 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                 You can copy rows directly from Microsoft Excel, Google Sheets, LibreOffice Calc, or any text editor and paste them into the import box.
                 The system automatically detects your headers and delimiter (Commas or Tabs).
               </p>
+              <div className="mt-3 p-2.5 bg-white/80 rounded-xl border border-indigo-200/80 flex items-center gap-2 text-indigo-900 text-[11px] font-semibold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>
+                  <strong>Full 100% Roundtrip Compatibility:</strong> Any CSV exported from your Inventory screen (<code className="bg-indigo-100/70 px-1 py-0.5 rounded text-indigo-950">Inventory_Stock_List_*.csv</code>) can be directly copy-pasted or uploaded here without modifying any column names or order.
+                </span>
+              </div>
             </div>
 
             {/* Column Dictionary Table */}
@@ -707,75 +713,96 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-[11px]">
                     <tr>
-                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">Name</td>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">Name / Product Name</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-red-100 text-red-800 font-bold rounded">Required</span></td>
-                      <td className="py-2 px-3 font-mono text-slate-500">product, item, title, product_name</td>
-                      <td className="py-2 px-3 font-semibold text-slate-800">Apple iPhone 15 Pro Max</td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Product Name, product, item, title, product_name</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">Redmi 9A, Apple iPhone 15 Pro</td>
                       <td className="py-2 px-3 text-slate-600">Product or device model name.</td>
                     </tr>
                     <tr>
                       <td className="py-2 px-3 font-mono font-bold text-indigo-900">Brand</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
-                      <td className="py-2 px-3 font-mono text-slate-500">brand, make, manufacturer</td>
-                      <td className="py-2 px-3 font-semibold text-slate-800">Apple, Samsung, Xiaomi</td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Brand, brand_name, make, manufacturer</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">Redmi, Apple, Samsung, Ansty</td>
                       <td className="py-2 px-3 text-slate-600">Brand name (auto-detected from Name prefix if omitted).</td>
                     </tr>
                     <tr>
                       <td className="py-2 px-3 font-mono font-bold text-indigo-900">Category</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
-                      <td className="py-2 px-3 font-mono text-slate-500">type, cat, product_category</td>
-                      <td className="py-2 px-3 font-semibold text-slate-800">new_phones, used_phones, accessories, gadgets</td>
-                      <td className="py-2 px-3 text-slate-600">Defaults to new_phones or accessories based on title.</td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Category, type, cat, product_category</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">Brand new phones, Cookware, Accessories</td>
+                      <td className="py-2 px-3 text-slate-600">Automatically mapped to standard shop taxonomy.</td>
                     </tr>
                     <tr>
                       <td className="py-2 px-3 font-mono font-bold text-indigo-900">SubCategory</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
-                      <td className="py-2 px-3 font-mono text-slate-500">sub_category, subcat, item_type</td>
-                      <td className="py-2 px-3 font-semibold text-slate-800">Fast Chargers, Power Banks, Earbuds, Smartwatches</td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Subcategory, sub_category, subcat, item_type</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">Fast Charger, Screen Protector, ဟင်းချက်အိုး</td>
                       <td className="py-2 px-3 text-slate-600">Subcategory for accessories and smart gadgets.</td>
                     </tr>
                     <tr>
-                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">CostPrice</td>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">Condition</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
-                      <td className="py-2 px-3 font-mono text-slate-500">cost, cost_price, buy_price, purchase_cost</td>
-                      <td className="py-2 px-3 font-semibold text-slate-800">3200000</td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Condition, state, grade</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">Brand New (Sealed), Brand New, Used Grade A</td>
+                      <td className="py-2 px-3 text-slate-600">Device condition / grade. Defaults to Brand New.</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">Cost Price</td>
+                      <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Cost Price (Ks), CostPrice, cost, buy_price, purchase_cost</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">425000, 3200000</td>
                       <td className="py-2 px-3 text-slate-600">Supplier acquisition unit cost in Kyats.</td>
                     </tr>
                     <tr>
-                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">SellingPrice</td>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">Selling Price</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-red-100 text-red-800 font-bold rounded">Required</span></td>
-                      <td className="py-2 px-3 font-mono text-slate-500">price, selling_price, retail_price</td>
-                      <td className="py-2 px-3 font-semibold text-slate-800">3500000</td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Selling Price (Ks), SellingPrice, price, retail_price</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">479000, 3500000</td>
                       <td className="py-2 px-3 text-slate-600">Standard retail selling price in Kyats.</td>
                     </tr>
                     <tr>
                       <td className="py-2 px-3 font-mono font-bold text-indigo-900">Stock</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
-                      <td className="py-2 px-3 font-mono text-slate-500">qty, quantity, count, units</td>
-                      <td className="py-2 px-3 font-semibold text-slate-800">5</td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Stock (Units), Stock, qty, quantity, count, units</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">1, 2, 40, 50</td>
                       <td className="py-2 px-3 text-slate-600">Physical stock units available. Auto-matches IMEI count if IMEIs provided.</td>
                     </tr>
                     <tr>
-                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">RAM / ROM</td>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">Min Alert Level</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
-                      <td className="py-2 px-3 font-mono text-slate-500">ram, rom, storage, memory</td>
-                      <td className="py-2 px-3 font-semibold text-slate-800">8GB, 256GB</td>
-                      <td className="py-2 px-3 text-slate-600">Memory & Storage specifications (phones).</td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Min Alert Level, MinAlert, min_stock, alert_level</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">0, 5, 10</td>
+                      <td className="py-2 px-3 text-slate-600">Low stock warning threshold.</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">RAM / ROM / Specs</td>
+                      <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
+                      <td className="py-2 px-3 font-mono text-slate-500">RAM, ROM, Specs / Storage / Color, storage, memory</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">4GB RAM • 64GB • Black, 8GB, 256GB</td>
+                      <td className="py-2 px-3 text-slate-600">Supports dedicated RAM & ROM columns or combined Specs string.</td>
                     </tr>
                     <tr>
                       <td className="py-2 px-3 font-mono font-bold text-indigo-900">Color</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
-                      <td className="py-2 px-3 font-mono text-slate-500">color, colour, finish</td>
-                      <td className="py-2 px-3 font-semibold text-slate-800">Natural Titanium, Midnight, White</td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Color, colour, finish</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">Black, Blue, Natural Titanium, White</td>
                       <td className="py-2 px-3 text-slate-600">Product finish color.</td>
                     </tr>
                     <tr>
-                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">IMEIs</td>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">SKU / Barcode</td>
+                      <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
+                      <td className="py-2 px-3 font-mono text-slate-500">SKU, Barcode, upc, ean</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">SKU-435331, 111228795337</td>
+                      <td className="py-2 px-3 text-slate-600">Item identifiers (auto-generated if omitted).</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">Serialized IMEIs</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Phones Only</span></td>
-                      <td className="py-2 px-3 font-mono text-slate-500">imei, imeis, serials, imei_list</td>
-                      <td className="py-2 px-3 font-mono text-slate-800">358765.../358765...; 35999...</td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Serialized IMEIs, IMEIs, imei, serials, imei_list</td>
+                      <td className="py-2 px-3 font-mono text-slate-800">862675065232361; 866286085182101</td>
                       <td className="py-2 px-3 text-slate-600">
-                        Dual IMEIs separated by <code className="bg-slate-100 px-1 rounded">/</code> and multiple units separated by <code className="bg-slate-100 px-1 rounded">;</code> (Omit or leave blank for accessories & gadgets).
+                        Multiple units separated by <code className="bg-slate-100 px-1 rounded">;</code> and dual IMEIs separated by <code className="bg-slate-100 px-1 rounded">/</code>. Leave as <code className="bg-slate-100 px-1 rounded">-</code> for accessories.
                       </td>
                     </tr>
                   </tbody>
@@ -792,7 +819,16 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'smartphones_imei') || SAMPLE_CSV_TEMPLATES[0])}
+                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES[0])}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-lg border border-slate-200 transition-all cursor-pointer shadow-2xs text-[11px]"
+                  title="Download Inventory Stock List Format (Export-compatible)"
+                >
+                  <Download className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span>Stock List (Export Format)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'smartphones_imei') || SAMPLE_CSV_TEMPLATES[1])}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-lg border border-slate-200 transition-all cursor-pointer shadow-2xs text-[11px]"
                   title="Download Phones CSV Template with IMEI columns"
                 >
@@ -801,7 +837,7 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'accessories') || SAMPLE_CSV_TEMPLATES[1])}
+                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'accessories') || SAMPLE_CSV_TEMPLATES[2])}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-900 font-bold rounded-lg border border-emerald-200 transition-all cursor-pointer shadow-2xs text-[11px]"
                   title="Download Accessories CSV Template (Chargers, Cables, Cases, Power Banks)"
                 >
@@ -810,7 +846,7 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'gadgets') || SAMPLE_CSV_TEMPLATES[2])}
+                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'gadgets') || SAMPLE_CSV_TEMPLATES[3])}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-amber-50 text-amber-900 font-bold rounded-lg border border-amber-200 transition-all cursor-pointer shadow-2xs text-[11px]"
                   title="Download Smart Gadgets CSV Template (Smartwatches, TWS Earbuds, Audio)"
                 >
@@ -819,7 +855,7 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'simple_quick') || SAMPLE_CSV_TEMPLATES[3])}
+                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'simple_quick') || SAMPLE_CSV_TEMPLATES[4])}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-lg border border-slate-200 transition-all cursor-pointer shadow-2xs text-[11px]"
                   title="Download Simple Minimal CSV Template"
                 >

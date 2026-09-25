@@ -19,7 +19,9 @@ import {
   ArrowUpRight,
   Banknote,
   Wallet,
-  Building
+  Building,
+  ArrowRightLeft,
+  AlertTriangle
 } from 'lucide-react';
 import { ExpenseRecord, ExpenseCategoryItem, PaymentMethod, ShopSettings } from '../../types';
 import { 
@@ -30,6 +32,7 @@ import {
   getPaymentMethodInfo 
 } from '../../utils/formatters';
 import { StorageService } from '../../utils/storage';
+import { calculateRunningCapital } from '../../utils/capitalUtils';
 import { ExpenseCategoryModal, renderCategoryIcon } from './ExpenseCategoryModal';
 
 interface ExpensesManagerProps {
@@ -78,6 +81,41 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
   const [paymentRef, setPaymentRef] = useState('');
   const [notes, setNotes] = useState('');
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0]);
+  const [transferNotice, setTransferNotice] = useState<string | null>(null);
+
+  // Live Capital Calculation for Digital Pool deficit checks
+  const liveCapital = React.useMemo(() => {
+    const prods = StorageService.getProducts();
+    const drawer = StorageService.getCashDrawer();
+    const credits = StorageService.getCreditSales();
+    const exps = StorageService.getExpenses();
+    const sls = StorageService.getSales();
+    const pur = StorageService.getPurchases();
+    return calculateRunningCapital(prods, drawer, credits, exps, sls, undefined, pur);
+  }, [transferNotice, expenses]);
+
+  const availableDigital = liveCapital.digitalBankBalances || 0;
+  const availableDrawer = liveCapital.cashInDrawer || 0;
+  const isDigitalExpense = fundingSource === 'revenue_cash';
+  const hasDigitalDeficit = isDigitalExpense && (amount || 0) > availableDigital;
+  const digitalDeficit = hasDigitalDeficit ? (amount || 0) - availableDigital : 0;
+
+  const handleQuickTransferFromDrawer = (amountToTransfer: number) => {
+    try {
+      StorageService.recordCapitalCashTransfer({
+        from: 'cash_drawer',
+        to: 'digital_cash_pool',
+        amount: amountToTransfer,
+        digitalChannel: revenueChannel,
+        reasonNotes: `Automated transfer for expense: ${title.trim() || 'Shop Expense'}`,
+        performedBy: 'Store Cashier'
+      });
+      setTransferNotice(`Transferred ${formatCurrency(amountToTransfer, settings.currencySymbol)} from Cash Drawer to Digital Cash Pool successfully!`);
+      setTimeout(() => setTransferNotice(null), 4000);
+    } catch (err: any) {
+      alert(err?.message || 'Transfer failed');
+    }
+  };
 
   // Sync propCategories if passed
   React.useEffect(() => {
@@ -362,7 +400,7 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
               }`}
             >
               <Banknote className="w-3 h-3" />
-              <span>Cash Drawer</span>
+              <span>Cash Drawer (Physical)</span>
             </button>
             <button
               type="button"
@@ -374,7 +412,7 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
               }`}
             >
               <Wallet className="w-3 h-3" />
-              <span>Revenue Cash</span>
+              <span>Digital Cash Pool</span>
             </button>
           </div>
 
@@ -505,7 +543,7 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                             {exp.fundingSource === 'revenue_cash' ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                                 <Wallet className="w-2.5 h-2.5 text-indigo-500" />
-                                <span>Revenue Cash</span>
+                                <span>Digital Pool</span>
                                 <span className="text-indigo-300">•</span>
                                 <span className="uppercase">{exp.revenueCashChannel || payInfo.label}</span>
                               </span>
@@ -526,7 +564,7 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                         <p className="font-semibold text-slate-900">{exp.recordedBy}</p>
                         {exp.fundingSource === 'revenue_cash' ? (
                           <span className="inline-block text-[9px] text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded mt-0.5">
-                            - Remaining Cash
+                            - Digital Pool (Remaining Cash)
                           </span>
                         ) : (
                           <span className="inline-block text-[9px] text-amber-800 font-bold bg-amber-50 px-1.5 py-0.5 rounded mt-0.5">
@@ -683,7 +721,7 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                         <div className={`p-1.5 rounded-lg ${fundingSource === 'cash_drawer' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600'}`}>
                           <Banknote className="w-4 h-4" />
                         </div>
-                        <span className="font-bold text-sm text-slate-900">Cash Drawer</span>
+                        <span className="font-bold text-sm text-slate-900">Cash Drawer (Physical Cash)</span>
                       </div>
                       {fundingSource === 'cash_drawer' && (
                         <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
@@ -694,7 +732,7 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                     </p>
                   </button>
 
-                  {/* Category 2: Revenue Cash */}
+                  {/* Category 2: Digital Cash Pool */}
                   <button
                     type="button"
                     onClick={() => setFundingSource('revenue_cash')}
@@ -709,27 +747,29 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                         <div className={`p-1.5 rounded-lg ${fundingSource === 'revenue_cash' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
                           <Wallet className="w-4 h-4" />
                         </div>
-                        <span className="font-bold text-sm text-slate-900">Revenue Cash</span>
+                        <span className="font-bold text-sm text-slate-900">Digital Cash Pool (Remaining Cash)</span>
                       </div>
                       {fundingSource === 'revenue_cash' && (
                         <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" />
                       )}
                     </div>
                     <p className="text-[11px] text-slate-600 leading-snug">
-                      Deducts from <strong className="text-indigo-800">Total Remaining Cash</strong>. Counter cash drawer is NOT touched.
+                      Deducts from <strong className="text-indigo-800">Total Remaining Cash</strong> (KPay/Wave/Banks). Counter register drawer is NOT touched.
                     </p>
                   </button>
                 </div>
               </div>
 
-              {/* Sub-channel picker if Revenue Cash is chosen */}
+              {/* Sub-channel picker if Digital Cash Pool is chosen */}
               {fundingSource === 'revenue_cash' && (
-                <div className="p-3.5 bg-indigo-50/60 border border-indigo-200 rounded-xl space-y-2">
+                <div className="p-3.5 bg-indigo-50/60 border border-indigo-200 rounded-xl space-y-2.5">
                   <div className="flex items-center justify-between">
                     <label className="block font-bold text-indigo-950 text-xs">
-                      Choose Payment Channel (KPay, Wave, Bank) *
+                      Choose Digital Channel (KPay, Wave, Banks) *
                     </label>
-                    <span className="text-[10px] text-indigo-600 font-bold uppercase">Digital Accounts</span>
+                    <span className="text-[10px] text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200 font-extrabold uppercase">
+                      Pool Avail: {formatCurrency(availableDigital, settings.currencySymbol)}
+                    </span>
                   </div>
                   <select
                     value={revenueChannel}
@@ -744,6 +784,46 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                     <option value="yoma">Yoma Bank</option>
                     <option value="cash">Main Reserve Cash (Safe / Back-office cash)</option>
                   </select>
+
+                  {/* Transfer Success Notice */}
+                  {transferNotice && (
+                    <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-[11px] font-medium flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>{transferNotice}</span>
+                    </div>
+                  )}
+
+                  {/* Insufficient Digital Balance Warning with Quick Transfer */}
+                  {hasDigitalDeficit && (
+                    <div className="p-3 bg-amber-50 border-2 border-amber-300 rounded-2xl space-y-2 animate-in fade-in">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div className="text-xs">
+                          <p className="font-extrabold text-amber-900">
+                            ⚠️ Insufficient Digital Cash Pool
+                          </p>
+                          <p className="text-[11px] text-amber-800 leading-snug">
+                            Digital Cash Pool has <strong className="text-amber-950 font-mono">{formatCurrency(availableDigital, settings.currencySymbol)}</strong>, but expense amount is <strong className="text-amber-950 font-mono">{formatCurrency(amount || 0, settings.currencySymbol)}</strong> (Short by <strong className="text-rose-700 font-mono">{formatCurrency(digitalDeficit, settings.currencySymbol)}</strong>).
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="pt-1.5 border-t border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <span className="text-[11px] text-amber-800">
+                          Cash Drawer: <strong>{formatCurrency(availableDrawer, settings.currencySymbol)}</strong>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickTransferFromDrawer(digitalDeficit)}
+                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <ArrowRightLeft className="w-3.5 h-3.5" />
+                          <span>Transfer {formatCurrency(digitalDeficit, settings.currencySymbol)} from Cash Drawer</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-[11px] text-indigo-700">
                     ✓ This voucher deducts strictly from your accumulated remaining cash reserves via <strong className="font-bold uppercase">{revenueChannel}</strong>.
                   </p>
@@ -871,7 +951,7 @@ export const ExpensesManager: React.FC<ExpensesManagerProps> = ({
                 <div className="flex justify-between">
                   <span className="text-slate-500">Fund Source:</span>
                   <span className="font-bold text-slate-900">
-                    {viewingVoucher.fundingSource === 'revenue_cash' ? 'Revenue Cash (Remaining Cash)' : 'Cash Drawer (Daily Sales)'}
+                    {viewingVoucher.fundingSource === 'revenue_cash' ? 'Digital Cash Pool (Remaining Cash)' : 'Cash Drawer (Physical Cash)'}
                   </span>
                 </div>
                 <div className="flex justify-between">

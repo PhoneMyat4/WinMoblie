@@ -9,7 +9,7 @@ interface PersonalGoalModalProps {
   onSave: (goal: PersonalSavingsGoal) => void;
   goal?: PersonalSavingsGoal | null;
   settings: ShopSettings;
-  wallets: PersonalWallet[];
+  wallets?: PersonalWallet[];
 }
 
 export const PersonalGoalModal: React.FC<PersonalGoalModalProps> = ({
@@ -18,7 +18,6 @@ export const PersonalGoalModal: React.FC<PersonalGoalModalProps> = ({
   onSave,
   goal,
   settings,
-  wallets,
 }) => {
   const [title, setTitle] = useState(goal?.title || '');
   const [targetAmount, setTargetAmount] = useState(goal ? String(goal.targetAmount) : '');

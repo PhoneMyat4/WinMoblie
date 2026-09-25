@@ -240,6 +240,9 @@ export class FirestoreSyncService {
       onSaleDelete: (id) => {
         if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deleteSale(id);
       },
+      onSalesDelete: (ids) => {
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deleteSales(ids);
+      },
       onPurchaseUpsert: (purchase) => {
         if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncPurchase(purchase);
       },
@@ -1323,6 +1326,22 @@ export class FirestoreSyncService {
       this.updateStatus({ lastSyncedAt: new Date(), error: null });
     } catch (err: any) {
       console.warn('[FirestoreSync] Error deleting sale:', err?.message || err);
+    }
+  }
+
+  public async deleteSales(ids: string[]): Promise<void> {
+    if (!ids || ids.length === 0) return;
+    try {
+      const batch = writeBatch(db);
+      for (const id of ids) {
+        if (id) {
+          batch.delete(doc(db, 'sales', id));
+        }
+      }
+      await batch.commit();
+      this.updateStatus({ lastSyncedAt: new Date(), error: null });
+    } catch (err: any) {
+      console.warn('[FirestoreSync] Error deleting sales batch:', err?.message || err);
     }
   }
 

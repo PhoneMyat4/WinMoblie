@@ -18,10 +18,13 @@ import {
   Landmark,
   ShieldCheck,
   Layers,
-  ArrowUpRight
+  ArrowUpRight,
+  ArrowRightLeft
 } from 'lucide-react';
 import { MonthlyCapitalSnapshot, RunningCapitalBreakdown, AppTab, Product, Sale, ExpenseRecord } from '../../types';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency as rawFormatCurrency } from '../../utils/formatters';
+import { CashPoolTransferModal } from './CashPoolTransferModal';
+import { useFinancialPrivacy } from '../../utils/useFinancialPrivacy';
 
 interface CapitalReconciliationViewProps {
   selectedMonth: string;
@@ -70,7 +73,12 @@ export const CapitalReconciliationView: React.FC<CapitalReconciliationViewProps>
   products,
   onNavigateTab,
 }) => {
+  const [isTransferModalOpen, setIsTransferModalOpen] = React.useState(false);
   const hasSnapshot = Boolean(currentSnapshot);
+  const { formatAmount } = useFinancialPrivacy();
+
+  // Internal currency formatter that respects privacy mask
+  const formatCurrency = (amount: number, symbol?: string) => formatAmount(amount, symbol);
 
   // Accounting variance between Capital Match and P&L Net Operating Profit
   const variance = Math.abs(capitalMatchResult.netProfit - currentMonthData.netOperatingProfit);
@@ -157,19 +165,45 @@ export const CapitalReconciliationView: React.FC<CapitalReconciliationViewProps>
               <p className="text-2xl font-black text-white">
                 {formatCurrency(initialTotalCapital, currencySymbol)}
               </p>
-              <div className="text-[11px] text-slate-300 pt-2 border-t border-slate-700/60 space-y-0.5">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Initial Cash:</span>
-                  <span className="font-semibold text-white">{formatCurrency(initialCash, currencySymbol)}</span>
+              <div className="text-[11px] text-slate-300 pt-2 border-t border-slate-700/60 space-y-1">
+                <div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Initial Cash:</span>
+                    <span className="font-semibold text-white">{formatCurrency(initialCash, currencySymbol)}</span>
+                  </div>
+                  {currentSnapshot && (currentSnapshot.initialPhysicalCash !== undefined || currentSnapshot.initialDigitalCash !== undefined) && (
+                    <div className="flex justify-between text-[10px] text-amber-300/80 pl-2">
+                      <span>• Cash Drawer: {formatCurrency(currentSnapshot.initialPhysicalCash ?? initialCash, currencySymbol)}</span>
+                      <span>• Digital Pool: {formatCurrency(currentSnapshot.initialDigitalCash ?? 0, currencySymbol)}</span>
+                    </div>
+                  )}
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Initial Stock Cost:</span>
-                  <span className="font-semibold text-white">{formatCurrency(initialStock, currencySymbol)}</span>
+
+                <div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Initial Stock Cost:</span>
+                    <span className="font-semibold text-white">{formatCurrency(initialStock, currencySymbol)}</span>
+                  </div>
+                  {currentSnapshot && Boolean(currentSnapshot.initialDigitalStockValuation && currentSnapshot.initialDigitalStockValuation > 0) && (
+                    <div className="flex justify-between text-[10px] text-emerald-300/80 pl-2">
+                      <span>• Physical Stock: {formatCurrency(currentSnapshot.initialPhysicalStockValuation ?? initialStock, currencySymbol)}</span>
+                      <span>• Digital Stock: {formatCurrency(currentSnapshot.initialDigitalStockValuation ?? 0, currencySymbol)}</span>
+                    </div>
+                  )}
                 </div>
+
                 {capitalInjections > 0 && (
-                  <div className="flex justify-between text-indigo-300">
-                    <span>+ Injected Capital:</span>
-                    <span className="font-semibold">+{formatCurrency(capitalInjections, currencySymbol)}</span>
+                  <div>
+                    <div className="flex justify-between text-indigo-300">
+                      <span>+ Injected Capital:</span>
+                      <span className="font-semibold">+{formatCurrency(capitalInjections, currencySymbol)}</span>
+                    </div>
+                    {currentSnapshot && (currentSnapshot.capitalInjectionsPhysical !== undefined || currentSnapshot.capitalInjectionsDigital !== undefined) && (
+                      <div className="flex justify-between text-[10px] text-indigo-400/80 pl-2">
+                        <span>• Physical: +{formatCurrency(currentSnapshot.capitalInjectionsPhysical ?? capitalInjections, currencySymbol)}</span>
+                        <span>• Digital: +{formatCurrency(currentSnapshot.capitalInjectionsDigital ?? 0, currencySymbol)}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -193,11 +227,18 @@ export const CapitalReconciliationView: React.FC<CapitalReconciliationViewProps>
               <p className="text-2xl font-black text-emerald-400">
                 {formatCurrency(currentRunningCapital.totalRunningCapital, currencySymbol)}
               </p>
-              <div className="text-[11px] text-slate-300 pt-2 border-t border-slate-700/60 space-y-0.5">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Remaining Cash:</span>
-                  <span className="font-semibold text-white">{formatCurrency(currentRunningCapital.totalRemainingCash, currencySymbol)}</span>
+              <div className="text-[11px] text-slate-300 pt-2 border-t border-slate-700/60 space-y-1">
+                <div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Remaining Cash:</span>
+                    <span className="font-semibold text-white">{formatCurrency(currentRunningCapital.totalRemainingCash, currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between text-[10px] text-amber-300/80 pl-2">
+                    <span>• Cash Drawer: {formatCurrency(currentRunningCapital.cashInDrawer, currencySymbol)}</span>
+                    <span>• Digital Pool: {formatCurrency(currentRunningCapital.digitalBankBalances, currencySymbol)}</span>
+                  </div>
                 </div>
+
                 <div className="flex justify-between">
                   <span className="text-slate-400">Remaining Stock:</span>
                   <span className="font-semibold text-white">{formatCurrency(currentRunningCapital.remainingStockValuation, currencySymbol)}</span>
@@ -206,10 +247,19 @@ export const CapitalReconciliationView: React.FC<CapitalReconciliationViewProps>
                   <span className="text-slate-400">Receivables (Credit):</span>
                   <span className="font-semibold text-white">{formatCurrency(currentRunningCapital.accountsReceivable, currencySymbol)}</span>
                 </div>
+
                 {ownerDrawings > 0 && (
-                  <div className="flex justify-between text-amber-300">
-                    <span>+ Owner Drawings:</span>
-                    <span className="font-semibold">+{formatCurrency(ownerDrawings, currencySymbol)}</span>
+                  <div>
+                    <div className="flex justify-between text-amber-300">
+                      <span>+ Owner Drawings:</span>
+                      <span className="font-semibold">+{formatCurrency(ownerDrawings, currencySymbol)}</span>
+                    </div>
+                    {currentSnapshot && (currentSnapshot.ownerDrawingsPhysical !== undefined || currentSnapshot.ownerDrawingsDigital !== undefined) && (
+                      <div className="flex justify-between text-[10px] text-amber-400/80 pl-2">
+                        <span>• Physical: +{formatCurrency(currentSnapshot.ownerDrawingsPhysical ?? ownerDrawings, currencySymbol)}</span>
+                        <span>• Digital: +{formatCurrency(currentSnapshot.ownerDrawingsDigital ?? 0, currencySymbol)}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -351,16 +401,27 @@ export const CapitalReconciliationView: React.FC<CapitalReconciliationViewProps>
                 <p className="text-[11px] text-slate-500 font-medium">Drawer + Digital Reserves</p>
               </div>
             </div>
-            <span className="text-sm font-black text-amber-600">
-              {formatCurrency(currentRunningCapital.totalRemainingCash, currencySymbol)}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-black text-amber-600">
+                {formatCurrency(currentRunningCapital.totalRemainingCash, currencySymbol)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsTransferModalOpen(true)}
+                className="px-2 py-1 text-[10px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                title="Transfer funds between Cash Drawer & Digital Pool"
+              >
+                <ArrowRightLeft className="w-3 h-3 text-amber-700" />
+                <span>Transfer ⇄</span>
+              </button>
+            </div>
           </div>
 
           <div className="space-y-2.5 text-xs">
             <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
               <div>
-                <p className="font-bold text-slate-800">Cash Drawer (Daily Counter)</p>
-                <p className="text-[10px] text-slate-500">Physical register drawer balance</p>
+                <p className="font-bold text-slate-800">Cash Drawer (Physical Cash)</p>
+                <p className="text-[10px] text-slate-500">Physical register counter cash</p>
               </div>
               <span className="font-black text-slate-900">
                 {formatCurrency(currentRunningCapital.cashInDrawer, currencySymbol)}
@@ -369,18 +430,37 @@ export const CapitalReconciliationView: React.FC<CapitalReconciliationViewProps>
 
             <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
               <div>
-                <p className="font-bold text-slate-800">Digital & Bank Reserves</p>
-                <p className="text-[10px] text-slate-500">KPay, Wave, Bank accounts net of revenue expenses</p>
+                <p className="font-bold text-slate-800">Digital Cash Pool (KPay, Wave, Banks)</p>
+                <p className="text-[10px] text-slate-500">Digital sales net of digital expenses & PO payouts</p>
               </div>
               <span className="font-black text-slate-900">
                 {formatCurrency(currentRunningCapital.digitalBankBalances, currencySymbol)}
               </span>
             </div>
 
+            {typeof currentRunningCapital.digitalTransfersNet === 'number' && currentRunningCapital.digitalTransfersNet !== 0 && (
+              <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-amber-50/80 border border-amber-200 text-[11px]">
+                <span className="text-amber-900 font-semibold">Net Cash Transfers (Drawer ⇄ Digital):</span>
+                <span className="font-bold text-amber-950 font-mono">
+                  {currentRunningCapital.digitalTransfersNet > 0 ? '+' : ''}
+                  {formatCurrency(currentRunningCapital.digitalTransfersNet, currencySymbol)}
+                </span>
+              </div>
+            )}
+
+            {typeof currentRunningCapital.digitalPurchasesOutflow === 'number' && currentRunningCapital.digitalPurchasesOutflow > 0 && (
+              <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-indigo-50/60 border border-indigo-100 text-[11px]">
+                <span className="text-indigo-800 font-semibold">PO Payouts from Digital Pool:</span>
+                <span className="font-bold text-indigo-900">
+                  -{formatCurrency(currentRunningCapital.digitalPurchasesOutflow, currencySymbol)}
+                </span>
+              </div>
+            )}
+
             <div className="p-2.5 rounded-xl bg-amber-50/50 border border-amber-200/60 text-[11px] text-amber-800">
-              <p className="font-semibold">✓ Revenue Cash vs Drawer Safe:</p>
-              <p className="mt-0.5 text-amber-700">
-                Expenses paid from Revenue Cash deduct strictly from the digital/bank reserves without disturbing drawer reconciliation.
+              <p className="font-semibold">✓ Separate & Protected Cash Pools:</p>
+              <p className="mt-0.5 text-amber-700 leading-relaxed">
+                Expenses and supplier PO vouchers paid via KPay/Banks deduct strictly from the Digital Cash Pool under Remaining Cash, preserving daily counter drawer reconciliation.
               </p>
             </div>
           </div>
@@ -514,6 +594,13 @@ export const CapitalReconciliationView: React.FC<CapitalReconciliationViewProps>
           </div>
         </div>
       </div>
+
+      {/* Cash Pool Transfer Modal */}
+      <CashPoolTransferModal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        settings={{ currencySymbol } as any}
+      />
     </div>
   );
 };

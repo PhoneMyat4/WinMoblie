@@ -73,6 +73,7 @@ import {
 import { AnnualProfitManager } from './AnnualProfitManager';
 import { MonthlyProfitManager } from './MonthlyProfitManager';
 import { StorageService } from '../../utils/storage';
+import { useFinancialPrivacy, PrivacyToggleButton } from '../../utils/useFinancialPrivacy';
 
 interface DailyGrossProfitManagerProps {
   sales: Sale[];
@@ -115,6 +116,10 @@ export const DailyGrossProfitManager: React.FC<DailyGrossProfitManagerProps> = (
   initialScope,
 }) => {
   const [profitScope, setProfitScope] = useState<'daily' | 'monthly' | 'annual'>(initialScope || 'daily');
+  const { hideDigits, toggleHideDigits, formatAmount } = useFinancialPrivacy();
+
+  // Internal currency formatter that respects privacy mask
+  const formatCurrency = (amount: number, symbol?: string) => formatAmount(amount, symbol);
 
   useEffect(() => {
     if (initialScope) {
@@ -584,7 +589,16 @@ export const DailyGrossProfitManager: React.FC<DailyGrossProfitManagerProps> = (
           </div>
         </div>
 
-        <div className="flex items-center p-1 bg-slate-800 rounded-xl border border-slate-700/80 shadow-inner self-start sm:self-auto gap-1">
+        <div className="flex items-center flex-wrap gap-2 self-start sm:self-auto">
+          {/* Privacy Eye Toggle Button */}
+          <PrivacyToggleButton
+            hideDigits={hideDigits}
+            onToggle={toggleHideDigits}
+            variant="dark"
+            size="sm"
+          />
+
+          <div className="flex items-center p-1 bg-slate-800 rounded-xl border border-slate-700/80 shadow-inner gap-1">
           <button
             type="button"
             onClick={() => setProfitScope('daily')}
@@ -629,6 +643,7 @@ export const DailyGrossProfitManager: React.FC<DailyGrossProfitManagerProps> = (
           </button>
         </div>
       </div>
+    </div>
 
       {profitScope === 'monthly' ? (
         <MonthlyProfitManager

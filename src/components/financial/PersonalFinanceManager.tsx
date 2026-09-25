@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  Wallet, 
+  Coins, 
   Plus, 
   ArrowUpRight, 
   ArrowDownLeft, 
@@ -33,7 +33,6 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { 
-  PersonalWallet, 
   PersonalTransaction, 
   PersonalBudget, 
   PersonalSavingsGoal, 
@@ -47,15 +46,14 @@ import {
 } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { StorageService } from '../../utils/storage';
+import { calculateRunningCapital } from '../../utils/capitalUtils';
 import { PERSONAL_CATEGORIES } from '../../data/initialPersonalFinance';
 import { PersonalTransactionModal } from './personal/PersonalTransactionModal';
-import { PersonalWalletModal } from './personal/PersonalWalletModal';
-import { PersonalTransferModal } from './personal/PersonalTransferModal';
 import { PersonalGoalModal } from './personal/PersonalGoalModal';
 import { PersonalDebtModal } from './personal/PersonalDebtModal';
 import { PersonalBudgetModal } from './personal/PersonalBudgetModal';
 
-type SubView = 'overview' | 'transactions' | 'wallets' | 'business_flow' | 'budgets' | 'savings_goals' | 'debts';
+type SubView = 'overview' | 'transactions' | 'business_flow' | 'budgets' | 'savings_goals' | 'debts';
 
 interface PersonalFinanceManagerProps {
   settings: ShopSettings;
@@ -64,6 +62,7 @@ interface PersonalFinanceManagerProps {
   sales?: Sale[];
   expenses?: ExpenseRecord[];
   onNavigateTab?: (tab: AppTab) => void;
+  onRefreshStoreData?: () => void;
 }
 
 export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
@@ -73,33 +72,40 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
   sales = [],
   expenses = [],
   onNavigateTab,
+  onRefreshStoreData,
 }) => {
   // Navigation sub-tab
   const [subView, setSubView] = useState<SubView>('overview');
 
   // Core Data States
-  const [wallets, setWallets] = useState<PersonalWallet[]>(() => StorageService.getPersonalWallets());
   const [transactions, setTransactions] = useState<PersonalTransaction[]>(() => StorageService.getPersonalTransactions());
   const [budgets, setBudgets] = useState<PersonalBudget[]>(() => StorageService.getPersonalBudgets());
   const [savingsGoals, setSavingsGoals] = useState<PersonalSavingsGoal[]>(() => StorageService.getPersonalSavingsGoals());
   const [debts, setDebts] = useState<PersonalDebtIOU[]>(() => StorageService.getPersonalDebts());
 
+  // Compute live shop cash drawer & digital cash pool balances
+  const liveCapital = useMemo(() => {
+    const prods = StorageService.getProducts();
+    const drawer = StorageService.getCashDrawer();
+    const credits = StorageService.getCreditSales();
+    const exps = StorageService.getExpenses();
+    const sls = StorageService.getSales();
+    const pur = StorageService.getPurchases();
+    return calculateRunningCapital(prods, drawer, credits, exps, sls, undefined, pur);
+  }, [transactions, cashDrawer, expenses, sales]);
+
+  const liveDrawerCash = liveCapital.cashInDrawer || 0;
+  const liveDigitalPool = liveCapital.digitalBankBalances || 0;
+
   // Filters for Transactions View
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [walletFilter, setWalletFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<'this_month' | 'last_month' | 'this_year' | 'all'>('this_month');
 
   // Modals state
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<PersonalTransaction | null>(null);
   const [txInitialType, setTxInitialType] = useState<PersonalTransaction['type']>('expense');
-
-  const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
-  const [editingWallet, setEditingWallet] = useState<PersonalWallet | null>(null);
-
-  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
-  const [fromWalletTransfer, setFromWalletTransfer] = useState<string | undefined>(undefined);
 
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [editingGoal, setEditingGoal] = useState<PersonalSavingsGoal | null>(null);
@@ -113,17 +119,20 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
   // Quick Action Modal for Goal Contribution
   const [contributeGoal, setContributeGoal] = useState<PersonalSavingsGoal | null>(null);
   const [contributeAmount, setContributeAmount] = useState('');
-  const [contributeWalletId, setContributeWalletId] = useState(wallets[0]?.id || '');
 
   // Quick Action Modal for Debt Payment
   const [repayDebt, setRepayDebt] = useState<PersonalDebtIOU | null>(null);
   const [repayAmount, setRepayAmount] = useState('');
-  const [repayWalletId, setRepayWalletId] = useState(wallets[0]?.id || '');
 
-  // Total Personal Liquidity (sum of all wallets)
-  const totalNetWorth = useMemo(() => {
-    return wallets.reduce((sum, w) => sum + (Number(w.balance) || 0), 0);
-  }, [wallets]);
+  // Total Personal Net Cashflow (all-time surplus)
+  const totalPersonalNetFlow = useMemo(() => {
+    let total = 0;
+    transactions.forEach(t => {
+      if (t.type === 'income' || t.type === 'drawing_from_business') total += t.amount;
+      else if (t.type === 'expense' || t.type === 'injection_to_business') total -= t.amount;
+    });
+    return total;
+  }, [transactions]);
 
   // Current Month String (e.g., '2026-09')
   const currentMonthPrefix = useMemo(() => {
@@ -137,7 +146,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   }, []);
 
-  // Filtered transactions by selected date range, type, wallet, and search
+  // Filtered transactions by selected date range, type, and search
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       // Date filter
@@ -159,11 +168,6 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
         }
       }
 
-      // Wallet filter
-      if (walletFilter !== 'all') {
-        if (t.walletId !== walletFilter && t.toWalletId !== walletFilter) return false;
-      }
-
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -177,7 +181,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
 
       return true;
     });
-  }, [transactions, dateFilter, typeFilter, walletFilter, searchQuery, currentMonthPrefix, lastMonthPrefix]);
+  }, [transactions, dateFilter, typeFilter, searchQuery, currentMonthPrefix, lastMonthPrefix]);
 
   // Monthly stats (current month)
   const currentMonthStats = useMemo(() => {
@@ -226,38 +230,15 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
   const handleSaveTransaction = (tx: PersonalTransaction) => {
     StorageService.savePersonalTransaction(tx);
     setTransactions(StorageService.getPersonalTransactions());
-    setWallets(StorageService.getPersonalWallets());
+    onRefreshStoreData?.();
   };
 
   // Handler: Delete transaction
   const handleDeleteTransaction = (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this transaction? Wallet balances will be adjusted accordingly.')) return;
+    if (!window.confirm('Are you sure you want to delete this transaction?')) return;
     StorageService.deletePersonalTransaction(id);
     setTransactions(StorageService.getPersonalTransactions());
-    setWallets(StorageService.getPersonalWallets());
-  };
-
-  // Handler: Save wallet
-  const handleSaveWallet = (wallet: PersonalWallet) => {
-    StorageService.savePersonalWallet(wallet);
-    setWallets(StorageService.getPersonalWallets());
-  };
-
-  // Handler: Delete wallet
-  const handleDeleteWallet = (id: string) => {
-    const w = wallets.find(item => item.id === id);
-    if (!w) return;
-    if (wallets.length <= 1) {
-      alert('You must have at least one active personal wallet.');
-      return;
-    }
-    if (w.balance > 0) {
-      if (!window.confirm(`This wallet has an active balance of ${formatCurrency(w.balance, settings.currencySymbol)}. Are you sure you want to delete it?`)) return;
-    } else {
-      if (!window.confirm(`Delete wallet "${w.name}"?`)) return;
-    }
-    StorageService.deletePersonalWallet(id);
-    setWallets(StorageService.getPersonalWallets());
+    onRefreshStoreData?.();
   };
 
   // Handler: Save savings goal
@@ -279,30 +260,20 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
     const amount = parseFloat(contributeAmount.replace(/,/g, ''));
     if (isNaN(amount) || amount <= 0) return;
 
-    // Deduct from wallet if selected
-    if (contributeWalletId) {
-      const sourceW = wallets.find(w => w.id === contributeWalletId);
-      if (sourceW && sourceW.balance < amount) {
-        alert('Insufficient wallet balance to allocate this contribution.');
-        return;
-      }
-      // Record personal expense or transfer
-      const tx: PersonalTransaction = {
-        id: `ptx-goal-${Date.now()}`,
-        date: new Date().toISOString().split('T')[0],
-        time: new Date().toTimeString().slice(0, 5),
-        type: 'expense',
-        amount,
-        walletId: contributeWalletId,
-        category: 'investments',
-        title: `Goal Contribution: ${contributeGoal.title}`,
-        notes: `Allocated to savings goal "${contributeGoal.title}"`,
-        createdAt: new Date().toISOString(),
-      };
-      StorageService.savePersonalTransaction(tx);
-      setTransactions(StorageService.getPersonalTransactions());
-      setWallets(StorageService.getPersonalWallets());
-    }
+    // Record personal expense
+    const tx: PersonalTransaction = {
+      id: `ptx-goal-${Date.now()}`,
+      date: new Date().toISOString().split('T')[0],
+      time: new Date().toTimeString().slice(0, 5),
+      type: 'expense',
+      amount,
+      category: 'investments',
+      title: `Goal Contribution: ${contributeGoal.title}`,
+      notes: `Allocated to savings goal "${contributeGoal.title}"`,
+      createdAt: new Date().toISOString(),
+    };
+    StorageService.savePersonalTransaction(tx);
+    setTransactions(StorageService.getPersonalTransactions());
 
     const updatedGoal: PersonalSavingsGoal = {
       ...contributeGoal,
@@ -310,7 +281,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
       isCompleted: (contributeGoal.currentAmount + amount) >= contributeGoal.targetAmount,
       contributions: [
         ...(contributeGoal.contributions || []),
-        { id: `c-${Date.now()}`, date: new Date().toISOString().split('T')[0], amount, walletId: contributeWalletId, notes: 'Direct contribution' }
+        { id: `c-${Date.now()}`, date: new Date().toISOString().split('T')[0], amount, notes: 'Direct contribution' }
       ]
     };
     StorageService.savePersonalSavingsGoal(updatedGoal);
@@ -338,23 +309,19 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
     const amount = parseFloat(repayAmount.replace(/,/g, ''));
     if (isNaN(amount) || amount <= 0) return;
 
-    if (repayWalletId) {
-      const tx: PersonalTransaction = {
-        id: `ptx-iou-${Date.now()}`,
-        date: new Date().toISOString().split('T')[0],
-        time: new Date().toTimeString().slice(0, 5),
-        type: repayDebt.type === 'lent' ? 'income' : 'expense',
-        amount,
-        walletId: repayWalletId,
-        category: 'personal_debt_pay',
-        title: repayDebt.type === 'lent' ? `Repayment Received: ${repayDebt.personName}` : `Debt Repaid to: ${repayDebt.personName}`,
-        notes: `IOU reference: ${repayDebt.notes || ''}`,
-        createdAt: new Date().toISOString(),
-      };
-      StorageService.savePersonalTransaction(tx);
-      setTransactions(StorageService.getPersonalTransactions());
-      setWallets(StorageService.getPersonalWallets());
-    }
+    const tx: PersonalTransaction = {
+      id: `ptx-iou-${Date.now()}`,
+      date: new Date().toISOString().split('T')[0],
+      time: new Date().toTimeString().slice(0, 5),
+      type: repayDebt.type === 'lent' ? 'income' : 'expense',
+      amount,
+      category: 'personal_debt_pay',
+      title: repayDebt.type === 'lent' ? `Repayment Received: ${repayDebt.personName}` : `Debt Repaid to: ${repayDebt.personName}`,
+      notes: `IOU reference: ${repayDebt.notes || ''}`,
+      createdAt: new Date().toISOString(),
+    };
+    StorageService.savePersonalTransaction(tx);
+    setTransactions(StorageService.getPersonalTransactions());
 
     const newPaid = repayDebt.paidAmount + amount;
     const newRemaining = Math.max(0, repayDebt.totalAmount - newPaid);
@@ -365,7 +332,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
       status: newRemaining <= 0 ? 'settled' : 'active',
       payments: [
         ...(repayDebt.payments || []),
-        { id: `p-${Date.now()}`, date: new Date().toISOString().split('T')[0], amount, walletId: repayWalletId }
+        { id: `p-${Date.now()}`, date: new Date().toISOString().split('T')[0], amount }
       ]
     };
     StorageService.savePersonalDebt(updatedDebt);
@@ -397,9 +364,8 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
 
   // Export CSV of personal transactions
   const handleExportCsv = () => {
-    const headers = ['Transaction ID', 'Date', 'Time', 'Type', 'Title', 'Category', 'Amount', 'Wallet', 'Payee/Payer', 'Notes'];
+    const headers = ['Transaction ID', 'Date', 'Time', 'Type', 'Title', 'Category', 'Amount', 'Payee/Payer', 'Notes'];
     const rows = filteredTransactions.map(t => {
-      const srcW = wallets.find(w => w.id === t.walletId);
       const catMeta = PERSONAL_CATEGORIES.find(c => c.id === t.category);
       return [
         t.id,
@@ -409,7 +375,6 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
         `"${(t.title || '').replace(/"/g, '""')}"`,
         `"${catMeta?.name || t.category}"`,
         t.amount,
-        `"${srcW?.name || t.walletId}"`,
         `"${(t.recipientOrPayer || '').replace(/"/g, '""')}"`,
         `"${(t.notes || '').replace(/"/g, '""')}"`,
       ].join(',');
@@ -445,7 +410,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-3">
-              <Wallet className="w-8 h-8 text-indigo-400 shrink-0" />
+              <Coins className="w-8 h-8 text-indigo-400 shrink-0" />
               <span>Personal Finance & Wealth</span>
             </h1>
             <p className="text-sm text-slate-300 mt-1 max-w-2xl leading-relaxed">
@@ -470,15 +435,6 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
 
             <button
               type="button"
-              onClick={() => setIsTransferModalOpen(true)}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Quick Transfer</span>
-            </button>
-
-            <button
-              type="button"
               onClick={() => {
                 setEditingTx(null);
                 setTxInitialType('drawing_from_business');
@@ -496,13 +452,13 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
           <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800">
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-              Total Personal Net Worth
+              Net Accumulated Savings
             </span>
-            <div className="text-xl sm:text-2xl font-black text-white mt-1">
-              {formatCurrency(totalNetWorth, settings.currencySymbol)}
+            <div className={`text-xl sm:text-2xl font-black mt-1 ${totalPersonalNetFlow >= 0 ? 'text-white' : 'text-rose-400'}`}>
+              {formatCurrency(totalPersonalNetFlow, settings.currencySymbol)}
             </div>
             <span className="text-[11px] text-slate-400 mt-0.5 block">
-              Across {wallets.length} personal wallets & vaults
+              All-time personal cash surplus
             </span>
           </div>
 
@@ -559,7 +515,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
             }`}
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Overview & Net Worth</span>
+            <span>Overview & Dashboard</span>
           </button>
 
           <button
@@ -573,19 +529,6 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
           >
             <Tag className="w-3.5 h-3.5" />
             <span>Transactions Ledger ({transactions.length})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSubView('wallets')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-              subView === 'wallets'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Wallet className="w-3.5 h-3.5" />
-            <span>Wallets & Accounts ({wallets.length})</span>
           </button>
 
           <button
@@ -663,92 +606,10 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
       </div>
 
       {/* ========================================================= */}
-      {/* SUBVIEW 1: OVERVIEW & NET WORTH DASHBOARD                 */}
+      {/* SUBVIEW 1: OVERVIEW & DASHBOARD                           */}
       {/* ========================================================= */}
       {subView === 'overview' && (
         <div className="space-y-6">
-          
-          {/* Wallets Horizontal Cards Grid */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                <Wallet className="w-4 h-4 text-indigo-600" />
-                <span>My Accounts & Reserves</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setSubView('wallets')}
-                className="text-xs text-indigo-600 hover:text-indigo-700 font-semibold cursor-pointer"
-              >
-                View all accounts →
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5">
-              {wallets.map(wallet => {
-                const isCash = wallet.type === 'cash';
-                const isBank = wallet.type === 'bank_account';
-                const isMobile = wallet.type === 'mobile_wallet';
-                const isSavings = wallet.type === 'savings';
-
-                return (
-                  <div 
-                    key={wallet.id}
-                    className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs hover:shadow-md transition-shadow relative overflow-hidden flex flex-col justify-between"
-                  >
-                    <div 
-                      className="absolute top-0 left-0 right-0 h-1" 
-                      style={{ backgroundColor: wallet.color || '#3B82F6' }}
-                    />
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <span className="text-xs font-semibold text-slate-500 truncate">
-                          {wallet.name}
-                        </span>
-                        <div className="p-1.5 rounded-lg bg-slate-100 text-slate-600">
-                          {isCash && <CircleDollarSign className="w-3.5 h-3.5 text-emerald-600" />}
-                          {isBank && <Landmark className="w-3.5 h-3.5 text-blue-600" />}
-                          {isMobile && <Smartphone className="w-3.5 h-3.5 text-amber-600" />}
-                          {isSavings && <PiggyBank className="w-3.5 h-3.5 text-pink-600" />}
-                        </div>
-                      </div>
-
-                      <div className="text-lg font-black text-slate-900 tracking-tight">
-                        {formatCurrency(wallet.balance, settings.currencySymbol)}
-                      </div>
-
-                      {wallet.accountNumber && (
-                        <p className="text-[11px] text-slate-400 font-mono mt-0.5 truncate">
-                          {wallet.accountNumber}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 text-[11px]">
-                      {wallet.isDefault ? (
-                        <span className="text-emerald-700 font-bold flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> Default
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 capitalize">{wallet.type.replace('_', ' ')}</span>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFromWalletTransfer(wallet.id);
-                          setIsTransferModalOpen(true);
-                        }}
-                        className="text-indigo-600 hover:text-indigo-800 font-bold cursor-pointer"
-                      >
-                        Transfer →
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
 
           {/* 2-Column Grid: Category Spending Breakdown & Business Flow Alert */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -858,7 +719,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-amber-200/60 flex items-center justify-between">
+              <div className="mt-4 pt-3 border-t border-amber-200/60 grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -866,9 +727,22 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                     setTxInitialType('drawing_from_business');
                     setIsTxModalOpen(true);
                   }}
-                  className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors text-center cursor-pointer"
+                  className="py-2 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors text-center cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  + Record Drawing or Injection
+                  <TrendingDown className="w-3.5 h-3.5" />
+                  <span>Draw Money</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingTx(null);
+                    setTxInitialType('injection_to_business');
+                    setIsTxModalOpen(true);
+                  }}
+                  className="py-2 px-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors text-center cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  <span>Deposit Money</span>
                 </button>
               </div>
             </div>
@@ -892,8 +766,6 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
 
             <div className="divide-y divide-slate-100">
               {transactions.slice(0, 5).map(tx => {
-                const srcW = wallets.find(w => w.id === tx.walletId);
-                const destW = tx.toWalletId ? wallets.find(w => w.id === tx.toWalletId) : null;
                 const catMeta = PERSONAL_CATEGORIES.find(c => c.id === tx.category);
 
                 const isExpense = tx.type === 'expense' || tx.type === 'injection_to_business';
@@ -922,20 +794,16 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                         <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2">
                           <span>{formatDate(tx.date)} {tx.time}</span>
                           <span>•</span>
-                          <span className="text-slate-600">{catMeta?.name || tx.category}</span>
-                          <span>•</span>
-                          <span className="font-medium text-slate-500">
-                            {tx.type === 'transfer' ? `${srcW?.name} → ${destW?.name}` : srcW?.name}
-                          </span>
+                          <span className="text-slate-600 font-medium">{catMeta?.name || tx.category}</span>
                         </div>
                       </div>
                     </div>
 
                     <div className="text-right shrink-0">
                       <div className={`font-black text-sm ${
-                        isExpense ? 'text-rose-600' : isIncome ? 'text-emerald-600' : 'text-indigo-600'
+                        isExpense ? 'text-rose-600' : 'text-emerald-600'
                       }`}>
-                        {isExpense ? '-' : isIncome ? '+' : ''}{formatCurrency(tx.amount, settings.currencySymbol)}
+                        {isExpense ? '-' : '+'}{formatCurrency(tx.amount, settings.currencySymbol)}
                       </div>
                     </div>
                   </div>
@@ -973,7 +841,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
               <select
                 value={dateFilter}
                 onChange={(e) => setDateFilter(e.target.value as any)}
-                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-indigo-500 font-medium"
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-indigo-500 font-medium cursor-pointer"
               >
                 <option value="this_month">This Month</option>
                 <option value="last_month">Last Month</option>
@@ -985,27 +853,12 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
               <select
                 value={typeFilter}
                 onChange={(e) => setTypeFilter(e.target.value)}
-                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-indigo-500 font-medium"
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-indigo-500 font-medium cursor-pointer"
               >
                 <option value="all">All Types</option>
                 <option value="expense">Expenses Only</option>
                 <option value="income">Income Only</option>
-                <option value="transfer">Transfers Only</option>
                 <option value="business">Business Draw / Inject</option>
-              </select>
-
-              {/* Wallet Filter */}
-              <select
-                value={walletFilter}
-                onChange={(e) => setWalletFilter(e.target.value)}
-                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-indigo-500 font-medium"
-              >
-                <option value="all">All Wallets</option>
-                {wallets.map(w => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
               </select>
             </div>
 
@@ -1038,7 +891,6 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                     <th className="py-3 px-4">Type</th>
                     <th className="py-3 px-4">Title / Description</th>
                     <th className="py-3 px-4">Category</th>
-                    <th className="py-3 px-4">Wallet / Account</th>
                     <th className="py-3 px-4 text-right">Amount</th>
                     <th className="py-3 px-4 text-center">Actions</th>
                   </tr>
@@ -1046,16 +898,13 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-12 text-center text-slate-400">
+                      <td colSpan={6} className="py-12 text-center text-slate-400">
                         No personal transactions found matching the selected criteria.
                       </td>
                     </tr>
                   ) : (
                     filteredTransactions.map(tx => {
-                      const srcW = wallets.find(w => w.id === tx.walletId);
-                      const destW = tx.toWalletId ? wallets.find(w => w.id === tx.toWalletId) : null;
                       const catMeta = PERSONAL_CATEGORIES.find(c => c.id === tx.category);
-
                       const isExpense = tx.type === 'expense' || tx.type === 'injection_to_business';
                       const isIncome = tx.type === 'income' || tx.type === 'drawing_from_business';
 
@@ -1072,17 +921,14 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                                 ? 'bg-rose-50 text-rose-700 border border-rose-200'
                                 : tx.type === 'income'
                                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : tx.type === 'transfer'
-                                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                    : tx.type === 'drawing_from_business'
-                                      ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                                      : 'bg-orange-50 text-orange-800 border border-orange-200'
+                                  : tx.type === 'drawing_from_business'
+                                    ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                    : 'bg-orange-50 text-orange-800 border border-orange-200'
                             }`}>
                               {tx.type === 'drawing_from_business' && 'Draw from Shop'}
                               {tx.type === 'injection_to_business' && 'Inject to Shop'}
                               {tx.type === 'expense' && 'Expense'}
                               {tx.type === 'income' && 'Income'}
-                              {tx.type === 'transfer' && 'Transfer'}
                             </span>
                           </td>
 
@@ -1108,23 +954,11 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                             </span>
                           </td>
 
-                          <td className="py-3 px-4 whitespace-nowrap">
-                            <div className="font-medium text-slate-800">
-                              {tx.type === 'transfer' ? (
-                                <span className="flex items-center gap-1 text-indigo-700 font-bold">
-                                  {srcW?.name} <ArrowRightLeft className="w-3 h-3" /> {destW?.name}
-                                </span>
-                              ) : (
-                                srcW?.name || tx.walletId
-                              )}
-                            </div>
-                          </td>
-
                           <td className="py-3 px-4 text-right whitespace-nowrap">
                             <span className={`font-black text-sm ${
-                              isExpense ? 'text-rose-600' : isIncome ? 'text-emerald-600' : 'text-indigo-600'
+                              isExpense ? 'text-rose-600' : 'text-emerald-600'
                             }`}>
-                              {isExpense ? '-' : isIncome ? '+' : ''}{formatCurrency(tx.amount, settings.currencySymbol)}
+                              {isExpense ? '-' : '+'}{formatCurrency(tx.amount, settings.currencySymbol)}
                             </span>
                           </td>
 
@@ -1163,113 +997,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
       )}
 
       {/* ========================================================= */}
-      {/* SUBVIEW 3: WALLETS & ACCOUNTS                             */}
-      {/* ========================================================= */}
-      {subView === 'wallets' && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-bold text-slate-800">Personal Wallets & Accounts</h2>
-              <p className="text-xs text-slate-500">Manage bank accounts, digital wallets, cash in safe, and savings vaults</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setEditingWallet(null);
-                setIsWalletModalOpen(true);
-              }}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>+ Add New Wallet</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {wallets.map(wallet => (
-              <div 
-                key={wallet.id}
-                className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs relative overflow-hidden flex flex-col justify-between"
-              >
-                <div 
-                  className="absolute top-0 left-0 right-0 h-1.5" 
-                  style={{ backgroundColor: wallet.color || '#3B82F6' }}
-                />
-
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                      {wallet.type.replace('_', ' ')}
-                    </span>
-                    {wallet.isDefault && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        Default Primary
-                      </span>
-                    )}
-                  </div>
-
-                  <h3 className="text-base font-bold text-slate-900 mb-1">
-                    {wallet.name}
-                  </h3>
-
-                  <div className="text-2xl font-black text-slate-900 tracking-tight mt-2">
-                    {formatCurrency(wallet.balance, settings.currencySymbol)}
-                  </div>
-
-                  {wallet.accountNumber && (
-                    <p className="text-xs text-slate-500 font-mono mt-1">
-                      Account / Phone: {wallet.accountNumber}
-                    </p>
-                  )}
-
-                  {wallet.notes && (
-                    <p className="text-xs text-slate-400 mt-2 italic">
-                      "{wallet.notes}"
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingWallet(wallet);
-                        setIsWalletModalOpen(true);
-                      }}
-                      className="text-xs font-semibold text-slate-600 hover:text-indigo-600 cursor-pointer"
-                    >
-                      Edit
-                    </button>
-                    <span>•</span>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteWallet(wallet.id)}
-                      className="text-xs font-semibold text-rose-500 hover:text-rose-700 cursor-pointer"
-                    >
-                      Delete
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFromWalletTransfer(wallet.id);
-                      setIsTransferModalOpen(true);
-                    }}
-                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold cursor-pointer transition-colors"
-                  >
-                    Transfer Funds →
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* SUBVIEW 4: STORE EQUITY & DRAWINGS                        */}
+      {/* SUBVIEW: STORE EQUITY & DRAWINGS (BUSINESS FLOW)          */}
       {/* ========================================================= */}
       {subView === 'business_flow' && (
         <div className="space-y-6">
@@ -1284,10 +1012,28 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                 </h3>
                 <p className="text-xs text-amber-800 mt-1 max-w-3xl leading-relaxed">
                   Every retail entrepreneur needs to separate business capital from personal living money.
-                  When you take profit withdrawals (Drawings), it is recorded here and can automatically deduct from store cash drawer/expenses.
-                  When you inject emergency personal cash into the store to buy inventory, it counts as an Owner Capital Injection.
+                  When you take profit withdrawals (Drawings), it can deduct from the store's physical cash drawer or digital cash pool.
+                  When you inject emergency personal cash into the store to buy inventory, it can deposit into physical cash or digital cash pool.
                 </p>
-                <div className="flex items-center gap-3 mt-4">
+
+                {/* Live Store Balances Indicator */}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="px-3 py-1.5 bg-amber-100/80 border border-amber-300/80 rounded-xl flex items-center gap-2 text-xs">
+                    <span className="text-amber-800 font-semibold">🪙 Store Cash Drawer:</span>
+                    <strong className="font-mono font-bold text-amber-950">
+                      {formatCurrency(liveDrawerCash, settings.currencySymbol)}
+                    </strong>
+                  </div>
+
+                  <div className="px-3 py-1.5 bg-indigo-100/80 border border-indigo-300/80 rounded-xl flex items-center gap-2 text-xs">
+                    <span className="text-indigo-800 font-semibold">📱 Digital Cash Pool:</span>
+                    <strong className="font-mono font-bold text-indigo-950">
+                      {formatCurrency(liveDigitalPool, settings.currencySymbol)}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 mt-4">
                   <button
                     type="button"
                     onClick={() => {
@@ -1295,9 +1041,23 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                       setTxInitialType('drawing_from_business');
                       setIsTxModalOpen(true);
                     }}
-                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors cursor-pointer"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
                   >
-                    + Record Owner Drawing / Injection
+                    <TrendingDown className="w-3.5 h-3.5" />
+                    <span>Draw Money from Shop</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingTx(null);
+                      setTxInitialType('injection_to_business');
+                      setIsTxModalOpen(true);
+                    }}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span>Deposit Money into Shop</span>
                   </button>
                 </div>
               </div>
@@ -1319,8 +1079,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                     <th className="py-2.5 px-4">Date</th>
                     <th className="py-2.5 px-4">Flow Type</th>
                     <th className="py-2.5 px-4">Memo / Reason</th>
-                    <th className="py-2.5 px-4">Personal Wallet</th>
-                    <th className="py-2.5 px-4">Store Reconciliation</th>
+                    <th className="py-2.5 px-4">Store Channel / Source</th>
                     <th className="py-2.5 px-4 text-right">Amount</th>
                   </tr>
                 </thead>
@@ -1328,7 +1087,6 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                   {transactions
                     .filter(t => t.type === 'drawing_from_business' || t.type === 'injection_to_business')
                     .map(tx => {
-                      const w = wallets.find(item => item.id === tx.walletId);
                       const isDraw = tx.type === 'drawing_from_business';
 
                       return (
@@ -1345,11 +1103,16 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                             <span className="font-bold text-slate-800">{tx.title}</span>
                             {tx.notes && <p className="text-[11px] text-slate-500 italic mt-0.5">"{tx.notes}"</p>}
                           </td>
-                          <td className="py-3 px-4 text-slate-700 font-medium">{w?.name || tx.walletId}</td>
                           <td className="py-3 px-4">
                             {tx.syncWithBusiness ? (
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                Synced with Store Ledger
+                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                tx.businessFundingSource === 'digital_cash_pool'
+                                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                  : 'bg-amber-50 text-amber-800 border-amber-200'
+                              }`}>
+                                {tx.businessFundingSource === 'digital_cash_pool' 
+                                  ? `📱 Digital Pool [${(tx.digitalChannel || 'Bank').toUpperCase()}]`
+                                  : '🪙 Cash Drawer (Physical)'}
                               </span>
                             ) : (
                               <span className="text-slate-400 text-[11px]">Unlinked / Private</span>
@@ -1757,40 +1520,13 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
           isOpen={isTxModalOpen}
           onClose={() => setIsTxModalOpen(false)}
           onSave={handleSaveTransaction}
-          wallets={wallets}
           settings={settings}
           initialType={txInitialType}
           editingTransaction={editingTx}
         />
       )}
 
-      {/* 2. Wallet Modal */}
-      {isWalletModalOpen && (
-        <PersonalWalletModal
-          isOpen={isWalletModalOpen}
-          onClose={() => setIsWalletModalOpen(false)}
-          onSave={handleSaveWallet}
-          wallet={editingWallet}
-          settings={settings}
-        />
-      )}
-
-      {/* 3. Inter-Wallet Transfer Modal */}
-      {isTransferModalOpen && (
-        <PersonalTransferModal
-          isOpen={isTransferModalOpen}
-          onClose={() => {
-            setIsTransferModalOpen(false);
-            setFromWalletTransfer(undefined);
-          }}
-          onSave={handleSaveTransaction}
-          wallets={wallets}
-          settings={settings}
-          initialFromWalletId={fromWalletTransfer}
-        />
-      )}
-
-      {/* 4. Goal Modal */}
+      {/* 2. Goal Modal */}
       {isGoalModalOpen && (
         <PersonalGoalModal
           isOpen={isGoalModalOpen}
@@ -1798,11 +1534,10 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
           onSave={handleSaveGoal}
           goal={editingGoal}
           settings={settings}
-          wallets={wallets}
         />
       )}
 
-      {/* 5. Debt Modal */}
+      {/* 3. Debt Modal */}
       {isDebtModalOpen && (
         <PersonalDebtModal
           isOpen={isDebtModalOpen}
@@ -1813,7 +1548,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
         />
       )}
 
-      {/* 6. Budget Modal */}
+      {/* 4. Budget Modal */}
       {isBudgetModalOpen && (
         <PersonalBudgetModal
           isOpen={isBudgetModalOpen}
@@ -1824,7 +1559,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
         />
       )}
 
-      {/* 7. Quick Goal Contribution Modal */}
+      {/* 5. Quick Goal Contribution Modal */}
       {contributeGoal && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl border border-slate-200 p-5 animate-in fade-in zoom-in-95">
@@ -1832,7 +1567,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
               Deposit to: {contributeGoal.title}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Add savings contribution from one of your personal accounts
+              Add savings contribution towards this target
             </p>
 
             <form onSubmit={handleContributeGoalSubmit} className="mt-4 space-y-3">
@@ -1850,23 +1585,6 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                   placeholder="e.g., 200,000"
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500"
                 />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Source Wallet
-                </label>
-                <select
-                  value={contributeWalletId}
-                  onChange={(e) => setContributeWalletId(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-emerald-500"
-                >
-                  {wallets.map(w => (
-                    <option key={w.id} value={w.id}>
-                      {w.name} ({formatCurrency(w.balance, settings.currencySymbol)})
-                    </option>
-                  ))}
-                </select>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
@@ -1889,7 +1607,7 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
         </div>
       )}
 
-      {/* 8. Quick Repay Debt Modal */}
+      {/* 6. Quick Repay Debt Modal */}
       {repayDebt && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl border border-slate-200 p-5 animate-in fade-in zoom-in-95">
@@ -1915,23 +1633,6 @@ export const PersonalFinanceManager: React.FC<PersonalFinanceManagerProps> = ({
                   onChange={(e) => setRepayAmount(e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500"
                 />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Affected Wallet
-                </label>
-                <select
-                  value={repayWalletId}
-                  onChange={(e) => setRepayWalletId(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-800 focus:ring-2 focus:ring-amber-500"
-                >
-                  {wallets.map(w => (
-                    <option key={w.id} value={w.id}>
-                      {w.name} ({formatCurrency(w.balance, settings.currencySymbol)})
-                    </option>
-                  ))}
-                </select>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">

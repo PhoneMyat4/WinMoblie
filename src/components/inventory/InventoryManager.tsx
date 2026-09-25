@@ -32,7 +32,18 @@ import {
   FileSpreadsheet,
   ShieldAlert
 } from 'lucide-react';
-import { Product, ProductCategory, ShopSettings, DamageLog } from '../../types';
+import { 
+  Product, 
+  ProductCategory, 
+  ShopSettings, 
+  DamageLog,
+  Sale,
+  PurchaseRecord,
+  StockAdjustment,
+  StockAuditSession,
+  PriceChangeRecord,
+  StaffUser
+} from '../../types';
 import { formatCurrency, formatImei, getCategoryLabel, getConditionLabel } from '../../utils/formatters';
 import { getColorDotHex } from '../../utils/variantUtils';
 import { exportToCsv } from '../../utils/reportUtils';
@@ -43,6 +54,7 @@ import { BarcodeLabelModal } from '../modals/BarcodeLabelModal';
 import { BulkProductImportModal } from '../modals/BulkProductImportModal';
 import { QuarantineReportModal } from './QuarantineReportModal';
 import { QuarantineManagerModal } from './QuarantineManagerModal';
+import { WholeInventoryLogModal } from './WholeInventoryLogModal';
 import { ColumnVisibilityFilter, ColumnDefinition } from '../common/ColumnVisibilityFilter';
 import { canonicalCategory, isPhoneCategory, CANONICAL_CATEGORIES } from '../../data/categoryTaxonomy';
 
@@ -60,6 +72,13 @@ const INVENTORY_COLUMNS: ColumnDefinition[] = [
 interface InventoryManagerProps {
   products: Product[];
   settings: ShopSettings;
+  sales?: Sale[];
+  purchases?: PurchaseRecord[];
+  stockAdjustments?: StockAdjustment[];
+  stockAudits?: StockAuditSession[];
+  priceChanges?: PriceChangeRecord[];
+  damageLogs?: DamageLog[];
+  staffUsers?: StaffUser[];
   onSaveProduct: (product: Product) => void;
   onDeleteProduct: (id: string) => void;
   onOpenProductHistory?: (product: Product) => void;
@@ -72,6 +91,13 @@ interface InventoryManagerProps {
 export const InventoryManager: React.FC<InventoryManagerProps> = ({
   products,
   settings,
+  sales,
+  purchases,
+  stockAdjustments,
+  stockAudits,
+  priceChanges,
+  damageLogs: initialDamageLogs,
+  staffUsers,
   onSaveProduct,
   onDeleteProduct,
   onOpenProductHistory,
@@ -93,6 +119,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   const [barcodeModalTarget, setBarcodeModalTarget] = useState<{ product: Product; imei?: string } | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState<boolean>(false);
+  const [isWholeLogModalOpen, setIsWholeLogModalOpen] = useState<boolean>(false);
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState<boolean>(false);
   const categoryDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -525,70 +552,69 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   };
 
   const handleExportCsv = () => {
-    const headers: string[] = [];
-
-    if (visibleColumns.item_model !== false) {
-      headers.push('Product Name', 'SKU', 'Brand', 'Barcode', 'Specs / Storage / Color');
-    }
-    if (visibleColumns.category_condition !== false) {
-      headers.push('Category', 'Subcategory', 'Condition');
-    }
-    if (visibleColumns.cost_price !== false) {
-      headers.push(`Cost Price (${settings.currencySymbol})`);
-    }
-    if (visibleColumns.selling_price !== false) {
-      headers.push(`Selling Price (${settings.currencySymbol})`);
-    }
-    if (visibleColumns.margin !== false) {
-      headers.push('Margin %', `Profit Per Unit (${settings.currencySymbol})`);
-    }
-    if (visibleColumns.stock_level !== false) {
-      headers.push('Stock (Units)', 'Min Alert Level', 'Stock Status');
-    }
-    if (visibleColumns.imei_serials !== false) {
-      headers.push('IMEI Count', 'Serialized IMEIs');
-    }
+    // Import-first, fully-ordered inventory stock list format
+    // Matches bulk import schema for 100% roundtrip compatibility
+    const headers = [
+      'Product Name',
+      'Brand',
+      'Category',
+      'Subcategory',
+      'Condition',
+      `Cost Price (${settings.currencySymbol})`,
+      `Selling Price (${settings.currencySymbol})`,
+      'Stock (Units)',
+      'Min Alert Level',
+      'RAM',
+      'ROM',
+      'Color',
+      'Specs / Storage / Color',
+      'SKU',
+      'Barcode',
+      'Serialized IMEIs',
+      'Warranty (Months)',
+      'Margin %',
+      `Profit Per Unit (${settings.currencySymbol})`,
+      'Stock Status',
+    ];
 
     const rows = filteredProducts.map((p) => {
-      const row: (string | number)[] = [];
+      const isPhone = isPhoneCategory(p.category);
+      const specSummary = [
+        p.ram && p.ram !== '-' ? `${p.ram} RAM` : null,
+        p.rom || p.storage,
+        p.color,
+      ].filter(Boolean).join(' • ');
 
-      if (visibleColumns.item_model !== false) {
-        const specSummary = [
-          p.ram ? `${p.ram} RAM` : null,
-          p.rom || p.storage,
-          p.color,
-        ].filter(Boolean).join(' • ');
+      const margin = p.sellingPrice > 0 ? (((p.sellingPrice - p.costPrice) / p.sellingPrice) * 100).toFixed(1) + '%' : '0.0%';
+      const profit = p.sellingPrice - p.costPrice;
+      const minAlert = typeof p.minStockAlert === 'number' ? p.minStockAlert : 0;
+      const isLow = minAlert > 0 ? p.stock <= minAlert : false;
+      const status = p.stock <= 0 ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
+      const imeis = p.imeiList && p.imeiList.length > 0 ? p.imeiList.join('; ') : '-';
+      const warranty = typeof p.warrantyMonths === 'number' ? p.warrantyMonths : (isPhone ? 12 : 6);
 
-        row.push(p.name, p.sku, p.brand || '-', p.barcode || '-', specSummary || '-');
-      }
-      if (visibleColumns.category_condition !== false) {
-        row.push(getCategoryLabel(p.category), p.subCategory || '-', getConditionLabel(p.condition).label);
-      }
-      if (visibleColumns.cost_price !== false) {
-        row.push(p.costPrice);
-      }
-      if (visibleColumns.selling_price !== false) {
-        row.push(p.sellingPrice);
-      }
-      if (visibleColumns.margin !== false) {
-        const margin = p.sellingPrice > 0 ? (((p.sellingPrice - p.costPrice) / p.sellingPrice) * 100).toFixed(1) + '%' : '0.0%';
-        const profit = p.sellingPrice - p.costPrice;
-        row.push(margin, profit);
-      }
-      if (visibleColumns.stock_level !== false) {
-        const minAlert = typeof p.minStockAlert === 'number' ? p.minStockAlert : 0;
-        const isLow = minAlert > 0 ? p.stock <= minAlert : false;
-        const status = p.stock <= 0 ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
-        row.push(p.stock, p.minStockAlert, status);
-      }
-      if (visibleColumns.imei_serials !== false) {
-        row.push(
-          p.imeiList ? p.imeiList.length : 0,
-          p.imeiList && p.imeiList.length > 0 ? p.imeiList.join('; ') : '-'
-        );
-      }
-
-      return row;
+      return [
+        p.name,
+        p.brand || '-',
+        getCategoryLabel(p.category),
+        p.subCategory || '-',
+        getConditionLabel(p.condition).label,
+        p.costPrice,
+        p.sellingPrice,
+        p.stock,
+        minAlert,
+        p.ram || '-',
+        p.rom || p.storage || '-',
+        p.color || '-',
+        specSummary || '-',
+        p.sku,
+        p.barcode || '-',
+        imeis,
+        warranty,
+        margin,
+        profit,
+        status,
+      ];
     });
 
     exportToCsv('Inventory_Stock_List', headers, rows);
@@ -614,7 +640,17 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             <Package className="w-4 h-4 text-indigo-500" />
           </div>
           <p className="text-2xl font-black text-slate-900">{totalUnits}</p>
-          <p className="text-[11px] text-slate-500 mt-1">{products.length} distinct product lines</p>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-[11px] text-slate-500">{products.length} product lines</span>
+            <button
+              type="button"
+              onClick={() => setIsWholeLogModalOpen(true)}
+              className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+              title="Open dedicated whole inventory audit & movement log"
+            >
+              View Log &rarr;
+            </button>
+          </div>
         </div>
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
@@ -780,6 +816,17 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>Bulk Import</span>
+          </button>
+
+          <button
+            id="open-whole-inventory-log-btn"
+            type="button"
+            onClick={() => setIsWholeLogModalOpen(true)}
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-gradient-to-r from-indigo-50 to-purple-50 hover:from-indigo-100 hover:to-purple-100 text-indigo-950 font-bold text-xs rounded-xl border border-indigo-200 shadow-2xs transition-all cursor-pointer"
+            title="Dedicated Window: Master chronological audit log of all inventory movements, price changes, sales, and quarantines"
+          >
+            <History className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span>Whole Inventory Log</span>
           </button>
 
           {onClearAllProducts && safeProducts.length > 0 && (
@@ -1410,7 +1457,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               type="button"
               onClick={handleExportCsv}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 shadow-2xs transition-colors cursor-pointer"
-              title="Export filtered items with visible columns to CSV"
+              title="Export complete inventory stock list in import-ready CSV format (compatible with Bulk Import)"
             >
               <Download className="w-3.5 h-3.5 text-slate-500" />
               <span>Export CSV</span>
@@ -1950,6 +1997,29 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             const refreshed = StorageService.getProducts();
             if (refreshed.length > 0) {
               onSaveProduct(refreshed[0]); // Triggers parent state refresh
+            }
+          }}
+        />
+      )}
+
+      {/* Whole Store Inventory Activity & Audit Trail Log Modal */}
+      {isWholeLogModalOpen && (
+        <WholeInventoryLogModal
+          isOpen={isWholeLogModalOpen}
+          onClose={() => setIsWholeLogModalOpen(false)}
+          products={products}
+          settings={settings}
+          sales={sales}
+          purchases={purchases}
+          stockAdjustments={stockAdjustments}
+          stockAudits={stockAudits}
+          priceChanges={priceChanges}
+          damageLogs={damageLogs}
+          staffUsers={staffUsers}
+          onOpenProductHistory={(prod) => {
+            setIsWholeLogModalOpen(false);
+            if (onOpenProductHistory) {
+              onOpenProductHistory(prod);
             }
           }}
         />

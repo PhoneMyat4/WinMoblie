@@ -39,6 +39,7 @@ import {
   Info,
   PlusCircle,
   MinusCircle,
+  Lock,
   X
 } from 'lucide-react';
 import { 
@@ -70,6 +71,7 @@ import { canonicalCategory, CANONICAL_CATEGORIES } from '../../data/categoryTaxo
 import { StorageService } from '../../utils/storage';
 import { calculateRunningCapital, calculateCapitalMatchNetProfit } from '../../utils/capitalUtils';
 import { CapitalReconciliationView } from './CapitalReconciliationView';
+import { useFinancialPrivacy, PrivacyToggleButton } from '../../utils/useFinancialPrivacy';
 
 export interface MonthlyProfitManagerProps {
   sales: Sale[];
@@ -109,6 +111,10 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
   onNavigateTab,
 }) => {
   const currencySymbol = settings?.currencySymbol || 'Ks';
+  const { hideDigits, toggleHideDigits, formatAmount } = useFinancialPrivacy();
+
+  // Internal currency formatter that respects privacy mask
+  const formatCurrency = (amount: number, symbol?: string) => formatAmount(amount, symbol);
 
   // Current month default in YYYY-MM format
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
@@ -129,15 +135,26 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
     StorageService.getMonthlyCapitalSnapshots()
   );
   const [isCapitalModalOpen, setIsCapitalModalOpen] = useState(false);
-  const [formInitialCash, setFormInitialCash] = useState<number>(0);
-  const [formInitialStock, setFormInitialStock] = useState<number>(0);
-  const [formInjections, setFormInjections] = useState<number>(0);
-  const [formDrawings, setFormDrawings] = useState<number>(0);
+  
+  // Physical & Digital breakdowns for Starting Snapshot
+  const [formInitialPhysicalCash, setFormInitialPhysicalCash] = useState<number>(0);
+  const [formInitialDigitalCash, setFormInitialDigitalCash] = useState<number>(0);
+
+  const [formInitialPhysicalStock, setFormInitialPhysicalStock] = useState<number>(0);
+  const [formInitialDigitalStock, setFormInitialDigitalStock] = useState<number>(0);
+
+  const [formInjectionsPhysical, setFormInjectionsPhysical] = useState<number>(0);
+  const [formInjectionsDigital, setFormInjectionsDigital] = useState<number>(0);
+
+  const [formDrawingsPhysical, setFormDrawingsPhysical] = useState<number>(0);
+  const [formDrawingsDigital, setFormDrawingsDigital] = useState<number>(0);
+
   const [formNotes, setFormNotes] = useState<string>('');
 
-  // Cash Drawer & Credit Sales for Balance Sheet calculations
+  // Cash Drawer, Purchases & Credit Sales for Balance Sheet calculations
   const cashDrawer = useMemo(() => StorageService.getCashDrawer(), []);
   const creditSales = useMemo(() => StorageService.getCreditSales(), []);
+  const purchases = useMemo(() => StorageService.getPurchases(), []);
 
   // Available Years extracted from sales and expenses
   const availableYears = useMemo(() => {
@@ -271,8 +288,8 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
 
   // Live Running Capital Breakdown for the selected month
   const currentRunningCapital = useMemo(() => {
-    return calculateRunningCapital(products, cashDrawer, creditSales, expenses, sales, selectedMonth);
-  }, [products, cashDrawer, creditSales, expenses, sales, selectedMonth]);
+    return calculateRunningCapital(products, cashDrawer, creditSales, expenses, sales, selectedMonth, purchases);
+  }, [products, cashDrawer, creditSales, expenses, sales, selectedMonth, purchases]);
 
   // Active snapshot for the selected month
   const currentSnapshot = useMemo(() => {
@@ -298,33 +315,89 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
 
   // Handlers for starting capital snapshot modal
   const handleOpenCapitalModal = () => {
+    // Initial Physical Stock Valuation is strictly locked to actual physical inventory at unit cost
+    const actualStockCost = currentRunningCapital.remainingStockValuation;
     if (currentSnapshot) {
-      setFormInitialCash(currentSnapshot.initialCash);
-      setFormInitialStock(currentSnapshot.initialStockValuation);
-      setFormInjections(currentSnapshot.capitalInjections || 0);
-      setFormDrawings(currentSnapshot.ownerDrawings || 0);
+      setFormInitialPhysicalCash(
+        currentSnapshot.initialPhysicalCash !== undefined 
+          ? currentSnapshot.initialPhysicalCash 
+          : (currentSnapshot.initialCash || 0)
+      );
+      setFormInitialDigitalCash(currentSnapshot.initialDigitalCash || 0);
+
+      setFormInitialPhysicalStock(actualStockCost);
+      setFormInitialDigitalStock(currentSnapshot.initialDigitalStockValuation || 0);
+
+      setFormInjectionsPhysical(
+        currentSnapshot.capitalInjectionsPhysical !== undefined
+          ? currentSnapshot.capitalInjectionsPhysical
+          : (currentSnapshot.capitalInjections || 0)
+      );
+      setFormInjectionsDigital(currentSnapshot.capitalInjectionsDigital || 0);
+
+      setFormDrawingsPhysical(
+        currentSnapshot.ownerDrawingsPhysical !== undefined
+          ? currentSnapshot.ownerDrawingsPhysical
+          : (currentSnapshot.ownerDrawings || 0)
+      );
+      setFormDrawingsDigital(currentSnapshot.ownerDrawingsDigital || 0);
+
       setFormNotes(currentSnapshot.notes || '');
     } else {
-      // Auto-suggest using live drawer float and live stock valuation
-      setFormInitialCash(cashDrawer?.openingFloat || cashDrawer?.openingBalance || 0);
-      setFormInitialStock(currentRunningCapital.remainingStockValuation);
-      setFormInjections(0);
-      setFormDrawings(0);
+      // Auto-suggest using live drawer float and live digital cash pool
+      setFormInitialPhysicalCash(cashDrawer?.openingFloat || cashDrawer?.openingBalance || currentRunningCapital.cashInDrawer || 0);
+      setFormInitialDigitalCash(currentRunningCapital.digitalBankBalances || 0);
+
+      setFormInitialPhysicalStock(actualStockCost);
+      setFormInitialDigitalStock(0);
+
+      setFormInjectionsPhysical(0);
+      setFormInjectionsDigital(0);
+
+      setFormDrawingsPhysical(0);
+      setFormDrawingsDigital(0);
+
       setFormNotes(`Starting capital snapshot for ${selectedMonth}`);
     }
     setIsCapitalModalOpen(true);
   };
 
   const handleSaveCapitalSnapshot = () => {
-    const totalInit = (Number(formInitialCash) || 0) + (Number(formInitialStock) || 0);
+    // Initial physical inventory valuation is strictly fixed to actual live stock at unit cost
+    const actualPhysicalStock = currentRunningCapital.remainingStockValuation;
+    const digitalStock = Math.max(0, Number(formInitialDigitalStock) || 0);
+    const totalStock = actualPhysicalStock + digitalStock;
+
+    const physicalCash = Math.max(0, Number(formInitialPhysicalCash) || 0);
+    const digitalCash = Math.max(0, Number(formInitialDigitalCash) || 0);
+    const totalCash = physicalCash + digitalCash;
+
+    const injectionsPhysical = Math.max(0, Number(formInjectionsPhysical) || 0);
+    const injectionsDigital = Math.max(0, Number(formInjectionsDigital) || 0);
+    const totalInjections = injectionsPhysical + injectionsDigital;
+
+    const drawingsPhysical = Math.max(0, Number(formDrawingsPhysical) || 0);
+    const drawingsDigital = Math.max(0, Number(formDrawingsDigital) || 0);
+    const totalDrawings = drawingsPhysical + drawingsDigital;
+
+    const totalInit = totalCash + totalStock;
+
     const newSnapshot: MonthlyCapitalSnapshot = {
       id: `cap-${selectedMonth}`,
       monthYM: selectedMonth,
-      initialCash: Number(formInitialCash) || 0,
-      initialStockValuation: Number(formInitialStock) || 0,
+      initialCash: totalCash,
+      initialPhysicalCash: physicalCash,
+      initialDigitalCash: digitalCash,
+      initialStockValuation: totalStock,
+      initialPhysicalStockValuation: actualPhysicalStock,
+      initialDigitalStockValuation: digitalStock,
       initialTotalCapital: totalInit,
-      capitalInjections: Number(formInjections) || 0,
-      ownerDrawings: Number(formDrawings) || 0,
+      capitalInjections: totalInjections,
+      capitalInjectionsPhysical: injectionsPhysical,
+      capitalInjectionsDigital: injectionsDigital,
+      ownerDrawings: totalDrawings,
+      ownerDrawingsPhysical: drawingsPhysical,
+      ownerDrawingsDigital: drawingsDigital,
       notes: formNotes,
       recordedBy: settings.currentStaffName || 'Store Manager',
       updatedAt: new Date().toISOString(),
@@ -755,6 +828,14 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
               This Month
             </button>
           )}
+
+          {/* Privacy Eye Toggle Button */}
+          <PrivacyToggleButton
+            hideDigits={hideDigits}
+            onToggle={toggleHideDigits}
+            variant="outline"
+            size="sm"
+          />
 
           {/* Quick CSV Export */}
           <button
@@ -1438,112 +1519,249 @@ export const MonthlyProfitManager: React.FC<MonthlyProfitManagerProps> = ({
 
       {/* Month Starting Capital Snapshot Modal */}
       {isCapitalModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-7 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 my-auto max-h-[92vh] overflow-y-auto">
+            
+            {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-indigo-100 text-indigo-700 rounded-xl">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-100 text-indigo-700 rounded-2xl">
                   <Scale className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-slate-900">
+                  <h3 className="text-base sm:text-lg font-black text-slate-900">
                     Set Month Starting Capital Snapshot
                   </h3>
                   <p className="text-xs text-slate-500 font-medium">
-                    Target Month: <strong className="text-indigo-600">{selectedMonth}</strong>
+                    Target Month: <strong className="text-indigo-600">{selectedMonth}</strong> • Separate Physical & Digital Capital Pools
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsCapitalModalOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="space-y-4 text-xs">
-              {/* Cash Float */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Initial Cash in Hand & Reserves ({currencySymbol})
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  value={formInitialCash || ''}
-                  onChange={(e) => setFormInitialCash(Number(e.target.value))}
-                  placeholder="e.g. 200000"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:outline-indigo-600"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">Starting physical cash drawer float & store reserve cash.</p>
-              </div>
-
-              {/* Initial Stock at Cost */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Initial Inventory Valuation at Cost ({currencySymbol})
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  value={formInitialStock || ''}
-                  onChange={(e) => setFormInitialStock(Number(e.target.value))}
-                  placeholder="e.g. 800000"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:outline-indigo-600"
-                />
-                <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1">
-                  <span>Valued strictly at product purchase unit cost.</span>
-                  <button
-                    type="button"
-                    onClick={() => setFormInitialStock(currentRunningCapital.remainingStockValuation)}
-                    className="text-indigo-600 hover:underline font-semibold cursor-pointer"
-                  >
-                    Use Live Cost ({formatCurrency(currentRunningCapital.remainingStockValuation, currencySymbol)})
-                  </button>
-                </div>
-              </div>
-
-              {/* Computed Initial Capital */}
-              <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-2xl flex items-center justify-between">
-                <span className="font-bold text-indigo-900">Total Starting Capital (A):</span>
-                <span className="text-base font-black text-indigo-900">
-                  {formatCurrency((Number(formInitialCash) || 0) + (Number(formInitialStock) || 0), currencySymbol)}
-                </span>
-              </div>
-
-              {/* Capital Injections & Drawings */}
-              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    Capital Injections (+)
+              
+              {/* 1. Cash Float & Reserves: Physical vs Digital */}
+              <div className="p-3.5 rounded-2xl bg-amber-50/50 border border-amber-200/70 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-amber-950 flex items-center gap-1.5 text-xs">
+                    <Banknote className="w-4 h-4 text-amber-600" />
+                    <span>1. Initial Cash in Hand & Reserves ({currencySymbol})</span>
                   </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formInjections || ''}
-                    onChange={(e) => setFormInjections(Number(e.target.value))}
-                    placeholder="0"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:outline-indigo-600"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Additional capital added during month</p>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-black bg-amber-100 text-amber-900 border border-amber-300/60">
+                    Total: {formatCurrency((Number(formInitialPhysicalCash) || 0) + (Number(formInitialDigitalCash) || 0), currencySymbol)}
+                  </span>
                 </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    Owner Drawings (−)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formDrawings || ''}
-                    onChange={(e) => setFormDrawings(Number(e.target.value))}
-                    placeholder="0"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:outline-indigo-600"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-0.5">Profit withdrawn for personal use</p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1 text-[11px]">
+                      Physical Cash Drawer & Safe Float
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formInitialPhysicalCash || ''}
+                      onChange={(e) => setFormInitialPhysicalCash(Number(e.target.value))}
+                      placeholder="e.g. 200000"
+                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-indigo-600 shadow-2xs"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">Starting counter register till float & shop safe.</p>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1 text-[11px]">
+                      Digital Cash Pool (KPay, Wave, Banks)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formInitialDigitalCash || ''}
+                      onChange={(e) => setFormInitialDigitalCash(Number(e.target.value))}
+                      placeholder="e.g. 800000"
+                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-indigo-600 shadow-2xs"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">Store business digital wallets & bank balances.</p>
+                  </div>
                 </div>
               </div>
+
+              {/* 2. Initial Inventory Valuation at Cost: Physical vs Digital */}
+              <div className="p-3.5 rounded-2xl bg-emerald-50/50 border border-emerald-200/70 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-emerald-950 flex items-center gap-1.5 text-xs">
+                    <Package className="w-4 h-4 text-emerald-600" />
+                    <span>2. Initial Inventory Valuation at Cost ({currencySymbol})</span>
+                  </label>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-black bg-emerald-100 text-emerald-900 border border-emerald-300/60">
+                    Total: {formatCurrency(currentRunningCapital.remainingStockValuation + (Number(formInitialDigitalStock) || 0), currencySymbol)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block font-semibold text-slate-700 text-[11px]">
+                        Physical Device & Hardware Stock
+                      </label>
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-200 text-slate-700">
+                        <Lock className="w-2.5 h-2.5" /> Locked
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={formatCurrency(currentRunningCapital.remainingStockValuation, currencySymbol)}
+                        className="w-full pl-3 pr-8 py-2 bg-slate-100/90 border border-slate-300 rounded-xl text-sm font-black text-slate-800 cursor-not-allowed select-none shadow-inner"
+                      />
+                      <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400">
+                        <Lock className="w-3.5 h-3.5" />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Strictly fixed to live inventory ({products.reduce((acc, p) => acc + Math.max(0, p.stock || 0), 0)} catalog items at unit cost).
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1 text-[11px]">
+                      Digital Goods / E-Load Float / Virtual Stock
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formInitialDigitalStock || ''}
+                      onChange={(e) => setFormInitialDigitalStock(Number(e.target.value))}
+                      placeholder="0"
+                      className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-indigo-600 shadow-2xs"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">Optional telecom topup / e-services stock at cost.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Capital Injections (+): Physical vs Digital */}
+              <div className="p-3.5 rounded-2xl bg-indigo-50/40 border border-indigo-200/70 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-indigo-950 flex items-center gap-1.5 text-xs">
+                    <PlusCircle className="w-4 h-4 text-indigo-600" />
+                    <span>3. Capital Injections (+) ({currencySymbol})</span>
+                  </label>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-black bg-indigo-100 text-indigo-900 border border-indigo-300/60">
+                    Total: +{formatCurrency((Number(formInjectionsPhysical) || 0) + (Number(formInjectionsDigital) || 0), currencySymbol)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1 text-[11px]">
+                      Physical Cash Injected
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formInjectionsPhysical || ''}
+                      onChange={(e) => setFormInjectionsPhysical(Number(e.target.value))}
+                      placeholder="0"
+                      className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-indigo-600 shadow-2xs"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">Personal cash deposited into shop till/safe.</p>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1 text-[11px]">
+                      Digital Cash Pool Injected
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formInjectionsDigital || ''}
+                      onChange={(e) => setFormInjectionsDigital(Number(e.target.value))}
+                      placeholder="0"
+                      className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-indigo-600 shadow-2xs"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">Personal funds transferred to shop KPay/Bank.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Owner Personal Drawings (−): Physical vs Digital */}
+              <div className="p-3.5 rounded-2xl bg-rose-50/40 border border-rose-200/70 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-rose-950 flex items-center gap-1.5 text-xs">
+                    <MinusCircle className="w-4 h-4 text-rose-600" />
+                    <span>4. Owner Personal Drawings (−) ({currencySymbol})</span>
+                  </label>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-black bg-rose-100 text-rose-900 border border-rose-300/60">
+                    Total: −{formatCurrency((Number(formDrawingsPhysical) || 0) + (Number(formDrawingsDigital) || 0), currencySymbol)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1 text-[11px]">
+                      Physical Cash Withdrawn
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formDrawingsPhysical || ''}
+                      onChange={(e) => setFormDrawingsPhysical(Number(e.target.value))}
+                      placeholder="0"
+                      className="w-full px-3 py-2 bg-white border border-rose-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-indigo-600 shadow-2xs"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">Cash taken from drawer for personal living.</p>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1 text-[11px]">
+                      Digital Cash Pool Withdrawn
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formDrawingsDigital || ''}
+                      onChange={(e) => setFormDrawingsDigital(Number(e.target.value))}
+                      placeholder="0"
+                      className="w-full px-3 py-2 bg-white border border-rose-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-indigo-600 shadow-2xs"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">Transfers out from KPay/Bank for personal use.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Computed Initial Capital Summary Card */}
+              {(() => {
+                const totalCash = (Number(formInitialPhysicalCash) || 0) + (Number(formInitialDigitalCash) || 0);
+                const totalStock = currentRunningCapital.remainingStockValuation + (Number(formInitialDigitalStock) || 0);
+                const totalStartingCapital = totalCash + totalStock;
+                const totalPhysical = (Number(formInitialPhysicalCash) || 0) + currentRunningCapital.remainingStockValuation;
+                const totalDigital = (Number(formInitialDigitalCash) || 0) + (Number(formInitialDigitalStock) || 0);
+
+                return (
+                  <div className="p-4 bg-gradient-to-r from-indigo-900 to-slate-900 text-white rounded-2xl space-y-2 border border-indigo-800 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-indigo-200 text-xs">Total Starting Capital (A):</span>
+                      <span className="text-xl font-black text-white">
+                        {formatCurrency(totalStartingCapital, currencySymbol)}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between text-[11px] pt-2 border-t border-indigo-800/60 text-slate-300 gap-2">
+                      <span>• Physical Assets (Cash + Stock): <strong className="text-amber-300">{formatCurrency(totalPhysical, currencySymbol)}</strong></span>
+                      <span>• Digital Pool (Cash + Digital Stock): <strong className="text-cyan-300">{formatCurrency(totalDigital, currencySymbol)}</strong></span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Notes */}
               <div>
