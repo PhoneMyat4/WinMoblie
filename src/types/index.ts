@@ -1412,7 +1412,7 @@ export interface PersonalTransaction {
   time?: string; // HH:mm
   type: PersonalTransactionType;
   amount: number;
-  walletId: string; // Source wallet or affected wallet
+  walletId?: string; // Source wallet or affected wallet
   toWalletId?: string; // Target wallet for inter-wallet transfers
   category: string;
   title: string;

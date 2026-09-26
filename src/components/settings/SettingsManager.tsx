@@ -56,7 +56,9 @@ import { processLogoImage } from '../../utils/imageCompression';
 import { FirebaseStorageService } from '../../services/firebaseStorageService';
 import { processFaviconImage, updateDocumentFavicon } from '../../utils/favicon';
 import { exportUserManualPdf } from '../../utils/userManualPdfExport';
+import { exportUserManualBurmesePdf } from '../../utils/userManualBurmesePdfExport';
 import { downloadUserManualMarkdownFile, USER_MANUAL_METADATA } from '../../data/userManualContent';
+import { USER_MANUAL_BURMESE_METADATA } from '../../data/userManualContentBurmese';
 import { UserManualModal } from './UserManualModal';
 
 interface SettingsManagerProps {
@@ -115,7 +117,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   // 4. Staff Operations & Training Manual (PDF Export & In-App SOP Reader)
   const [isManualModalOpen, setIsManualModalOpen] = useState<boolean>(false);
   const [isExportingManualPdf, setIsExportingManualPdf] = useState<boolean>(false);
-  const [manualExportSuccess, setManualExportSuccess] = useState<boolean>(false);
+  const [isExportingBurmeseManualPdf, setIsExportingBurmeseManualPdf] = useState<boolean>(false);
+  const [manualExportSuccess, setManualExportSuccess] = useState<string | null>(null);
 
   const handleExportManualPdf = () => {
     try {
@@ -123,13 +126,29 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       setTimeout(() => {
         exportUserManualPdf({ settings: formData, staffName: 'Authorized Store Management' });
         setIsExportingManualPdf(false);
-        setManualExportSuccess(true);
-        setTimeout(() => setManualExportSuccess(false), 4500);
+        setManualExportSuccess('English User Manual PDF generated successfully!');
+        setTimeout(() => setManualExportSuccess(null), 4500);
       }, 250);
     } catch (err) {
       console.error('[SettingsManager] Failed to export manual PDF:', err);
       setIsExportingManualPdf(false);
       alert('Failed to generate User Manual PDF. Please try again.');
+    }
+  };
+
+  const handleExportBurmeseManualPdf = () => {
+    try {
+      setIsExportingBurmeseManualPdf(true);
+      setTimeout(() => {
+        exportUserManualBurmesePdf({ settings: formData, staffName: 'Authorized Store Management' });
+        setIsExportingBurmeseManualPdf(false);
+        setManualExportSuccess('မြန်မာဘာသာ အသုံးပြုသူလမ်းညွှန် PDF ပြင်ဆင်ပြီးပါပြီ။ ပရင့်ထုတ်ရန် သို့မဟုတ် PDF အဖြစ်သိမ်းရန် အဆင်သင့်ဖြစ်ပါပြီ။');
+        setTimeout(() => setManualExportSuccess(null), 5000);
+      }, 250);
+    } catch (err) {
+      console.error('[SettingsManager] Failed to export Burmese manual PDF:', err);
+      setIsExportingBurmeseManualPdf(false);
+      alert('Failed to generate Burmese User Manual PDF. Please try again.');
     }
   };
 
@@ -889,25 +908,49 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
             {/* Direct Action Buttons */}
             <div className="flex flex-wrap items-center sm:flex-col sm:items-end gap-2.5 shrink-0">
-              <button
-                type="button"
-                id="btn-export-manual-pdf"
-                onClick={handleExportManualPdf}
-                disabled={isExportingManualPdf}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-600/30 hover:shadow-indigo-600/50 transition-all cursor-pointer disabled:opacity-50"
-              >
-                {isExportingManualPdf ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                    <span>Rendering PDF...</span>
-                  </>
-                ) : (
-                  <>
-                    <FileDown className="w-4 h-4 text-white" />
-                    <span>Export Manual (PDF)</span>
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  id="btn-export-burmese-manual-pdf"
+                  onClick={handleExportBurmeseManualPdf}
+                  disabled={isExportingBurmeseManualPdf}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold text-xs shadow-lg shadow-emerald-600/30 hover:shadow-emerald-600/50 transition-all cursor-pointer disabled:opacity-50"
+                  title="မြန်မာဘာသာ အသုံးပြုသူလမ်းညွှန် PDF အဖြစ် ထုတ်ယူမည် / ပရင့်ထုတ်မည်"
+                >
+                  {isExportingBurmeseManualPdf ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                      <span>ပြင်ဆင်နေဆဲ...</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileDown className="w-4 h-4 text-white" />
+                      <span>🇲🇲 မြန်မာဘာသာ PDF</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-export-manual-pdf"
+                  onClick={handleExportManualPdf}
+                  disabled={isExportingManualPdf}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition-all cursor-pointer disabled:opacity-50"
+                  title="Export official SOP manual in English"
+                >
+                  {isExportingManualPdf ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+                      <span>Rendering...</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileDown className="w-3.5 h-3.5 text-white" />
+                      <span>🇬🇧 English PDF</span>
+                    </>
+                  )}
+                </button>
+              </div>
 
               <div className="flex items-center gap-2">
                 <button
@@ -917,7 +960,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 hover:text-white text-xs font-bold transition-all border border-white/10 cursor-pointer"
                 >
                   <Eye className="w-3.5 h-3.5 text-indigo-300" />
-                  <span>Read in App</span>
+                  <span>Read in App (လက်စွဲဖတ်ရန်)</span>
                 </button>
 
                 <button
@@ -939,9 +982,15 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             <div className="bg-emerald-500/20 border border-emerald-400/40 rounded-2xl p-3 flex items-center justify-between text-emerald-200 text-xs animate-in fade-in">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Operations Manual PDF generated and downloaded to your device! Formatted for high-resolution A4 printing and employee compliance sign-off.</span>
+                <span>{manualExportSuccess}</span>
               </div>
-              <span className="font-bold text-[11px] text-emerald-300">Ready to Print</span>
+              <button
+                type="button"
+                onClick={() => setManualExportSuccess(null)}
+                className="text-emerald-300 hover:text-white text-[11px] font-bold cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
           )}
 

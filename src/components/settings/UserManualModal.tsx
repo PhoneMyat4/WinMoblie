@@ -24,7 +24,14 @@ import {
   downloadUserManualMarkdownFile,
   ManualSection 
 } from '../../data/userManualContent';
+import { 
+  USER_MANUAL_BURMESE_METADATA, 
+  USER_MANUAL_BURMESE_SECTIONS, 
+  downloadUserManualBurmeseMarkdownFile,
+  ManualSectionBurmese 
+} from '../../data/userManualContentBurmese';
 import { exportUserManualPdf } from '../../utils/userManualPdfExport';
+import { exportUserManualBurmesePdf, openBurmeseUserManualPrintWindow } from '../../utils/userManualBurmesePdfExport';
 
 interface UserManualModalProps {
   isOpen: boolean;
@@ -47,19 +54,28 @@ export const UserManualModal: React.FC<UserManualModalProps> = ({
   onClose,
   settings,
 }) => {
+  const [language, setLanguage] = useState<'my' | 'en'>('my');
   const [activeSectionId, setActiveSectionId] = useState<string>('system-overview');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
-  const [exportSuccess, setExportSuccess] = useState<boolean>(false);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+
+  const activeMetadata = language === 'my' ? USER_MANUAL_BURMESE_METADATA : USER_MANUAL_METADATA;
+  const currentSections = language === 'my' ? USER_MANUAL_BURMESE_SECTIONS : USER_MANUAL_SECTIONS;
 
   const handleExportPdf = () => {
     try {
       setIsExportingPdf(true);
       setTimeout(() => {
-        exportUserManualPdf({ settings, staffName: 'Authorized Staff' });
+        if (language === 'my') {
+          exportUserManualBurmesePdf({ settings, staffName: 'Authorized Staff' });
+          setExportSuccess('မြန်မာဘာသာ အသုံးပြုသူလမ်းညွှန် PDF ပြင်ဆင်ပြီးပါပြီ။ ပရင့်ထုတ်ရန် သို့မဟုတ် PDF အဖြစ်သိမ်းရန် အသင့်ဖြစ်ပါပြီ။');
+        } else {
+          exportUserManualPdf({ settings, staffName: 'Authorized Staff' });
+          setExportSuccess('Official Operations Manual PDF generated and downloaded successfully!');
+        }
         setIsExportingPdf(false);
-        setExportSuccess(true);
-        setTimeout(() => setExportSuccess(false), 4000);
+        setTimeout(() => setExportSuccess(null), 5000);
       }, 250);
     } catch (err) {
       console.error('Failed to export PDF manual:', err);
@@ -69,34 +85,38 @@ export const UserManualModal: React.FC<UserManualModalProps> = ({
   };
 
   const handleDownloadMarkdown = () => {
-    downloadUserManualMarkdownFile(settings.shopName || 'Mobile_Store');
+    if (language === 'my') {
+      downloadUserManualBurmeseMarkdownFile(settings.shopName || 'Mobile_Store');
+    } else {
+      downloadUserManualMarkdownFile(settings.shopName || 'Mobile_Store');
+    }
   };
 
   // Filter sections and subsections if search query is present
   const filteredSections = useMemo(() => {
-    if (!searchQuery.trim()) return USER_MANUAL_SECTIONS;
+    if (!searchQuery.trim()) return currentSections;
     const query = searchQuery.toLowerCase();
 
-    return USER_MANUAL_SECTIONS.filter((sec) => {
+    return currentSections.filter((sec: any) => {
       const matchTitle = sec.title.toLowerCase().includes(query);
       const matchSummary = sec.summary.toLowerCase().includes(query);
       const matchSub = sec.subsections.some(
-        (sub) =>
+        (sub: any) =>
           sub.subtitle.toLowerCase().includes(query) ||
           sub.description.toLowerCase().includes(query) ||
-          sub.bulletPoints?.some((bp) => bp.toLowerCase().includes(query))
+          sub.bulletPoints?.some((bp: string) => bp.toLowerCase().includes(query))
       );
       return matchTitle || matchSummary || matchSub;
     });
-  }, [searchQuery]);
+  }, [searchQuery, currentSections]);
 
-  const activeSection: ManualSection | undefined = useMemo(() => {
+  const activeSection = useMemo(() => {
     return (
-      filteredSections.find((s) => s.id === activeSectionId) ||
+      filteredSections.find((s: any) => s.id === activeSectionId) ||
       filteredSections[0] ||
-      USER_MANUAL_SECTIONS[0]
+      currentSections[0]
     );
-  }, [filteredSections, activeSectionId]);
+  }, [filteredSections, activeSectionId, currentSections]);
 
   if (!isOpen) return null;
 
@@ -108,47 +128,92 @@ export const UserManualModal: React.FC<UserManualModalProps> = ({
         aria-modal="true"
       >
         {/* Header Bar */}
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white shrink-0">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white shrink-0 flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-300 flex items-center justify-center border border-indigo-500/30">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-300 flex items-center justify-center border border-indigo-500/30 shrink-0">
               <BookOpen className="w-5 h-5 text-indigo-400" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-base font-bold text-white tracking-tight">
-                  {USER_MANUAL_METADATA.title}
+                  {activeMetadata.title}
                 </h3>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 font-medium">
-                  {USER_MANUAL_METADATA.version}
+                  {activeMetadata.version}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Official store SOP for {settings.shopName || 'Mobile & Gadget Store'} • Ref: {USER_MANUAL_METADATA.documentControlId}
+                {settings.shopName || 'Mobile & Gadget Store'} • စာရွက်စာတမ်းနံပါတ်: {activeMetadata.documentControlId}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Language Switcher */}
+            <div className="flex items-center bg-slate-800 rounded-xl p-0.5 border border-slate-700">
+              <button
+                type="button"
+                id="btn-manual-lang-my"
+                onClick={() => setLanguage('my')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  language === 'my' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                }`}
+                title="မြန်မာဘာသာဖြင့် ဖတ်ရှုမည်"
+              >
+                🇲🇲 မြန်မာ
+              </button>
+              <button
+                type="button"
+                id="btn-manual-lang-en"
+                onClick={() => setLanguage('en')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  language === 'en' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Read in English"
+              >
+                🇬🇧 English
+              </button>
+            </div>
+
+            {/* Print / Save as PDF Button */}
+            <button
+              type="button"
+              id="btn-print-manual-window"
+              onClick={() => {
+                if (language === 'my') {
+                  openBurmeseUserManualPrintWindow({ settings, staffName: 'Authorized Staff' });
+                } else {
+                  handleExportPdf();
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-all border border-slate-700 cursor-pointer"
+              title="Print document or Save as PDF"
+            >
+              <Printer className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{language === 'my' ? 'ပရင့် / PDF သိမ်းရန်' : 'Print / PDF'}</span>
+            </button>
+
             {/* Quick Export PDF Button in Header */}
             <button
               type="button"
+              id="btn-export-manual-pdf-header"
               onClick={handleExportPdf}
               disabled={isExportingPdf}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-xs disabled:opacity-50 cursor-pointer"
-              title="Generate and download full multi-page PDF document"
+              title={language === 'my' ? 'မြန်မာဘာသာ အသုံးပြုနည်းလမ်းညွှန် PDF ထုတ်ယူမည်' : 'Generate and download full multi-page PDF document'}
             >
               <FileDown className="w-4 h-4" />
-              <span>{isExportingPdf ? 'Generating PDF...' : 'Export PDF'}</span>
+              <span>{isExportingPdf ? (language === 'my' ? 'ထုတ်ယူနေဆဲ...' : 'Generating PDF...') : (language === 'my' ? 'PDF ထုတ်ယူမည်' : 'Export PDF')}</span>
             </button>
 
             <button
               type="button"
               onClick={handleDownloadMarkdown}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-all border border-slate-700 cursor-pointer"
+              className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-all border border-slate-700 cursor-pointer"
               title="Download raw Markdown documentation"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Markdown (.md)</span>
+              <span>.md</span>
             </button>
 
             <button
@@ -167,9 +232,9 @@ export const UserManualModal: React.FC<UserManualModalProps> = ({
           <div className="bg-emerald-50 border-b border-emerald-200 px-6 py-2.5 flex items-center justify-between text-emerald-800 text-xs font-medium shrink-0 animate-in slide-in-from-top-1">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Official Operations Manual PDF generated and downloaded successfully! Ready to print or distribute to staff.</span>
+              <span>{exportSuccess}</span>
             </div>
-            <span className="text-[11px] text-emerald-600 font-bold">Downloaded</span>
+            <span className="text-[11px] text-emerald-600 font-bold">အောင်မြင်ပါသည်</span>
           </div>
         )}
 
@@ -185,7 +250,7 @@ export const UserManualModal: React.FC<UserManualModalProps> = ({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search procedures, IMEI, RBAC..."
+                  placeholder={language === 'my' ? 'လုပ်ထုံးလုပ်နည်းများ၊ IMEI၊ အရောင်း ရှာရန်...' : 'Search procedures, IMEI, RBAC...'}
                   className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all placeholder:text-slate-400"
                 />
                 {searchQuery && (
@@ -356,20 +421,35 @@ export const UserManualModal: React.FC<UserManualModalProps> = ({
                 </div>
 
                 {/* Bottom Navigation between chapters */}
-                <div className="pt-8 border-t border-slate-100 flex items-center justify-between">
+                <div className="pt-8 border-t border-slate-100 flex items-center justify-between flex-wrap gap-3">
                   <button
                     type="button"
                     onClick={() => {
-                      const curIdx = USER_MANUAL_SECTIONS.findIndex((s) => s.id === activeSection.id);
-                      if (curIdx > 0) setActiveSectionId(USER_MANUAL_SECTIONS[curIdx - 1].id);
+                      const curIdx = currentSections.findIndex((s: any) => s.id === activeSection.id);
+                      if (curIdx > 0) setActiveSectionId(currentSections[curIdx - 1].id);
                     }}
-                    disabled={USER_MANUAL_SECTIONS.findIndex((s) => s.id === activeSection.id) === 0}
+                    disabled={currentSections.findIndex((s: any) => s.id === activeSection.id) === 0}
                     className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   >
-                    &larr; Previous Chapter
+                    &larr; {language === 'my' ? 'ရှေ့အခန်းသို့' : 'Previous Chapter'}
                   </button>
 
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (language === 'my') {
+                          openBurmeseUserManualPrintWindow({ settings, staffName: 'Authorized Staff' });
+                        } else {
+                          handleExportPdf();
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4 text-slate-600" />
+                      <span>{language === 'my' ? 'ပရင့်ထုတ်ရန်' : 'Print View'}</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={handleExportPdf}
@@ -377,20 +457,20 @@ export const UserManualModal: React.FC<UserManualModalProps> = ({
                       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
                     >
                       <FileDown className="w-4 h-4" />
-                      <span>{isExportingPdf ? 'Exporting...' : 'Export Manual to PDF'}</span>
+                      <span>{isExportingPdf ? (language === 'my' ? 'ထုတ်ယူနေဆဲ...' : 'Exporting...') : (language === 'my' ? 'မြန်မာဘာသာ PDF ထုတ်ယူမည်' : 'Export Manual to PDF')}</span>
                     </button>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => {
-                      const curIdx = USER_MANUAL_SECTIONS.findIndex((s) => s.id === activeSection.id);
-                      if (curIdx < USER_MANUAL_SECTIONS.length - 1) setActiveSectionId(USER_MANUAL_SECTIONS[curIdx + 1].id);
+                      const curIdx = currentSections.findIndex((s: any) => s.id === activeSection.id);
+                      if (curIdx < currentSections.length - 1) setActiveSectionId(currentSections[curIdx + 1].id);
                     }}
-                    disabled={USER_MANUAL_SECTIONS.findIndex((s) => s.id === activeSection.id) === USER_MANUAL_SECTIONS.length - 1}
+                    disabled={currentSections.findIndex((s: any) => s.id === activeSection.id) === currentSections.length - 1}
                     className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   >
-                    Next Chapter &rarr;
+                    {language === 'my' ? 'နောက်အခန်းသို့' : 'Next Chapter'} &rarr;
                   </button>
                 </div>
               </div>

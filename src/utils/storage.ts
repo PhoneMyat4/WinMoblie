@@ -232,6 +232,7 @@ export interface StorageChangeHandler {
   onSaleUpsert?: (sale: Sale) => void;
   onSalesBatch?: (sales: Sale[]) => void;
   onSaleDelete?: (id: string) => void;
+  onSalesDelete?: (ids: string[]) => void;
   onPurchaseUpsert?: (purchase: PurchaseRecord) => void;
   onPurchasesBatch?: (purchases: PurchaseRecord[]) => void;
   onPurchaseDelete?: (id: string) => void;
@@ -1320,6 +1321,77 @@ export const StorageService = {
       totalRefundAmount,
       staffName,
     });
+  },
+
+  deleteSale: (saleId: string, options?: { restockItems?: boolean; staffName?: string }, triggerSync = true) => {
+    const sales = StorageService.getSales();
+    const target = sales.find(s => s.id === saleId);
+    if (!target) return;
+
+    if (options?.restockItems && target.items) {
+      const allProducts = StorageService.getProducts();
+      target.items.forEach(item => {
+        if (item.productId) {
+          const product = allProducts.find(p => p.id === item.productId);
+          if (product) {
+            product.stock += item.quantity || 1;
+            if (item.imei && product.imeiList && !product.imeiList.includes(item.imei)) {
+              product.imeiList.push(item.imei);
+            }
+            StorageService.saveProduct(product, options?.staffName || 'System', false);
+          }
+        }
+      });
+    }
+
+    const filtered = sales.filter(s => s.id !== saleId);
+    setItem(STORAGE_KEYS.SALES, filtered);
+
+    if (triggerSync) {
+      if (activeStorageSyncHandler?.onSaleDelete) {
+        activeStorageSyncHandler.onSaleDelete(saleId);
+      }
+      if (activeStorageSyncHandler?.onSalesDelete) {
+        activeStorageSyncHandler.onSalesDelete([saleId]);
+      }
+    }
+  },
+
+  deleteSales: (saleIds: string[], options?: { restockItems?: boolean; staffName?: string }, triggerSync = true) => {
+    if (!saleIds || saleIds.length === 0) return;
+    const idSet = new Set(saleIds);
+    const sales = StorageService.getSales();
+
+    if (options?.restockItems) {
+      const allProducts = StorageService.getProducts();
+      sales.forEach(sale => {
+        if (idSet.has(sale.id) && sale.items) {
+          sale.items.forEach(item => {
+            if (item.productId) {
+              const product = allProducts.find(p => p.id === item.productId);
+              if (product) {
+                product.stock += item.quantity || 1;
+                if (item.imei && product.imeiList && !product.imeiList.includes(item.imei)) {
+                  product.imeiList.push(item.imei);
+                }
+                StorageService.saveProduct(product, options?.staffName || 'System', false);
+              }
+            }
+          });
+        }
+      });
+    }
+
+    const filtered = sales.filter(s => !idSet.has(s.id));
+    setItem(STORAGE_KEYS.SALES, filtered);
+
+    if (triggerSync) {
+      if (activeStorageSyncHandler?.onSalesDelete) {
+        activeStorageSyncHandler.onSalesDelete(saleIds);
+      } else if (activeStorageSyncHandler?.onSaleDelete) {
+        saleIds.forEach(id => activeStorageSyncHandler?.onSaleDelete?.(id));
+      }
+    }
   },
 
   // Purchases (Supplier Orders & Stock In)
