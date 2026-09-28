@@ -67,6 +67,21 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({
     );
   }
 
+  if (variant === 'compact') {
+    return (
+      <button
+        type="button"
+        id="btn-lang-toggle"
+        onClick={() => setLanguage(language === 'my' ? 'en' : 'my')}
+        className={`inline-flex items-center gap-1 px-2 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-bold text-slate-700 transition-colors cursor-pointer shrink-0 ${className}`}
+        title={language === 'my' ? 'မြန်မာဘာသာ (Click to switch to English)' : 'English (မြန်မာဘာသာသို့ ပြောင်းမည်)'}
+      >
+        <span className="text-[12px] leading-none">{language === 'my' ? '🇲🇲' : '🇬🇧'}</span>
+        <span className="text-[10px] font-bold">{language === 'my' ? 'MM' : 'EN'}</span>
+      </button>
+    );
+  }
+
   // Default 'pill' variant
   return (
     <div 
@@ -79,7 +94,7 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({
         type="button"
         id="btn-lang-burmese"
         onClick={() => setLanguage('my')}
-        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+        className={`inline-flex items-center gap-1 px-1.5 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
           language === 'my'
             ? 'bg-white text-indigo-900 shadow-xs border border-indigo-100 ring-1 ring-indigo-500/20'
             : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
@@ -87,14 +102,14 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({
         title="မြန်မာဘာသာသို့ ပြောင်းမည် (Switch to Burmese)"
       >
         <span className="text-[13px] leading-none">🇲🇲</span>
-        <span className="text-[11px]">မြန်မာ</span>
+        <span className="text-[11px] hidden sm:inline">မြန်မာ</span>
       </button>
 
       <button
         type="button"
         id="btn-lang-english"
         onClick={() => setLanguage('en')}
-        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+        className={`inline-flex items-center gap-1 px-1.5 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
           language === 'en'
             ? 'bg-white text-indigo-900 shadow-xs border border-indigo-100 ring-1 ring-indigo-500/20'
             : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
@@ -102,7 +117,7 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({
         title="Switch to English (အင်္ဂလိပ်ဘာသာ)"
       >
         <span className="text-[13px] leading-none">🇬🇧</span>
-        <span className="text-[11px]">EN</span>
+        <span className="text-[11px] hidden sm:inline">EN</span>
       </button>
     </div>
   );

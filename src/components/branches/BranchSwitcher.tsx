@@ -110,17 +110,17 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({
 
         <div className="text-left min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] sm:text-xs font-black truncate max-w-[120px] sm:max-w-[170px] leading-tight">
+            <span className="text-[11px] sm:text-xs font-black truncate max-w-[85px] xs:max-w-[110px] sm:max-w-[140px] xl:max-w-[170px] leading-tight">
               {activeLoc.name}
             </span>
-            <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-md ${
+            <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-md hidden md:inline-block ${
               isWarehouse ? 'bg-amber-200 text-amber-900' : 'bg-emerald-200 text-emerald-900'
             }`}>
               {activeLoc.code}
             </span>
           </div>
           {!compact && (
-            <p className="text-[10px] text-slate-500 font-medium leading-none mt-0.5 truncate max-w-[140px]">
+            <p className="text-[10px] text-slate-500 font-medium leading-none mt-0.5 truncate max-w-[140px] hidden xl:block">
               {isWarehouse ? 'Central Warehouse' : 'Active Retail Store'}
             </p>
           )}
