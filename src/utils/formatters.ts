@@ -55,7 +55,31 @@ export function formatDualImei(imei1: string, imei2?: string): string {
   return `IMEI 1: ${formatImei(imei1)} | IMEI 2: ${formatImei(imei2)}`;
 }
 
-export function getCategoryLabel(category: ProductCategory | string): string {
+export function getCategoryLabel(category: ProductCategory | string, isBurmese?: boolean): string {
+  if (isBurmese) {
+    switch (category) {
+      case 'brand_new_phones':
+      case 'new_phones':
+        return 'ဖုန်းအသစ်စက်စက်';
+      case 'pre_owned_phones':
+      case 'used_phones':
+        return 'တစ်ပတ်ရစ်ဖုန်းများ';
+      case 'accessories_gadgets':
+      case 'accessories':
+      case 'gadgets':
+        return 'ဖုန်းအပိုပစ္စည်းနှင့် ဆက်စပ်ပစ္စည်းများ';
+      case 'cookware':
+        return 'အိမ်သုံးပစ္စည်း';
+      case 'sim_cards':
+      case 'sim_topup':
+        return 'ဆင်းမ်ကတ်နှင့် ငွေဖြည့်ကတ်';
+      case 'spare_parts':
+        return 'အပိုပစ္စည်းနှင့် LCD မျက်နှာပြင်များ';
+      default:
+        return category;
+    }
+  }
+
   switch (category) {
     case 'brand_new_phones':
     case 'new_phones':
@@ -79,7 +103,24 @@ export function getCategoryLabel(category: ProductCategory | string): string {
   }
 }
 
-export function getConditionLabel(condition: DeviceCondition): { label: string; badgeClass: string } {
+export function getConditionLabel(condition: DeviceCondition, isBurmese?: boolean): { label: string; badgeClass: string } {
+  if (isBurmese) {
+    switch (condition) {
+      case 'brand_new':
+        return { label: 'အသစ်စက်စက် (ဘူးပိတ်)', badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+      case 'used_grade_a_plus':
+        return { label: 'အသစ်နီးပါး (၉၉%)', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' };
+      case 'used_grade_a':
+        return { label: 'အထူးကောင်းမွန် (၉၅%)', badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
+      case 'used_grade_b':
+        return { label: 'အခြေအနေကောင်း (၉၀%)', badgeClass: 'bg-amber-50 text-amber-700 border-amber-200' };
+      case 'used_grade_c':
+        return { label: 'အသင့်အတင့် (၈၅%)', badgeClass: 'bg-orange-50 text-orange-700 border-orange-200' };
+      default:
+        return { label: condition, badgeClass: 'bg-slate-50 text-slate-700 border-slate-200' };
+    }
+  }
+
   switch (condition) {
     case 'brand_new':
       return { label: 'Brand New (Sealed)', badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200' };

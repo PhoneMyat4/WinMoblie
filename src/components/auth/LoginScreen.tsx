@@ -17,6 +17,8 @@ import { FirebaseAuthService } from '../../services/firebaseAuthService';
 import { FirestoreSyncService } from '../../services/firestoreSyncService';
 import { checkStaffWorkingHoursAccess } from '../../utils/workingHours';
 import { StorageService } from '../../utils/storage';
+import { useLanguage } from '../../context/LanguageContext';
+import { LanguageSwitcher } from '../common/LanguageSwitcher';
 
 interface LoginScreenProps {
   staffUsers: StaffUser[];
@@ -29,6 +31,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   settings,
   onLoginSuccess,
 }) => {
+  const { t, isBurmese } = useLanguage();
   const [username, setUsername] = useState<string>(() => {
     try {
       return localStorage.getItem('mobileshop_remembered_username') || '';
@@ -246,6 +249,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       {/* Main Login Card */}
       <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10 p-6 sm:p-8">
         
+        {/* Top bar with Language Switcher */}
+        <div className="flex items-center justify-end mb-3">
+          <LanguageSwitcher variant="select" />
+        </div>
+
         {/* Brand & Terminal Header */}
         <div className="flex flex-col items-center text-center mb-6">
           {settings.logoUrl ? (
@@ -278,7 +286,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           </h1>
           <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            POS Terminal Authentication
+            {isBurmese ? 'POS စက် သော့ခတ်ထားပါသည် / အကောင့်ဝင်ပါ' : 'POS Terminal Authentication'}
           </p>
           <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/80 text-[11px] text-emerald-400 font-medium shadow-inner">
             <Flame className="w-3 h-3 text-amber-400 fill-amber-400/20" />
@@ -308,7 +316,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               htmlFor="login-username-input"
               className="block text-xs font-bold text-slate-300 mb-1.5"
             >
-              Username
+              {t('auth.username', 'Username')}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -320,7 +328,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 required
                 autoFocus={!username}
                 autoComplete="username"
-                placeholder="Enter your username"
+                placeholder={isBurmese ? 'အသုံးပြုသူအမည် ရိုက်ထည့်ပါ' : 'Enter your username'}
                 value={username}
                 onChange={(e) => {
                   setUsername(e.target.value);
@@ -338,7 +346,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 htmlFor="login-password-input"
                 className="text-xs font-bold text-slate-300"
               >
-                Password
+                {t('auth.password', 'Password')}
               </label>
               <button
                 type="button"
@@ -346,7 +354,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 className="text-[11px] font-semibold text-slate-400 hover:text-emerald-400 flex items-center gap-1 cursor-pointer transition-colors"
               >
                 {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                <span>{showPassword ? 'Hide' : 'Show'}</span>
+                <span>{showPassword ? (isBurmese ? 'ဝှက်မည်' : 'Hide') : (isBurmese ? 'ပြမည်' : 'Show')}</span>
               </button>
             </div>
 
@@ -360,7 +368,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 required
                 autoFocus={Boolean(username)}
                 autoComplete="current-password"
-                placeholder="Enter your password"
+                placeholder={isBurmese ? 'စကားဝှက် သို့မဟုတ် PIN နံပါတ် ရိုက်ထည့်ပါ' : 'Enter your password'}
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
@@ -380,10 +388,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 onChange={(e) => setRememberUsername(e.target.checked)}
                 className="w-4 h-4 rounded-md border-slate-700 bg-slate-950 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900"
               />
-              <span>Remember username</span>
+              <span>{t('auth.remember_me', 'Remember username')}</span>
             </label>
             <span className="text-[11px] text-slate-500">
-              Role-protected
+              {isBurmese ? 'လုံခြုံရေးအဆင့်' : 'Role-protected'}
             </span>
           </div>
 
@@ -404,7 +412,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               className="w-full py-3.5 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-98 text-white font-bold text-sm rounded-2xl shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Lock className="w-4 h-4" />
-              <span>{isSubmitting ? 'Authenticating with Firebase...' : 'Sign In'}</span>
+              <span>
+                {isSubmitting 
+                  ? (isBurmese ? 'အတည်ပြုနေဆဲ...' : 'Authenticating with Firebase...') 
+                  : (isBurmese ? 'စနစ်ဖွင့်၍ ဝင်ရောက်မည်' : 'Sign In')}
+              </span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -415,7 +427,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         <div className="mt-6 pt-5 border-t border-slate-800 text-center">
           <p className="text-[11px] text-slate-500 flex items-center justify-center gap-1.5">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-            Secure Session &bull; Authorized Staff Only
+            {isBurmese ? 'လုံခြုံစိတ်ချရသော စနစ် • ခွင့်ပြုချက်ရ ဝန်ထမ်းများသာ' : 'Secure Session • Authorized Staff Only'}
           </p>
         </div>
 

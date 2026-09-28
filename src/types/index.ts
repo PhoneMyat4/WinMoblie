@@ -89,6 +89,11 @@ export interface RolePermissions {
   canManagePayroll?: boolean;
   canManageKpiSettings?: boolean;
   canViewPayroll?: boolean;
+  // Multi-Branch & Central Warehouse Scope
+  canSwitchBranch?: boolean;
+  canManageBranches?: boolean;
+  canTransferStock?: boolean;
+  canApproveTransfer?: boolean;
 }
 
 export interface StaffUser {
@@ -102,6 +107,9 @@ export interface StaffUser {
   password?: string; // Password for account authentication
   active: boolean;
   avatarColor?: string;
+  branchId?: string; // Assigned primary branch (e.g. 'loc_br_yangon_01')
+  branchName?: string;
+  allowedLocationIds?: string[]; // Allowed branches for switching
   customPermissions?: Partial<RolePermissions>;
   restrictWorkingHours?: boolean;
   workStartTime?: string; // (e.g. '07:30')
@@ -245,12 +253,12 @@ export interface ProductHistoryEvent {
   extraMeta?: Record<string, unknown>;
 }
 
-export type ImeiStatus = 'In Stock' | 'Sold' | 'RMA' | 'Reserved' | 'Defective' | 'Quarantined' | 'Pending RMA' | 'Written-Off' | 'Available';
+export type ImeiStatus = 'In Stock' | 'Sold' | 'RMA' | 'Reserved' | 'Defective' | 'Quarantined' | 'Pending RMA' | 'Written-Off' | 'Available' | 'In Transit' | 'Returned' | 'Transferred';
 
 export interface ImeiHistoryEvent {
   id: string;
   timestamp: string;
-  action: 'received' | 'price_updated' | 'status_changed' | 'sold' | 'refunded' | 'rma_initiated' | 'rma_resolved' | 'reserved' | 'stock_audit';
+  action: 'received' | 'price_updated' | 'status_changed' | 'sold' | 'refunded' | 'rma_initiated' | 'rma_resolved' | 'reserved' | 'stock_audit' | 'transferred' | 'transfer_dispatched' | 'transfer_received';
   details: string;
   performedBy: string;
   referenceDoc?: string; // e.g. PO-2026-001 or INV-2026-008
@@ -271,6 +279,8 @@ export interface SerializedDeviceItem {
   costPrice: number;
   sellingPrice: number;
   status: ImeiStatus;
+  locationId?: string; // Current location / branch ID
+  locationName?: string;
   receivedDate: string; // ISO date string
   purchaseOrderNumber?: string;
   supplierId?: string;
@@ -318,6 +328,9 @@ export interface DamageLog {
   costImpact: number; // Read-only original unit cost from database
   originalSellingPrice: number;
   quarantinedQuantity: number;
+  locationId?: string; // Location / Branch where damage or loss occurred
+  locationName?: string;
+  transferId?: string; // Linked Stock Transfer ID if caused by in-transit discrepancy
   
   // Phase 1: Quarantine (Isolation)
   status: ItemInventoryStatus; // 'Available' | 'Quarantined' | 'Pending RMA' | 'Written-Off'
@@ -409,6 +422,8 @@ export interface Product {
   warrantyMonths: number;
   supplierId?: string;
   supplierName?: string;
+  locationId?: string; // Global catalog primary or default location
+  locationName?: string;
   description?: string;
   imageUrl?: string;
   lastRestockedAt?: string;
@@ -525,6 +540,8 @@ export interface Sale {
   soldById?: string;
   cashierId?: string;
   cashierName?: string;
+  locationId?: string; // Branch / Store location where sale occurred
+  locationName?: string;
   status: 'completed' | 'refunded' | 'partially_refunded';
   refundReason?: string;
   refundedAt?: string;
@@ -642,6 +659,8 @@ export interface PurchaseRecord {
   amountPaid: number;
   balanceDue: number;
   referenceInvoiceNo?: string;
+  locationId?: string; // Receiving warehouse / branch ID
+  locationName?: string;
   notes?: string;
   receivedBy: string;
 
@@ -752,6 +771,8 @@ export interface ExpenseRecord {
   deductFromCashDrawer: boolean;
   fundingSource?: ExpenseFundingSource; // 'cash_drawer' (deducts from daily counter sales) | 'revenue_cash' (deducts from total remaining cash)
   revenueCashChannel?: PaymentMethod | string; // e.g. 'kpay' | 'wave' | 'kbz' | 'aya' | 'cb' | 'yoma' | 'cash'
+  locationId?: string; // Branch / Store location incurring the expense
+  locationName?: string;
   notes?: string;
   purchaseId?: string; // Linked purchase invoice ID if auto-generated
   purchaseOrderNumber?: string;
@@ -798,6 +819,8 @@ export interface Supplier {
 export interface CashDrawerRecord {
   id: string;
   date: string; // YYYY-MM-DD
+  locationId?: string; // Branch / Store location of the register
+  locationName?: string;
   openedAt: string;
   closedAt?: string;
   openedBy: string;
@@ -973,6 +996,7 @@ export interface SocialMarketingState {
   aiImagePrompt: string;
   selectedImageModel?: string;
   isGeneratingAiImage: boolean;
+  isEditingAiImage?: boolean;
   referenceImageUrl?: string | null;
   referenceImageName?: string | null;
   isAnalyzingReference?: boolean;
@@ -1056,6 +1080,7 @@ export interface ShopSettings {
   currentStaffRole: StaffRole;
   currentStaffId: string;
   enableSoundEffects: boolean;
+  systemLanguage?: 'my' | 'en'; // System UI language: 'my' (မြန်မာဘာသာ) or 'en' (English)
   invoiceCustomization: InvoiceCustomization;
   expenseCategories?: ExpenseCategoryItem[];
   socialMediaConfig?: FacebookPageConfig;
@@ -1077,6 +1102,7 @@ export type AppTab =
   | 'quarantine_rma'
   | 'stock_check'
   | 'purchases'
+  | 'branches'
   | 'expenses'
   | 'sales_history'
   | 'crm' 
@@ -1583,6 +1609,84 @@ export interface AuditLogEntry {
   clientDevice?: string; // Terminal identifier or browser environment
   ipAddress?: string;
   expireAt?: string; // ISO 8601 string for Firestore Time-to-Live (TTL) auto-purging (180 days)
+}
+
+// =========================================================================
+// MULTI-BRANCH & CENTRAL WAREHOUSE "GLOBAL CATALOG WITH LOCALIZED STOCK"
+// =========================================================================
+
+export type LocationType = 'warehouse' | 'branch';
+
+export interface StoreLocation {
+  id: string; // e.g. "loc_wh_central", "loc_br_yangon_01", "loc_br_mandalay_01"
+  code: string; // e.g. "WH-CENTRAL", "BR-YGN-01", "BR-MDY-01"
+  name: string; // e.g. "Central Distribution Warehouse", "Yangon Flagship Store"
+  type: LocationType;
+  address: string;
+  phone: string;
+  managerId?: string;
+  managerName?: string;
+  isActive: boolean;
+  isDefault?: boolean;
+  currency?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface BranchInventory {
+  id: string; // composite key: `${productId}_${locationId}`
+  productId: string;
+  locationId: string;
+  onHandStock: number; // physically counted stock present in branch
+  reservedStock: number; // reserved for transfers / pending carts
+  availableStock: number; // onHandStock - reservedStock (sellable)
+  minThreshold: number; // low stock alert trigger for this specific branch
+  localSellingPrice?: number; // optional regional price override
+  lastAuditedAt?: string;
+  updatedAt: string;
+}
+
+export type TransferStatus = 'draft' | 'requested' | 'approved' | 'dispatched' | 'received' | 'rejected' | 'cancelled';
+
+export interface StockTransferItem {
+  productId: string;
+  productName: string;
+  brand: string;
+  model: string;
+  sku: string;
+  requestedQty: number;
+  dispatchedQty: number;
+  receivedQty: number;
+  imeiList?: string[]; // Specific 15-digit IMEIs dispatched
+  receivedImeiList?: string[]; // Specific IMEIs physically verified on receipt
+  discrepancyQty?: number; // Math.max(0, dispatchedQty - receivedQty)
+}
+
+export interface StockTransfer {
+  id: string;
+  transferNumber: string; // e.g. "TRF-2026-0001"
+  fromLocationId: string;
+  fromLocationName: string;
+  toLocationId: string;
+  toLocationName: string;
+  status: TransferStatus;
+  items: StockTransferItem[];
+  totalRequestedQty: number;
+  totalDispatchedQty: number;
+  totalReceivedQty: number;
+  requestedBy: { staffId: string; name: string; date: string };
+  approvedBy?: { staffId: string; name: string; date: string };
+  rejectedBy?: { staffId: string; name: string; date: string };
+  rejectionReason?: string;
+  dispatchedBy?: { staffId: string; name: string; date: string };
+  receivedBy?: { staffId: string; name: string; date: string };
+  discrepancyReason?: string;
+  damageLogId?: string; // Linked DamageLog if discrepancy / shrinkage logged
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  dispatchedAt?: string;
+  receivedAt?: string;
 }
 
 

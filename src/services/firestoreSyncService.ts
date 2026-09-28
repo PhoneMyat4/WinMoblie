@@ -43,7 +43,10 @@ import {
   PersonalSavingsGoal,
   PersonalDebtIOU,
   FacebookAdPostRecord,
-  AuditLogEntry
+  AuditLogEntry,
+  StoreLocation,
+  BranchInventory,
+  StockTransfer
 } from '../types';
 
 export const PENDING_AUDIT_LOGS_KEY = 'pending_audit_logs';
@@ -73,6 +76,13 @@ export class FirestoreSyncService {
   private preAuthUnsubscribers: Unsubscribe[] = [];
   private isProcessingRemoteSnapshot: boolean = false;
   private isSyncPaused: boolean = false;
+  private locationsSyncTimeout: any = null;
+  private branchInventorySyncTimeout: any = null;
+  private stockTransfersSyncTimeout: any = null;
+  private salesSyncTimeout: any = null;
+  private purchasesSyncTimeout: any = null;
+  private staffUsersSyncTimeout: any = null;
+  private isFlushingLogs: boolean = false;
   private status: FirestoreSyncStatus = {
     isConnected: false,
     isSyncing: false,
@@ -90,7 +100,6 @@ export class FirestoreSyncService {
   constructor() {
     if (typeof window !== 'undefined') {
       this.registerStorageHooks();
-      this.registerDataUpdatedEventListener();
 
       // Listen for network connectivity changes (Offline Queueing & Sync)
       window.addEventListener('online', () => {
@@ -125,162 +134,127 @@ export class FirestoreSyncService {
   }
 
   /**
-   * Listen to local storage update events so ANY collection saved through StorageService
-   * is automatically synced to Firestore without missing anything.
-   */
-  private registerDataUpdatedEventListener() {
-    window.addEventListener('mobileshop_data_updated', (e: any) => {
-      if (this.isSyncPaused || this.isProcessingRemoteSnapshot) return;
-      if (!FirebaseAuthService.isAuthenticated()) return;
-
-      const key = e.detail?.key;
-      if (!key) return;
-
-      try {
-        switch (key) {
-          case STORAGE_KEYS.SETTINGS:
-            this.syncSettings(StorageService.getSettings());
-            break;
-          case STORAGE_KEYS.PRODUCTS:
-            this.syncProducts(StorageService.getProducts());
-            break;
-          case STORAGE_KEYS.SALES:
-            this.syncSales(StorageService.getSales());
-            break;
-          case STORAGE_KEYS.CREDIT_SALES:
-            this.syncCreditSales(StorageService.getCreditSales());
-            break;
-          case STORAGE_KEYS.PURCHASES:
-            this.syncPurchases(StorageService.getPurchases());
-            break;
-          case STORAGE_KEYS.EXPENSES:
-            this.syncExpenses(StorageService.getExpenses());
-            break;
-          case STORAGE_KEYS.EXPENSE_CATEGORIES:
-            this.syncExpenseCategories(StorageService.getExpenseCategories());
-            break;
-          case STORAGE_KEYS.CUSTOMERS:
-            this.syncCustomers(StorageService.getCustomers());
-            break;
-          case STORAGE_KEYS.SUPPLIERS:
-            this.syncSuppliers(StorageService.getSuppliers());
-            break;
-          case STORAGE_KEYS.STAFF_USERS:
-            this.syncStaffUsers(StorageService.getStaffUsers());
-            break;
-          case STORAGE_KEYS.ROLE_PERMISSIONS:
-            this.syncRolePermissions(StorageService.getRolePermissions());
-            break;
-          case STORAGE_KEYS.CASH_DRAWER:
-            this.syncCashDrawer(StorageService.getCashDrawer());
-            break;
-          case STORAGE_KEYS.PRE_ORDERS:
-            this.syncPreOrders(StorageService.getPreOrders());
-            break;
-          case STORAGE_KEYS.STOCK_ADJUSTMENTS:
-            this.syncStockAdjustments(StorageService.getStockAdjustments());
-            break;
-          case STORAGE_KEYS.PRICE_CHANGES:
-            this.syncPriceChanges(StorageService.getPriceChanges());
-            break;
-          case STORAGE_KEYS.STOCK_AUDITS:
-            this.syncStockAudits(StorageService.getStockAudits());
-            break;
-          case STORAGE_KEYS.DAMAGE_LOGS:
-            this.syncDamageLogs(StorageService.getDamageLogs());
-            break;
-          case STORAGE_KEYS.ANNOUNCEMENTS:
-            this.syncAnnouncements(StorageService.getAnnouncements());
-            break;
-          case STORAGE_KEYS.CHAT_CHANNELS:
-            this.syncChatChannels(StorageService.getChatChannels());
-            break;
-          case STORAGE_KEYS.CHAT_MESSAGES:
-            this.syncChatMessages(StorageService.getChatMessages());
-            break;
-          case STORAGE_KEYS.PERSONAL_WALLETS:
-            this.syncPersonalWallets(StorageService.getPersonalWallets());
-            break;
-          case STORAGE_KEYS.PERSONAL_TRANSACTIONS:
-            this.syncPersonalTransactions(StorageService.getPersonalTransactions());
-            break;
-          case STORAGE_KEYS.PERSONAL_BUDGETS:
-            this.syncPersonalBudgets(StorageService.getPersonalBudgets());
-            break;
-          case STORAGE_KEYS.PERSONAL_GOALS:
-            this.syncPersonalGoals(StorageService.getPersonalSavingsGoals());
-            break;
-          case STORAGE_KEYS.PERSONAL_DEBTS:
-            this.syncPersonalDebts(StorageService.getPersonalDebts());
-            break;
-          case STORAGE_KEYS.FACEBOOK_POSTS:
-            this.syncFacebookPosts(StorageService.getFacebookPosts());
-            break;
-          case STORAGE_KEYS.AUDIT_LOGS:
-            this.syncAuditLogs(StorageService.getAuditLogs());
-            break;
-        }
-      } catch (err) {
-        console.warn('[FirestoreSync] Auto-sync event handler warning:', err);
-      }
-    });
-  }
-
-  /**
    * Connects high-priority local storage hooks directly into Firestore push operations
    */
   private registerStorageHooks() {
     StorageService.setSyncHandler({
       onSaleUpsert: (sale) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncSale(sale);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.syncSale(sale);
+        }
       },
       onSalesBatch: (sales) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncSales(sales);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          if (this.salesSyncTimeout) clearTimeout(this.salesSyncTimeout);
+          this.salesSyncTimeout = setTimeout(() => {
+            this.syncSales(sales);
+          }, 1500);
+        }
       },
       onSaleDelete: (id) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deleteSale(id);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.deleteSale(id);
+        }
       },
       onSalesDelete: (ids) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deleteSales(ids);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.deleteSales(ids);
+        }
       },
       onPurchaseUpsert: (purchase) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncPurchase(purchase);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.syncPurchase(purchase);
+        }
       },
       onPurchasesBatch: (purchases) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncPurchases(purchases);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          if (this.purchasesSyncTimeout) clearTimeout(this.purchasesSyncTimeout);
+          this.purchasesSyncTimeout = setTimeout(() => {
+            this.syncPurchases(purchases);
+          }, 1500);
+        }
       },
       onPurchaseDelete: (id) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deletePurchase(id);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.deletePurchase(id);
+        }
       },
       onCustomerUpsert: (customer) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncCustomer(customer);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.syncCustomer(customer);
+        }
       },
       onExpenseUpsert: (expense) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncExpense(expense);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.syncExpense(expense);
+        }
       },
       onExpenseDelete: (id) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deleteExpense(id);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.deleteExpense(id);
+        }
       },
       onProductUpsert: (product) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncProduct(product);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.syncProduct(product);
+        }
       },
       onProductDelete: (id) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deleteProduct(id);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.deleteProduct(id);
+        }
       },
       onSettingsUpsert: (settings) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncSettings(settings);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.syncSettings(settings);
+        }
       },
       onSupplierUpsert: (supplier) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncSupplier(supplier);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.syncSupplier(supplier);
+        }
       },
       onStaffUserUpsert: (staff) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncStaffUser(staff);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.syncStaffUser(staff);
+        }
       },
       onStaffUsersBatch: (staffList) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.syncStaffUsers(staffList);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          if (this.staffUsersSyncTimeout) clearTimeout(this.staffUsersSyncTimeout);
+          this.staffUsersSyncTimeout = setTimeout(() => {
+            this.syncStaffUsers(staffList);
+          }, 1500);
+        }
       },
       onStaffUserDelete: (id) => {
-        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot) this.deleteStaffUser(id);
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.deleteStaffUser(id);
+        }
+      },
+      onLocationsBatch: (locations) => {
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          if (this.locationsSyncTimeout) clearTimeout(this.locationsSyncTimeout);
+          this.locationsSyncTimeout = setTimeout(() => {
+            this.syncLocations(locations);
+          }, 1500);
+        }
+      },
+      onBranchInventoryBatch: (inventory) => {
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          if (this.branchInventorySyncTimeout) clearTimeout(this.branchInventorySyncTimeout);
+          this.branchInventorySyncTimeout = setTimeout(() => {
+            this.syncBranchInventoryList(inventory);
+          }, 1500);
+        }
+      },
+      onStockTransfersBatch: (transfers) => {
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          if (this.stockTransfersSyncTimeout) clearTimeout(this.stockTransfersSyncTimeout);
+          this.stockTransfersSyncTimeout = setTimeout(() => {
+            this.syncStockTransfers(transfers);
+          }, 1500);
+        }
       },
     });
   }
@@ -378,7 +352,7 @@ export class FirestoreSyncService {
                 else merged.push(remote);
               });
               const cleanMerged = merged.filter(u => !isMockStaffUser(u));
-              StorageService.saveStaffUsers(cleanMerged, true);
+              StorageService.saveStaffUsers(cleanMerged, false);
               this.updateStatus({ lastSyncedAt: new Date(), error: null });
             } finally {
               this.isProcessingRemoteSnapshot = false;
@@ -397,7 +371,7 @@ export class FirestoreSyncService {
             try {
               const current = StorageService.getSettings();
               const merged = this.mergeSettingsSafely(current, remoteSettings);
-              StorageService.saveSettings(merged, true);
+              StorageService.saveSettings(merged, false);
               this.updateStatus({ lastSyncedAt: new Date(), error: null });
             } finally {
               this.isProcessingRemoteSnapshot = false;
@@ -476,7 +450,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveProducts([]);
+            StorageService.saveProducts([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -495,7 +469,7 @@ export class FirestoreSyncService {
           });
 
           // Strictly replace the local state with authoritative Firestore products list
-          StorageService.saveProducts(remoteProducts);
+          StorageService.saveProducts(remoteProducts, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Products listener error:', err?.message || err);
@@ -519,7 +493,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveSales([]);
+            StorageService.saveSales([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -538,7 +512,7 @@ export class FirestoreSyncService {
             return timeB - timeA;
           });
 
-          StorageService.saveSales(remoteSales);
+          StorageService.saveSales(remoteSales, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Sales listener error:', err?.message || err);
@@ -562,7 +536,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveCreditSales([]);
+            StorageService.saveCreditSales([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -575,7 +549,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.saveCreditSales(remoteCreditSales);
+          StorageService.saveCreditSales(remoteCreditSales, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Credit sales listener error:', err?.message || err);
@@ -599,7 +573,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.savePurchases([]);
+            StorageService.savePurchases([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -612,7 +586,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.savePurchases(remotePurchases);
+          StorageService.savePurchases(remotePurchases, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Purchases listener error:', err?.message || err);
@@ -636,7 +610,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveCustomers([]);
+            StorageService.saveCustomers([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -649,7 +623,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.saveCustomers(remoteCustomers);
+          StorageService.saveCustomers(remoteCustomers, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Customers listener error:', err?.message || err);
@@ -673,7 +647,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveExpenses([]);
+            StorageService.saveExpenses([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -686,7 +660,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.saveExpenses(remoteExpenses);
+          StorageService.saveExpenses(remoteExpenses, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Expenses listener error:', err?.message || err);
@@ -703,7 +677,7 @@ export class FirestoreSyncService {
           if (Array.isArray(categories)) {
             this.isProcessingRemoteSnapshot = true;
             try {
-              StorageService.saveExpenseCategories(categories);
+              StorageService.saveExpenseCategories(categories, false);
               this.updateStatus({ lastSyncedAt: new Date(), error: null });
             } finally {
               this.isProcessingRemoteSnapshot = false;
@@ -727,7 +701,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveSuppliers([]);
+            StorageService.saveSuppliers([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -740,7 +714,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.saveSuppliers(remoteSuppliers);
+          StorageService.saveSuppliers(remoteSuppliers, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Suppliers listener error:', err?.message || err);
@@ -777,7 +751,7 @@ export class FirestoreSyncService {
           });
 
           if (remoteStaff.length > 0) {
-            StorageService.saveStaffUsers(remoteStaff);
+            StorageService.saveStaffUsers(remoteStaff, false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
           }
         } catch (err: any) {
@@ -795,7 +769,7 @@ export class FirestoreSyncService {
           if (perms) {
             this.isProcessingRemoteSnapshot = true;
             try {
-              StorageService.saveRolePermissions(perms);
+              StorageService.saveRolePermissions(perms, false);
               this.updateStatus({ lastSyncedAt: new Date(), error: null });
             } finally {
               this.isProcessingRemoteSnapshot = false;
@@ -812,7 +786,7 @@ export class FirestoreSyncService {
           if (remoteDrawer && (remoteDrawer.openingFloat !== undefined || remoteDrawer.status !== undefined)) {
             this.isProcessingRemoteSnapshot = true;
             try {
-              StorageService.saveCashDrawer(remoteDrawer);
+              StorageService.saveCashDrawer(remoteDrawer, false);
               this.updateStatus({ lastSyncedAt: new Date(), error: null });
             } finally {
               this.isProcessingRemoteSnapshot = false;
@@ -836,7 +810,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.savePreOrders([]);
+            StorageService.savePreOrders([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -849,7 +823,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.savePreOrders(remotePreOrders);
+          StorageService.savePreOrders(remotePreOrders, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Pre-orders listener error:', err?.message || err);
@@ -873,7 +847,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveStockAdjustments([]);
+            StorageService.saveStockAdjustments([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -886,7 +860,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.saveStockAdjustments(remoteAdjs);
+          StorageService.saveStockAdjustments(remoteAdjs, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Stock adjustments listener error:', err?.message || err);
@@ -910,7 +884,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.savePriceChanges([]);
+            StorageService.savePriceChanges([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -923,7 +897,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.savePriceChanges(remotePcs);
+          StorageService.savePriceChanges(remotePcs, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Price changes listener error:', err?.message || err);
@@ -947,7 +921,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveStockAudits([]);
+            StorageService.saveStockAudits([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -960,7 +934,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.saveStockAudits(remoteAudits);
+          StorageService.saveStockAudits(remoteAudits, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Stock audits listener error:', err?.message || err);
@@ -984,7 +958,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveDamageLogs([]);
+            StorageService.saveDamageLogs([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -997,7 +971,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.saveDamageLogs(remoteDamage);
+          StorageService.saveDamageLogs(remoteDamage, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Damage logs listener error:', err?.message || err);
@@ -1021,7 +995,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveAnnouncements([]);
+            StorageService.saveAnnouncements([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -1034,7 +1008,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.saveAnnouncements(remoteAnnounce);
+          StorageService.saveAnnouncements(remoteAnnounce, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Announcements listener error:', err?.message || err);
@@ -1058,7 +1032,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveChatMessages([]);
+            StorageService.saveChatMessages([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -1071,7 +1045,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.saveChatMessages(remoteChat);
+          StorageService.saveChatMessages(remoteChat, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Chat messages listener error:', err?.message || err);
@@ -1095,7 +1069,7 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveAuditLogs([]);
+            StorageService.saveAuditLogs([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -1108,7 +1082,7 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.saveAuditLogs(remoteLogs);
+          StorageService.saveAuditLogs(remoteLogs, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Audit logs listener error:', err?.message || err);
@@ -1117,6 +1091,69 @@ export class FirestoreSyncService {
         }
       }, (err) => console.warn('[FirestoreSync] Audit logs listener:', err.message));
       this.unsubscribers.push(unsubAudit);
+
+      // 21. Locations & Warehouses Listener
+      const unsubLocations = onSnapshot(collection(db, 'locations'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          if (!snap.empty) {
+            const remoteLocs: StoreLocation[] = [];
+            snap.forEach(d => {
+              const data = d.data() as StoreLocation;
+              if (data) remoteLocs.push({ ...data, id: data.id || d.id });
+            });
+            StorageService.saveLocations(remoteLocs, false);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+          }
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Locations listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
+        }
+      }, (err) => console.warn('[FirestoreSync] Locations listener warning:', err.message));
+      this.unsubscribers.push(unsubLocations);
+
+      // 22. Branch Inventory Localized Stock Ledger Listener
+      const unsubBranchInv = onSnapshot(collection(db, 'branch_inventory'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          if (!snap.empty) {
+            const remoteInv: BranchInventory[] = [];
+            snap.forEach(d => {
+              const data = d.data() as BranchInventory;
+              if (data) remoteInv.push({ ...data, id: data.id || d.id });
+            });
+            StorageService.saveBranchInventoryList(remoteInv, false);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+          }
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Branch inventory listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
+        }
+      }, (err) => console.warn('[FirestoreSync] Branch inventory listener warning:', err.message));
+      this.unsubscribers.push(unsubBranchInv);
+
+      // 23. Inter-Branch Stock Transfers Listener
+      const unsubTransfers = onSnapshot(collection(db, 'stock_transfers'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          if (!snap.empty) {
+            const remoteTransfers: StockTransfer[] = [];
+            snap.forEach(d => {
+              const data = d.data() as StockTransfer;
+              if (data) remoteTransfers.push({ ...data, id: data.id || d.id });
+            });
+            StorageService.saveStockTransfers(remoteTransfers, false);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+          }
+        } catch (err: any) {
+          console.warn('[FirestoreSync] Stock transfers listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
+        }
+      }, (err) => console.warn('[FirestoreSync] Stock transfers listener warning:', err.message));
+      this.unsubscribers.push(unsubTransfers);
 
       this.updateStatus({ isConnected: true, error: null });
     } catch (err: any) {
@@ -1195,10 +1232,12 @@ export class FirestoreSyncService {
     // 2. If online and authenticated with Firebase, execute atomic Firestore transaction
     if (FirebaseAuthService.isAuthenticated() && typeof navigator !== 'undefined' && navigator.onLine) {
       try {
+        const saleLocId = sale.locationId || StorageService.getActiveLocationId();
         await runTransaction(db, async (transaction) => {
           // Distinct products involved in this transaction
           const distinctProductIds = Array.from(new Set(cartItems.map(i => i.product.id)));
           const productDocs: { id: string; ref: any; data: Product }[] = [];
+          const branchDocs: { prodId: string; ref: any; data?: BranchInventory }[] = [];
 
           // All reads MUST execute before any writes in Firestore transactions
           for (const prodId of distinctProductIds) {
@@ -1210,6 +1249,19 @@ export class FirestoreSyncService {
                 ref: productRef,
                 data: productSnap.data() as Product,
               });
+            }
+
+            // Read branch localized stock
+            const branchRef = doc(db, 'branch_inventory', `${prodId}_${saleLocId}`);
+            const branchSnap = await transaction.get(branchRef);
+            if (branchSnap.exists()) {
+              branchDocs.push({
+                prodId,
+                ref: branchRef,
+                data: branchSnap.data() as BranchInventory,
+              });
+            } else {
+              branchDocs.push({ prodId, ref: branchRef });
             }
           }
 
@@ -1225,6 +1277,17 @@ export class FirestoreSyncService {
               throw new Error(
                 `Cloud Stock Conflict: "${liveProd.name}" only has ${liveSellable} sellable units in cloud database. Another terminal may have just finalized a sale.`
               );
+            }
+
+            // Also check branch-scoped inventory if available
+            const branchInfo = branchDocs.find(b => b.prodId === prodInfo.id);
+            if (branchInfo?.data) {
+              const branchAvail = branchInfo.data.availableStock ?? branchInfo.data.onHandStock ?? 0;
+              if (totalQtySold > branchAvail) {
+                throw new Error(
+                  `Branch Stock Conflict: "${liveProd.name}" only has ${branchAvail} available units at this location.`
+                );
+              }
             }
 
             const usedImeis = soldItemsOfProd.map(i => i.selectedImei).filter(Boolean) as string[];
@@ -1263,11 +1326,47 @@ export class FirestoreSyncService {
               imeiPairs: updatedImeiPairs || [],
               lastModifiedAt: new Date().toISOString(),
             }));
+
+            // Write updated localized branch inventory
+            if (branchInfo) {
+              const currentOnHand = branchInfo.data?.onHandStock ?? liveProd.stock ?? 0;
+              const currentReserved = branchInfo.data?.reservedStock ?? 0;
+              const newBranchOnHand = Math.max(0, currentOnHand - totalQtySold);
+              const newBranchAvail = Math.max(0, newBranchOnHand - currentReserved);
+
+              transaction.set(branchInfo.ref, sanitizeForFirestore({
+                id: `${prodInfo.id}_${saleLocId}`,
+                productId: prodInfo.id,
+                locationId: saleLocId,
+                onHandStock: newBranchOnHand,
+                reservedStock: currentReserved,
+                availableStock: newBranchAvail,
+                minThreshold: branchInfo.data?.minThreshold || liveProd.minStockAlert || 2,
+                localSellingPrice: branchInfo.data?.localSellingPrice || liveProd.sellingPrice,
+                updatedAt: new Date().toISOString(),
+              }), { merge: true });
+            }
+
+            // Update device_units status for serialized devices sold
+            for (const imei of allUsedImeis) {
+              const deviceRef = doc(db, 'device_units', imei);
+              transaction.set(deviceRef, sanitizeForFirestore({
+                imei,
+                productId: prodInfo.id,
+                currentLocationId: saleLocId,
+                status: 'sold',
+                soldInvoiceId: sale.id,
+                soldAt: new Date().toISOString(),
+              }), { merge: true });
+            }
           }
 
-          // Write sale record in same atomic transaction
+          // Write sale record with locationId in same atomic transaction
           const saleDocRef = doc(db, 'sales', sale.id);
-          transaction.set(saleDocRef, sanitizeForFirestore(sale));
+          transaction.set(saleDocRef, sanitizeForFirestore({
+            ...sale,
+            locationId: saleLocId,
+          }));
 
           // Write credit record if present
           if (creditRecord) {
@@ -1294,6 +1393,280 @@ export class FirestoreSyncService {
     }
 
     return localResult;
+  }
+
+  // ==========================================
+  // ATOMIC STOCK TRANSFERS (3-WAY HANDSHAKE)
+  // ==========================================
+
+  /**
+   * Executes atomic Transfer Request:
+   * Increments origin location reservedStock and records transfer in requested status.
+   */
+  public async executeAtomicTransferRequest(transfer: StockTransfer): Promise<{ success: boolean; error?: string }> {
+    if (!FirebaseAuthService.isAuthenticated() || typeof navigator === 'undefined' || !navigator.onLine) {
+      return { success: true };
+    }
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        // Read origin branch inventory documents for all items
+        const branchRefs: Array<{ ref: any; item: any; currentData?: BranchInventory }> = [];
+
+        for (const item of transfer.items) {
+          const bRef = doc(db, 'branch_inventory', `${item.productId}_${transfer.fromLocationId}`);
+          const snap = await transaction.get(bRef);
+          branchRefs.push({
+            ref: bRef,
+            item,
+            currentData: snap.exists() ? (snap.data() as BranchInventory) : undefined,
+          });
+        }
+
+        // Concurrency check: Ensure origin branch has enough available stock
+        for (const b of branchRefs) {
+          if (b.currentData) {
+            const avail = b.currentData.availableStock ?? b.currentData.onHandStock ?? 0;
+            if (avail < b.item.requestedQty) {
+              throw new Error(
+                `Transfer Request Conflict: "${b.item.productName}" only has ${avail} available units at ${transfer.fromLocationName}.`
+              );
+            }
+          }
+        }
+
+        // Apply reservations
+        for (const b of branchRefs) {
+          const currentOnHand = b.currentData?.onHandStock ?? 0;
+          const currentReserved = b.currentData?.reservedStock ?? 0;
+          const newReserved = currentReserved + b.item.requestedQty;
+          const newAvail = Math.max(0, currentOnHand - newReserved);
+
+          transaction.set(b.ref, sanitizeForFirestore({
+            id: `${b.item.productId}_${transfer.fromLocationId}`,
+            productId: b.item.productId,
+            locationId: transfer.fromLocationId,
+            onHandStock: currentOnHand,
+            reservedStock: newReserved,
+            availableStock: newAvail,
+            updatedAt: new Date().toISOString(),
+          }), { merge: true });
+        }
+
+        // Write transfer record
+        const trfRef = doc(db, 'stock_transfers', transfer.id);
+        transaction.set(trfRef, sanitizeForFirestore(transfer));
+      });
+
+      this.updateStatus({ lastSyncedAt: new Date(), error: null });
+      return { success: true };
+    } catch (err: any) {
+      console.error('[FirestoreSync] executeAtomicTransferRequest error:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Executes atomic Transfer Dispatch:
+   * Decrements origin onHandStock, releases reservedStock, sets serial devices to 'in_transit'.
+   */
+  public async executeAtomicTransferDispatch(transfer: StockTransfer): Promise<{ success: boolean; error?: string }> {
+    if (!FirebaseAuthService.isAuthenticated() || typeof navigator === 'undefined' || !navigator.onLine) {
+      return { success: true };
+    }
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        // Read and update origin branch inventory
+        for (const item of transfer.items) {
+          const bRef = doc(db, 'branch_inventory', `${item.productId}_${transfer.fromLocationId}`);
+          const snap = await transaction.get(bRef);
+          const current = snap.exists() ? (snap.data() as BranchInventory) : undefined;
+
+          const currentOnHand = current?.onHandStock ?? item.dispatchedQty;
+          const currentReserved = current?.reservedStock ?? item.requestedQty;
+          const newOnHand = Math.max(0, currentOnHand - item.dispatchedQty);
+          const newReserved = Math.max(0, currentReserved - item.requestedQty);
+
+          transaction.set(bRef, sanitizeForFirestore({
+            id: `${item.productId}_${transfer.fromLocationId}`,
+            productId: item.productId,
+            locationId: transfer.fromLocationId,
+            onHandStock: newOnHand,
+            reservedStock: newReserved,
+            availableStock: Math.max(0, newOnHand - newReserved),
+            updatedAt: new Date().toISOString(),
+          }), { merge: true });
+
+          // Update serialized IMEIs to 'in_transit'
+          if (item.imeiList && item.imeiList.length > 0) {
+            for (const imei of item.imeiList) {
+              const devRef = doc(db, 'device_units', imei);
+              transaction.set(devRef, sanitizeForFirestore({
+                imei,
+                productId: item.productId,
+                currentLocationId: transfer.fromLocationId,
+                status: 'in_transit',
+                activeTransferId: transfer.id,
+                updatedAt: new Date().toISOString(),
+              }), { merge: true });
+            }
+          }
+        }
+
+        // Update transfer doc to dispatched
+        const trfRef = doc(db, 'stock_transfers', transfer.id);
+        transaction.set(trfRef, sanitizeForFirestore(transfer));
+      });
+
+      this.updateStatus({ lastSyncedAt: new Date(), error: null });
+      return { success: true };
+    } catch (err: any) {
+      console.error('[FirestoreSync] executeAtomicTransferDispatch error:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Executes atomic Transfer Receive:
+   * Increments destination onHandStock, updates serial devices to 'in_stock' at destination,
+   * and auto-writes DamageLog if any discrepancy is detected.
+   */
+  public async executeAtomicTransferReceive(
+    transfer: StockTransfer,
+    damageLog?: DamageLog
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!FirebaseAuthService.isAuthenticated() || typeof navigator === 'undefined' || !navigator.onLine) {
+      return { success: true };
+    }
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        // Increment destination branch inventory
+        for (const item of transfer.items) {
+          const bRef = doc(db, 'branch_inventory', `${item.productId}_${transfer.toLocationId}`);
+          const snap = await transaction.get(bRef);
+          const current = snap.exists() ? (snap.data() as BranchInventory) : undefined;
+
+          const currentOnHand = current?.onHandStock ?? 0;
+          const currentReserved = current?.reservedStock ?? 0;
+          const newOnHand = currentOnHand + item.receivedQty;
+
+          transaction.set(bRef, sanitizeForFirestore({
+            id: `${item.productId}_${transfer.toLocationId}`,
+            productId: item.productId,
+            locationId: transfer.toLocationId,
+            onHandStock: newOnHand,
+            reservedStock: currentReserved,
+            availableStock: Math.max(0, newOnHand - currentReserved),
+            updatedAt: new Date().toISOString(),
+          }), { merge: true });
+
+          // Relocate verified IMEIs to destination
+          const imeisToRelocate = item.receivedImeiList || item.imeiList || [];
+          for (const imei of imeisToRelocate) {
+            const devRef = doc(db, 'device_units', imei);
+            transaction.set(devRef, sanitizeForFirestore({
+              imei,
+              productId: item.productId,
+              currentLocationId: transfer.toLocationId,
+              status: 'in_stock',
+              activeTransferId: null,
+              lastReceivedAt: new Date().toISOString(),
+            }), { merge: true });
+          }
+        }
+
+        // Update transfer doc
+        const trfRef = doc(db, 'stock_transfers', transfer.id);
+        transaction.set(trfRef, sanitizeForFirestore(transfer));
+
+        // Auto-create DamageLog in transaction if transit discrepancy occurred
+        if (damageLog?.id) {
+          const dmgRef = doc(db, 'damageLogs', damageLog.id);
+          transaction.set(dmgRef, sanitizeForFirestore(damageLog));
+        }
+      });
+
+      this.updateStatus({ lastSyncedAt: new Date(), error: null });
+      return { success: true };
+    } catch (err: any) {
+      console.error('[FirestoreSync] executeAtomicTransferReceive error:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Executes atomic Transfer Rejection:
+   * Releases origin branch reservedStock.
+   */
+  public async executeAtomicTransferReject(transfer: StockTransfer): Promise<{ success: boolean; error?: string }> {
+    if (!FirebaseAuthService.isAuthenticated() || typeof navigator === 'undefined' || !navigator.onLine) {
+      return { success: true };
+    }
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        for (const item of transfer.items) {
+          const bRef = doc(db, 'branch_inventory', `${item.productId}_${transfer.fromLocationId}`);
+          const snap = await transaction.get(bRef);
+          if (snap.exists()) {
+            const current = snap.data() as BranchInventory;
+            const newReserved = Math.max(0, (current.reservedStock || 0) - item.requestedQty);
+            transaction.update(bRef, {
+              reservedStock: newReserved,
+              availableStock: Math.max(0, (current.onHandStock || 0) - newReserved),
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        }
+
+        const trfRef = doc(db, 'stock_transfers', transfer.id);
+        transaction.set(trfRef, sanitizeForFirestore(transfer));
+      });
+
+      this.updateStatus({ lastSyncedAt: new Date(), error: null });
+      return { success: true };
+    } catch (err: any) {
+      console.error('[FirestoreSync] executeAtomicTransferReject error:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Multi-Branch Collection Pushes
+  public async syncLocations(locations: StoreLocation[]): Promise<void> {
+    await this.batchWriteCollection('locations', locations, l => l.id);
+  }
+
+  public async syncLocation(location: StoreLocation): Promise<void> {
+    if (!location?.id) return;
+    try {
+      const docRef = doc(db, 'locations', location.id);
+      await setDoc(docRef, sanitizeForFirestore({
+        ...location,
+        updatedAt: new Date().toISOString(),
+      }), { merge: true });
+    } catch (err: any) {
+      console.warn('[FirestoreSync] Error syncing location:', err?.message || err);
+    }
+  }
+
+  public async syncBranchInventoryList(list: BranchInventory[]): Promise<void> {
+    await this.batchWriteCollection('branch_inventory', list, item => item.id);
+  }
+
+  public async syncStockTransfers(transfers: StockTransfer[]): Promise<void> {
+    await this.batchWriteCollection('stock_transfers', transfers, t => t.id);
+  }
+
+  public async syncStockTransfer(transfer: StockTransfer): Promise<void> {
+    if (!transfer?.id) return;
+    try {
+      const docRef = doc(db, 'stock_transfers', transfer.id);
+      await setDoc(docRef, sanitizeForFirestore(transfer), { merge: true });
+    } catch (err: any) {
+      console.warn('[FirestoreSync] Error syncing transfer:', err?.message || err);
+    }
   }
 
   // ==========================================
@@ -1806,6 +2179,10 @@ export class FirestoreSyncService {
    * Automatically pushes all queued pending_audit_logs to Firestore once network connection is restored.
    */
   public async flushPendingAuditLogs(): Promise<{ flushed: number; remaining: number }> {
+    if (this.isFlushingLogs) {
+      return { flushed: 0, remaining: this.getPendingAuditLogs().length };
+    }
+
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       return { flushed: 0, remaining: this.getPendingAuditLogs().length };
     }
@@ -1820,36 +2197,41 @@ export class FirestoreSyncService {
       return { flushed: 0, remaining: 0 };
     }
 
+    this.isFlushingLogs = true;
     console.log(`[FirestoreSync] Flushing ${pending.length} queued activity logs to Firestore...`);
     let flushedCount = 0;
     const remaining: AuditLogEntry[] = [];
 
-    for (const log of pending) {
-      try {
-        const sanitized = sanitizeForFirestore({
-          ...log,
-          expireAt: log.expireAt || new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString(),
-          syncedAt: new Date().toISOString()
-        });
+    try {
+      // Chunk into batches of 40 (each log writes to activityLogs + auditLogs, so 80 operations per batch)
+      const BATCH_CHUNK_SIZE = 40;
+      for (let i = 0; i < pending.length; i += BATCH_CHUNK_SIZE) {
+        const chunk = pending.slice(i, i + BATCH_CHUNK_SIZE);
+        const batch = writeBatch(db);
 
-        const activityDocRef = doc(db, 'activityLogs', log.id);
-        const auditDocRef = doc(db, 'auditLogs', log.id);
+        for (const log of chunk) {
+          if (!log?.id) continue;
+          const sanitized = sanitizeForFirestore({
+            ...log,
+            expireAt: log.expireAt || new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString(),
+            syncedAt: new Date().toISOString()
+          });
+          const actRef = doc(db, 'activityLogs', log.id);
+          const audRef = doc(db, 'auditLogs', log.id);
+          batch.set(actRef, sanitized, { merge: true });
+          batch.set(audRef, sanitized, { merge: true });
+        }
 
-        await Promise.allSettled([
-          setDoc(activityDocRef, sanitized),
-          setDoc(auditDocRef, sanitized)
-        ]);
-
-        flushedCount++;
-      } catch (err: any) {
-        // If document already exists and immutability blocks update, consider document persisted
-        if (err?.code === 'permission-denied' && (err?.message?.includes('update') || err?.message?.includes('write'))) {
-          flushedCount++;
-        } else {
-          console.warn(`[FirestoreSync] Could not flush queued log ${log.id}, keeping in queue:`, err?.message || err);
-          remaining.push(log);
+        try {
+          await batch.commit();
+          flushedCount += chunk.length;
+        } catch (batchErr: any) {
+          console.warn('[FirestoreSync] Batch commit error during log flush:', batchErr?.message || batchErr);
+          remaining.push(...chunk);
         }
       }
+    } finally {
+      this.isFlushingLogs = false;
     }
 
     this.savePendingAuditLogs(remaining);
@@ -1896,8 +2278,8 @@ export class FirestoreSyncService {
           });
           const actRef = doc(db, 'activityLogs', item.id);
           const audRef = doc(db, 'auditLogs', item.id);
-          batch.set(actRef, sanitized);
-          batch.set(audRef, sanitized);
+          batch.set(actRef, sanitized, { merge: true });
+          batch.set(audRef, sanitized, { merge: true });
         }
         await batch.commit();
       }
@@ -2115,11 +2497,16 @@ export class FirestoreSyncService {
       'personalGoals',
       'personalDebts',
       'facebookPosts',
+      'activityLogs',
+      'auditLogs',
     ];
 
     try {
       let totalDeleted = 0;
       this.isProcessingRemoteSnapshot = true;
+
+      // Clear local pending audit log queue so wiped test logs are not re-queued
+      this.savePendingAuditLogs([]);
 
       for (const colName of collectionsToClear) {
         try {
@@ -2192,10 +2579,11 @@ export class FirestoreSyncService {
 
       await this.batchWriteCollection('staffUsers', staffUsers, u => u.id);
 
-      // Seed initialization log in auditLogs
+      // Seed initialization log in auditLogs and activityLogs
       const auditLog = StorageService.getAuditLogs();
       if (auditLog.length > 0) {
         await this.batchWriteCollection('auditLogs', auditLog, al => al.id);
+        await this.batchWriteCollection('activityLogs', auditLog, al => al.id);
       }
 
       this.isProcessingRemoteSnapshot = false;
@@ -2255,7 +2643,7 @@ export class FirestoreSyncService {
         if (catSnap.exists()) {
           const categories = catSnap.data()?.categories as ExpenseCategoryItem[];
           if (Array.isArray(categories)) {
-            StorageService.saveExpenseCategories(categories);
+            StorageService.saveExpenseCategories(categories, false);
             count += categories.length;
           }
         }
@@ -2269,7 +2657,7 @@ export class FirestoreSyncService {
         if (permSnap.exists()) {
           const perms = permSnap.data()?.permissions as Record<any, any>;
           if (perms) {
-            StorageService.saveRolePermissions(perms);
+            StorageService.saveRolePermissions(perms, false);
             count += 1;
           }
         }
@@ -2283,7 +2671,7 @@ export class FirestoreSyncService {
         if (drawerSnap.exists()) {
           const remoteDrawer = drawerSnap.data() as CashDrawerRecord;
           if (remoteDrawer && (remoteDrawer.openingFloat !== undefined || remoteDrawer.status !== undefined)) {
-            StorageService.saveCashDrawer(remoteDrawer);
+            StorageService.saveCashDrawer(remoteDrawer, false);
             count += 1;
           }
         }
@@ -2321,35 +2709,35 @@ export class FirestoreSyncService {
       // Pull all remaining collections - strictly replacing local state with fetched data
       await pullCollection<Product>('products', items => {
         const filtered = items.filter(p => !isMockProduct(p));
-        StorageService.saveProducts(filtered);
+        StorageService.saveProducts(filtered, false);
       });
-      await pullCollection<Sale>('sales', items => StorageService.saveSales(items));
-      await pullCollection<CreditSaleRecord>('creditSales', items => StorageService.saveCreditSales(items));
-      await pullCollection<PurchaseRecord>('purchases', items => StorageService.savePurchases(items));
-      await pullCollection<Customer>('customers', items => StorageService.saveCustomers(items));
-      await pullCollection<ExpenseRecord>('expenses', items => StorageService.saveExpenses(items));
-      await pullCollection<Supplier>('suppliers', items => StorageService.saveSuppliers(items));
+      await pullCollection<Sale>('sales', items => StorageService.saveSales(items, false));
+      await pullCollection<CreditSaleRecord>('creditSales', items => StorageService.saveCreditSales(items, false));
+      await pullCollection<PurchaseRecord>('purchases', items => StorageService.savePurchases(items, false));
+      await pullCollection<Customer>('customers', items => StorageService.saveCustomers(items, false));
+      await pullCollection<ExpenseRecord>('expenses', items => StorageService.saveExpenses(items, false));
+      await pullCollection<Supplier>('suppliers', items => StorageService.saveSuppliers(items, false));
       await pullCollection<StaffUser>('staffUsers', items => {
         const clean = items.filter(u => !isMockStaffUser(u));
         if (clean.length > 0) {
-          StorageService.saveStaffUsers(clean);
+          StorageService.saveStaffUsers(clean, false);
         }
       });
-      await pullCollection<PreOrder>('preOrders', items => StorageService.savePreOrders(items));
-      await pullCollection<StockAdjustment>('stockAdjustments', items => StorageService.saveStockAdjustments(items));
-      await pullCollection<PriceChangeRecord>('priceChanges', items => StorageService.savePriceChanges(items));
-      await pullCollection<StockAuditSession>('stockAudits', items => StorageService.saveStockAudits(items));
-      await pullCollection<DamageLog>('damageLogs', items => StorageService.saveDamageLogs(items));
-      await pullCollection<Announcement>('announcements', items => StorageService.saveAnnouncements(items));
-      await pullCollection<ChatChannel>('chatChannels', items => StorageService.saveChatChannels(items));
-      await pullCollection<ChatMessage>('chatMessages', items => StorageService.saveChatMessages(items));
-      await pullCollection<PersonalWallet>('personalWallets', items => StorageService.savePersonalWallets(items));
-      await pullCollection<PersonalTransaction>('personalTransactions', items => StorageService.savePersonalTransactions(items));
-      await pullCollection<PersonalBudget>('personalBudgets', items => StorageService.savePersonalBudgets(items));
-      await pullCollection<PersonalSavingsGoal>('personalGoals', items => StorageService.savePersonalSavingsGoals(items));
-      await pullCollection<PersonalDebtIOU>('personalDebts', items => StorageService.savePersonalDebts(items));
-      await pullCollection<FacebookAdPostRecord>('facebookPosts', items => StorageService.saveFacebookPosts(items));
-      await pullCollection<AuditLogEntry>('auditLogs', items => StorageService.saveAuditLogs(items));
+      await pullCollection<PreOrder>('preOrders', items => StorageService.savePreOrders(items, false));
+      await pullCollection<StockAdjustment>('stockAdjustments', items => StorageService.saveStockAdjustments(items, false));
+      await pullCollection<PriceChangeRecord>('priceChanges', items => StorageService.savePriceChanges(items, false));
+      await pullCollection<StockAuditSession>('stockAudits', items => StorageService.saveStockAudits(items, false));
+      await pullCollection<DamageLog>('damageLogs', items => StorageService.saveDamageLogs(items, false));
+      await pullCollection<Announcement>('announcements', items => StorageService.saveAnnouncements(items, false));
+      await pullCollection<ChatChannel>('chatChannels', items => StorageService.saveChatChannels(items, false));
+      await pullCollection<ChatMessage>('chatMessages', items => StorageService.saveChatMessages(items, false));
+      await pullCollection<PersonalWallet>('personalWallets', items => StorageService.savePersonalWallets(items, false));
+      await pullCollection<PersonalTransaction>('personalTransactions', items => StorageService.savePersonalTransactions(items, false));
+      await pullCollection<PersonalBudget>('personalBudgets', items => StorageService.savePersonalBudgets(items, false));
+      await pullCollection<PersonalSavingsGoal>('personalGoals', items => StorageService.savePersonalSavingsGoals(items, false));
+      await pullCollection<PersonalDebtIOU>('personalDebts', items => StorageService.savePersonalDebts(items, false));
+      await pullCollection<FacebookAdPostRecord>('facebookPosts', items => StorageService.saveFacebookPosts(items, false));
+      await pullCollection<AuditLogEntry>('auditLogs', items => StorageService.saveAuditLogs(items, false));
 
       this.isProcessingRemoteSnapshot = false;
 

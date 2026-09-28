@@ -66,6 +66,7 @@ export const initialSettings: ShopSettings = {
   currentStaffRole: 'Cashier',
   currentStaffId: '',
   enableSoundEffects: true,
+  systemLanguage: 'my',
   invoiceCustomization: {
     headerTitle: 'WIN MOBILE',
     subHeader: 'Smartphones & Genuine Gadgets Retail',

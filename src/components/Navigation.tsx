@@ -30,12 +30,16 @@ import {
   TrendingUp,
   ShieldAlert,
   Wallet,
-  History
+  History,
+  Building2,
+  ArrowRightLeft
 } from 'lucide-react';
 import { ShopSettings, StaffUser, AppTab, StaffRole, RolePermissions } from '../types';
 import { AppLink } from './common/AppLink';
 import { isTabAccessibleForUser, getEffectiveUserPermissions } from '../utils/permissionUtils';
 import { StorageService } from '../utils/storage';
+import { useLanguage } from '../context/LanguageContext';
+import { LanguageSwitcher } from './common/LanguageSwitcher';
 
 export type { AppTab };
 
@@ -85,6 +89,7 @@ export const Navigation: React.FC<NavigationProps> = ({
 }) => {
   const effectivePerms = getEffectiveUserPermissions(currentStaffUser, rolePermissions);
   const canAccessAi = effectivePerms.canAccessAiCopilot ?? true;
+  const { t, isBurmese } = useLanguage();
 
   const quarantinedBadgeCount = React.useMemo(() => {
     if (typeof quarantinedCount === 'number') return quarantinedCount;
@@ -95,33 +100,41 @@ export const Navigation: React.FC<NavigationProps> = ({
     }
   }, [quarantinedCount, activeTab]);
 
+  const inTransitCount = React.useMemo(() => {
+    try {
+      return StorageService.getStockTransfers().filter(t => t.status === 'dispatched').length;
+    } catch {
+      return 0;
+    }
+  }, [activeTab]);
+
   const navGroups: NavGroup[] = [
     {
-      groupTitle: 'Operations',
+      groupTitle: t('nav.operations', 'Operations'),
       items: [
         {
           id: 'dashboard',
-          label: 'Dashboard',
+          label: t('tab.dashboard', 'Dashboard'),
           icon: LayoutDashboard,
         },
         {
           id: 'pos',
-          label: 'POS Register',
+          label: t('tab.pos', 'POS Register'),
           icon: ShoppingCart,
         },
         {
           id: 'pre_orders',
-          label: 'Pre-Orders & Bookings',
+          label: t('tab.pre_orders', 'Pre-Orders & Bookings'),
           icon: CalendarClock,
         },
         {
           id: 'sales_history',
-          label: 'Sale History & Refunds',
+          label: t('tab.sales_history', 'Sale History & Refunds'),
           icon: Receipt,
         },
         {
           id: 'social_marketing',
-          label: 'Social Media Marketing',
+          label: t('tab.social_marketing', 'Social Media Marketing'),
           icon: Megaphone,
           badge: 'AI',
           badgeColor: 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold',
@@ -129,104 +142,111 @@ export const Navigation: React.FC<NavigationProps> = ({
       ],
     },
     {
-      groupTitle: 'Inventory & Supply',
+      groupTitle: t('nav.inventory_supply', 'Inventory & Supply'),
       items: [
         {
           id: 'inventory',
-          label: 'Inventory & Stock Adjust',
+          label: t('tab.inventory', 'Inventory & Stock Adjust'),
           icon: Package,
-          badge: lowStockCount > 0 ? `${lowStockCount} Low` : null,
+          badge: lowStockCount > 0 ? `${lowStockCount} ${isBurmese ? 'နည်း' : 'Low'}` : null,
           badgeColor: 'bg-amber-500 text-white',
         },
         {
           id: 'quarantine_rma',
-          label: 'Damage & Quarantine RMA',
+          label: t('tab.quarantine_rma', 'Damage & Quarantine RMA'),
           icon: ShieldAlert,
-          badge: quarantinedBadgeCount > 0 ? `${quarantinedBadgeCount} Quarantined` : null,
+          badge: quarantinedBadgeCount > 0 ? `${quarantinedBadgeCount} ${isBurmese ? 'ခွဲထုတ်' : 'Quarantined'}` : null,
           badgeColor: 'bg-rose-500 text-white',
         },
         {
           id: 'stock_check',
-          label: 'Stock Check & Audit',
+          label: t('tab.stock_check', 'Stock Check & Audit'),
           icon: ClipboardCheck,
         },
         {
           id: 'purchases',
-          label: 'Purchases / Stock-In',
+          label: t('tab.purchases', 'Purchases / Stock-In'),
           icon: Truck,
+        },
+        {
+          id: 'branches',
+          label: t('tab.branches', 'Multi-Branch & Transfers'),
+          icon: Building2,
+          badge: inTransitCount > 0 ? `${inTransitCount} ${isBurmese ? 'လမ်းခရီး' : 'Transit'}` : null,
+          badgeColor: 'bg-blue-600 text-white',
         },
       ],
     },
     {
-      groupTitle: 'Financials',
+      groupTitle: t('nav.financials', 'Financials'),
       items: [
         {
           id: 'daily_profit',
-          label: 'Daily & Annual Profit',
+          label: t('tab.daily_profit', 'Daily & Annual Profit'),
           icon: TrendingUp,
           badge: 'P&L',
           badgeColor: 'bg-emerald-100 text-emerald-800',
         },
         {
           id: 'personal_finance',
-          label: 'Personal Finance',
+          label: t('tab.personal_finance', 'Personal Finance'),
           icon: Wallet,
-          badge: 'New',
+          badge: isBurmese ? 'အသစ်' : 'New',
           badgeColor: 'bg-indigo-100 text-indigo-800',
         },
         {
           id: 'credit_sales',
-          label: 'Credit Sales & AR',
+          label: t('tab.credit_sales', 'Credit Sales & AR'),
           icon: HandCoins,
         },
         {
           id: 'cash_drawer',
-          label: 'Cash Drawer & Shifts',
+          label: t('tab.cash_drawer', 'Cash Drawer & Shifts'),
           icon: Landmark,
         },
         {
           id: 'expenses',
-          label: 'Shop Expenses',
+          label: t('tab.expenses', 'Shop Expenses'),
           icon: DollarSign,
         },
       ],
     },
     {
-      groupTitle: 'Analytics & Reports',
+      groupTitle: t('nav.analytics_reports', 'Analytics & Reports'),
       items: [
         {
           id: 'reports',
-          label: 'Business Reports',
+          label: t('tab.reports', 'Business Reports'),
           icon: BarChart3,
         },
       ],
     },
     {
-      groupTitle: 'CRM & Staff',
+      groupTitle: t('nav.crm_staff', 'CRM & Staff'),
       items: [
         {
           id: 'team_chat',
-          label: 'Team Chat & Notice Board',
+          label: t('tab.team_chat', 'Team Chat & Notice Board'),
           icon: MessageSquare,
         },
         {
           id: 'staff_payroll',
-          label: 'Staff Payroll & KPIs',
+          label: t('tab.staff_payroll', 'Staff Payroll & KPIs'),
           icon: DollarSign,
         },
         {
           id: 'crm',
-          label: 'Customers & Suppliers',
+          label: t('tab.crm', 'Customers & Suppliers'),
           icon: Users,
         },
         {
           id: 'roles',
-          label: 'User Roles & PINs',
+          label: t('tab.roles', 'User Roles & PINs'),
           icon: ShieldCheck,
         },
         {
           id: 'audit_logs',
-          label: 'User Activity & Audit Logs',
+          label: t('tab.audit_logs', 'User Activity & Audit Logs'),
           icon: History,
           badge: 'Live',
           badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
@@ -234,16 +254,16 @@ export const Navigation: React.FC<NavigationProps> = ({
       ],
     },
     {
-      groupTitle: 'Configuration',
+      groupTitle: t('nav.administration', 'Configuration'),
       items: [
         {
           id: 'invoice_customizer',
-          label: 'Customize Invoice',
+          label: t('tab.invoice_customizer', 'Customize Invoice'),
           icon: Sliders,
         },
         {
           id: 'settings',
-          label: 'Shop Settings',
+          label: t('tab.settings', 'Shop Settings'),
           icon: Settings,
         },
       ],
@@ -505,6 +525,9 @@ export const Navigation: React.FC<NavigationProps> = ({
               )}
             </div>
 
+            {/* Sidebar Language Switcher */}
+            <LanguageSwitcher variant="sidebar" className="mb-2" />
+
             {onLockTerminal && (
               <button
                 type="button"
@@ -513,7 +536,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                 className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold rounded-xl border border-slate-700/60 flex items-center justify-center gap-2 cursor-pointer transition-colors"
               >
                 <Lock className="w-3.5 h-3.5 text-amber-400" />
-                <span>Lock Terminal</span>
+                <span>{t('navbar.lock_terminal', 'Lock Terminal')}</span>
               </button>
             )}
           </div>

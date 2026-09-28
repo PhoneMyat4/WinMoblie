@@ -324,6 +324,34 @@ export const generatePdfReportTool: ChatCompletionTool = {
   },
 };
 
+// Function Declaration 7: check_market_price_google_search (OpenAI Tool format)
+export const checkMarketPriceGoogleSearchTool: ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: 'check_market_price_google_search',
+    description: 'Perform real-time Live Google Search Grounding to check current Myanmar street retail prices, market benchmark prices, smartphone technical specifications, official launch dates, or currency exchange rates. Use this whenever the user asks about market pricing ("ပြင်ပပေါက်ဈေး", "market price", "retail benchmark", "အပြင်ဈေး"), competitor retail prices, phone specs, launch details, or comparisons with store prices.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query for Google Search (e.g. "Redmi Note 14 Pro 5G price in Myanmar MMK", "iPhone 16 Pro Max market price Yangon", "Samsung Galaxy S24 Ultra specs price")',
+        },
+        phone_model: {
+          type: 'string',
+          description: 'Smartphone model name or brand being queried (e.g. "Redmi Note 14 Pro", "iPhone 16 Pro Max", "Samsung S24 Ultra")',
+        },
+        target_info: {
+          type: 'string',
+          enum: ['market_price', 'specifications', 'launch_date', 'currency_rates', 'general_search'],
+          description: 'The type of information being searched for. Defaults to "market_price".',
+        },
+      },
+      required: ['query'],
+    },
+  },
+};
+
 
 // System Prompt with Guardrails
 const SYSTEM_INSTRUCTION = `You are "Aura", the intelligent AI Store Manager & POS Copilot for a high-volume smartphone retail and electronics store.
@@ -433,6 +461,12 @@ TOOL USAGE & GUARDRAILS:
        - Carefully read all printed text: brand, model name, color, RAM & ROM storage, model numbers, and serial/IMEI barcodes (15 digits each).
        - If user asks to add the unit to inventory and provides prices, invoke 'add_inventory_item'.
        - If prices are missing, tell the user the specs and IMEIs extracted, and ask for target cost and retail selling price.
+
+8. 'check_market_price_google_search':
+   - REAL-TIME LIVE GOOGLE SEARCH GROUNDING:
+     * Use this whenever the user asks about market pricing ("ပြင်ပပေါက်ဈေး", "market price", "retail benchmark", "အပြင်ဈေး"), competitor retail prices in Myanmar, global/official launch prices, unreleased phone specs, release dates, or currency exchange rates.
+     * This searches Google live to fetch verified Myanmar street prices (in MMK Kyats), specs, and source links.
+     * When comparing with store inventory, you can first call 'query_inventory_products' to see our current price, then call 'check_market_price_google_search' to get the current external Myanmar market rate, providing the owner or staff with a comprehensive price benchmark comparison.
 
 COMMUNICATION STYLE:
 - Professional, concise, and structured.
@@ -2047,13 +2081,91 @@ export function executeGeneratePdfReport(args: any, context: PosDataContext) {
   };
 }
 
+/**
+ * Executes Live Google Search Grounding using Gemini 3.5 Flash with googleSearch tool.
+ * Retrieves real-time smartphone retail street prices in Myanmar (Kyats), specs, and source URLs.
+ */
+export async function executeCheckMarketPriceGoogleSearch(
+  args: { query: string; phone_model?: string; target_info?: string },
+  getGenAI: () => any
+): Promise<{
+  success: boolean;
+  query: string;
+  phone_model?: string;
+  target_info?: string;
+  summary: string;
+  sources: Array<{ title: string; url: string }>;
+  searchQueries: string[];
+}> {
+  try {
+    const genAI = getGenAI();
+    const query = (args.query || '').trim();
+    const phoneModel = args.phone_model || '';
+    const targetInfo = args.target_info || 'market_price';
+
+    console.log(`[GoogleSearch Tool] Executing live search for: "${query}" (target: ${targetInfo}, model: ${phoneModel || 'N/A'})`);
+
+    const searchPrompt = `Search Google for real-time information regarding: "${query}".
+Focus details:
+- If market price / retail price: Provide current street retail prices in Myanmar (Kyats / MMK), USD pricing, and price ranges across popular mobile stores in Yangon/Mandalay.
+- If specifications: Provide official specs (RAM, ROM storage variants, Processor chipset, Display refresh rate, Cameras, Battery mAh, Charging wattage).
+- Provide concise, accurate, structured information in polite Burmese (မြန်မာဘာသာ) with model names and specs in English.`;
+
+    const response = await genAI.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: searchPrompt,
+      config: {
+        systemInstruction: `You are an expert smartphone market researcher with real-time Google Search grounding. Search Google to provide verified, up-to-date retail market prices in Myanmar (MMK Kyats) and accurate technical specifications. Always cite key findings accurately. Respond concisely in Burmese.`,
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    const candidate = response.candidates?.[0];
+    const groundingMeta = candidate?.groundingMetadata;
+    const sources: Array<{ title: string; url: string }> = [];
+
+    if (groundingMeta?.groundingChunks) {
+      for (const chunk of groundingMeta.groundingChunks) {
+        if (chunk.web?.uri) {
+          sources.push({
+            title: chunk.web.title || chunk.web.uri,
+            url: chunk.web.uri,
+          });
+        }
+      }
+    }
+
+    return {
+      success: true,
+      query,
+      phone_model: phoneModel,
+      target_info: targetInfo,
+      summary: response.text || 'No detailed search results found.',
+      sources: sources.slice(0, 5),
+      searchQueries: groundingMeta?.webSearchQueries || [query],
+    };
+  } catch (error: any) {
+    console.error('[GoogleSearch Tool] executeCheckMarketPriceGoogleSearch error:', error);
+    return {
+      success: false,
+      query: args.query,
+      phone_model: args.phone_model,
+      target_info: args.target_info,
+      summary: `Google Search Grounding encountered an error: ${error?.message || 'Search service unavailable'}`,
+      sources: [],
+      searchQueries: [],
+    };
+  }
+}
+
 export const openAiAssistantTools: ChatCompletionTool[] = [
   queryPosReportsTool, 
   addInventoryItemTool, 
   updateProductPriceTool, 
   queryInventoryProductsTool,
   postProductAdToFacebookTool,
-  generatePdfReportTool
+  generatePdfReportTool,
+  checkMarketPriceGoogleSearchTool,
 ];
 export const aiAssistantDeclarations = openAiAssistantTools;
 export const AI_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION;

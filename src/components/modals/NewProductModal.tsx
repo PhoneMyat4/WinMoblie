@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Package, X, Plus, Trash2, Check, Barcode, Smartphone, Layers, Sparkles, RefreshCw, Camera, ChevronRight, Calculator, TrendingUp } from 'lucide-react';
+import { Package, X, Plus, Trash2, Check, Barcode, Smartphone, Layers, Sparkles, RefreshCw, Camera, ChevronRight, Calculator, TrendingUp, Globe, ExternalLink, AlertTriangle } from 'lucide-react';
 import { Product, ProductCategory, DeviceCondition, ShopSettings, ImeiPair } from '../../types';
 import { formatImei } from '../../utils/formatters';
 import { 
@@ -14,6 +14,7 @@ import { BoxScannerModal } from './BoxScannerModal';
 import { PriceFormulaModal } from './PriceFormulaModal';
 import { ExtractedBoxSpecs } from '../../utils/boxScannerService';
 import { ProductPhotoUploader } from '../common/ProductPhotoUploader';
+import { authenticatedFetch } from '../../utils/apiClient';
 import { 
   calculateSellingPriceFromFormula, 
   loadFormulaConfig 
@@ -122,6 +123,88 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState<boolean>(false);
   const modelInputRef = useRef<HTMLInputElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Google Search Grounding Specs & Live Market Price State (gemini-3.5-flash with googleSearch tool)
+  const [isSearchingGroundedSpecs, setIsSearchingGroundedSpecs] = useState<boolean>(false);
+  const [groundedSpecsData, setGroundedSpecsData] = useState<{
+    brand?: string;
+    model?: string;
+    officialName?: string;
+    releaseYear?: string;
+    display?: string;
+    processor?: string;
+    ramOptions?: string[];
+    romOptions?: string[];
+    colors?: string[];
+    camera?: string;
+    battery?: string;
+    recommendedSellingPriceMmk?: number;
+    marketPriceRangeMmk?: { min: number; max: number };
+    myanmarMarketSummary?: string;
+  } | null>(null);
+  const [groundedSources, setGroundedSources] = useState<Array<{ title: string; url: string }>>([]);
+  const [groundedSearchQueries, setGroundedSearchQueries] = useState<string[]>([]);
+  const [searchSpecsError, setSearchSpecsError] = useState<string | null>(null);
+  const [isGroundedSpecsExpanded, setIsGroundedSpecsExpanded] = useState<boolean>(false);
+
+  const handleSearchGoogleSpecs = async (customQuery?: string) => {
+    const targetQuery = (customQuery || `${brand || ''} ${model || name || ''}`).trim();
+    if (!targetQuery) {
+      setSearchSpecsError('Please enter a Brand or Model name to research on Google.');
+      return;
+    }
+    setIsSearchingGroundedSpecs(true);
+    setSearchSpecsError(null);
+    try {
+      const res = await authenticatedFetch('/api/products/search-grounded-specs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: targetQuery, brand, model }),
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setGroundedSpecsData(data.data);
+        setGroundedSources(data.groundingMetadata?.sources || []);
+        setGroundedSearchQueries(data.groundingMetadata?.searchQueries || []);
+        setIsGroundedSpecsExpanded(true);
+      } else {
+        throw new Error(data.error || 'Failed to retrieve specs with Google Search Grounding.');
+      }
+    } catch (err: any) {
+      setSearchSpecsError(err.message || 'Google Search Grounding failed.');
+    } finally {
+      setIsSearchingGroundedSpecs(false);
+    }
+  };
+
+  const handleApplyGroundedSpecs = () => {
+    if (!groundedSpecsData) return;
+    if (groundedSpecsData.brand && !brand) setBrand(groundedSpecsData.brand);
+    if (groundedSpecsData.model && !model) setModel(groundedSpecsData.model);
+    if (groundedSpecsData.ramOptions && groundedSpecsData.ramOptions.length > 0 && ram === '-') {
+      setRam(groundedSpecsData.ramOptions[0]);
+    }
+    if (groundedSpecsData.romOptions && groundedSpecsData.romOptions.length > 0) {
+      setRom(groundedSpecsData.romOptions[0]);
+    }
+    if (groundedSpecsData.colors && groundedSpecsData.colors.length > 0) {
+      setColor(groundedSpecsData.colors[0]);
+    }
+    if (groundedSpecsData.recommendedSellingPriceMmk && sellingPrice === 0) {
+      setSellingPrice(groundedSpecsData.recommendedSellingPriceMmk);
+    }
+    // Build descriptive specs
+    const parts: string[] = [];
+    if (groundedSpecsData.officialName) parts.push(`📱 ${groundedSpecsData.officialName}`);
+    if (groundedSpecsData.display) parts.push(`Display: ${groundedSpecsData.display}`);
+    if (groundedSpecsData.processor) parts.push(`Processor: ${groundedSpecsData.processor}`);
+    if (groundedSpecsData.camera) parts.push(`Camera: ${groundedSpecsData.camera}`);
+    if (groundedSpecsData.battery) parts.push(`Battery: ${groundedSpecsData.battery}`);
+    if (groundedSpecsData.myanmarMarketSummary) parts.push(`\nMarket Insight:\n${groundedSpecsData.myanmarMarketSummary}`);
+    if (parts.length > 0) {
+      setDescription(parts.join('\n'));
+    }
+  };
 
   const handleQuickCalculateFormula = () => {
     if (costPrice <= 0) {
@@ -737,6 +820,238 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
               <Camera className="w-4 h-4" />
               <span>Scan Box Photo</span>
             </button>
+          </div>
+
+          {/* GOOGLE SEARCH GROUNDED SPECS & LIVE MARKET PRICE (gemini-3.5-flash) */}
+          <div className="p-4 bg-gradient-to-r from-sky-50/90 via-blue-50/60 to-indigo-50/40 border border-sky-200/90 rounded-2xl shadow-2xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-blue-600 text-white rounded-xl shadow-xs shrink-0">
+                  <Globe className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-xs font-bold text-slate-900">Google Search Grounded Specs & Live Market Price</h4>
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded-full flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" />
+                      gemini-3.5-flash • googleSearch
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-0.5">
+                    Look up verified technical specifications, factory colors, RAM/ROM configs, and live Myanmar street prices directly from Google.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleSearchGoogleSpecs()}
+                  disabled={isSearchingGroundedSpecs}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-xs font-bold rounded-xl shadow-xs hover:shadow-md flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+                >
+                  {isSearchingGroundedSpecs ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Researching Google...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Globe className="w-4 h-4" />
+                      <span>Search Google Specs</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {searchSpecsError && (
+              <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{searchSpecsError}</span>
+              </div>
+            )}
+
+            {/* Grounded Specs Results Card */}
+            {groundedSpecsData && isGroundedSpecsExpanded && (
+              <div className="p-3.5 bg-white border border-blue-200 rounded-xl shadow-xs space-y-3 animate-in fade-in duration-200">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
+                  <div>
+                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <span>{groundedSpecsData.officialName || `${groundedSpecsData.brand} ${groundedSpecsData.model}`}</span>
+                      {groundedSpecsData.releaseYear && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold">
+                          {groundedSpecsData.releaseYear}
+                        </span>
+                      )}
+                    </h5>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Verified via Google Search Grounding • Click any badge below to instantly apply to form
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleApplyGroundedSpecs}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Auto-Fill Form with Grounded Data</span>
+                  </button>
+                </div>
+
+                {/* Specs Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+                  {groundedSpecsData.processor && (
+                    <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Processor / Chipset</span>
+                      <span className="font-semibold text-slate-800 text-[11px]">{groundedSpecsData.processor}</span>
+                    </div>
+                  )}
+                  {groundedSpecsData.display && (
+                    <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Display</span>
+                      <span className="font-semibold text-slate-800 text-[11px]">{groundedSpecsData.display}</span>
+                    </div>
+                  )}
+                  {groundedSpecsData.camera && (
+                    <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Camera Setup</span>
+                      <span className="font-semibold text-slate-800 text-[11px]">{groundedSpecsData.camera}</span>
+                    </div>
+                  )}
+                  {groundedSpecsData.battery && (
+                    <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Battery &amp; Charging</span>
+                      <span className="font-semibold text-slate-800 text-[11px]">{groundedSpecsData.battery}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* RAM, ROM & Color Quick Selectors */}
+                <div className="space-y-2 pt-1">
+                  {/* RAM Options */}
+                  {groundedSpecsData.ramOptions && groundedSpecsData.ramOptions.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                      <span className="text-[11px] font-bold text-slate-500">Official RAM:</span>
+                      {groundedSpecsData.ramOptions.map((r, rIdx) => (
+                        <button
+                          key={rIdx}
+                          type="button"
+                          onClick={() => setRam(r)}
+                          className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                            ram === r
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ROM Storage Options */}
+                  {groundedSpecsData.romOptions && groundedSpecsData.romOptions.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                      <span className="text-[11px] font-bold text-slate-500">Official Storage:</span>
+                      {groundedSpecsData.romOptions.map((ro, roIdx) => (
+                        <button
+                          key={roIdx}
+                          type="button"
+                          onClick={() => setRom(ro)}
+                          className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                            rom === ro
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : 'bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200'
+                          }`}
+                        >
+                          {ro}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Colorway Options */}
+                  {groundedSpecsData.colors && groundedSpecsData.colors.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                      <span className="text-[11px] font-bold text-slate-500">Factory Colors:</span>
+                      {groundedSpecsData.colors.map((c, cIdx) => (
+                        <button
+                          key={cIdx}
+                          type="button"
+                          onClick={() => setColor(c)}
+                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${
+                            color.toLowerCase() === c.toLowerCase()
+                              ? 'bg-slate-900 text-white shadow-xs ring-2 ring-blue-500'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Recommended Myanmar Market Price */}
+                {groundedSpecsData.recommendedSellingPriceMmk && (
+                  <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wide">
+                        Live Myanmar Market Retail Benchmark
+                      </span>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-base font-black text-emerald-950">
+                          {groundedSpecsData.recommendedSellingPriceMmk.toLocaleString()} MMK
+                        </span>
+                        {groundedSpecsData.marketPriceRangeMmk && (
+                          <span className="text-xs text-emerald-700 font-medium">
+                            (Market range: {groundedSpecsData.marketPriceRangeMmk.min.toLocaleString()} - {groundedSpecsData.marketPriceRangeMmk.max.toLocaleString()} MMK)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSellingPrice(groundedSpecsData.recommendedSellingPriceMmk!)}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer shrink-0"
+                    >
+                      Set Selling Price to {groundedSpecsData.recommendedSellingPriceMmk.toLocaleString()} MMK
+                    </button>
+                  </div>
+                )}
+
+                {/* Myanmar Market Summary */}
+                {groundedSpecsData.myanmarMarketSummary && (
+                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-700 leading-relaxed whitespace-pre-wrap">
+                    <span className="font-bold text-slate-900 block mb-0.5">Market Analysis:</span>
+                    {groundedSpecsData.myanmarMarketSummary}
+                  </div>
+                )}
+
+                {/* Google Search Citations Sources */}
+                {groundedSources.length > 0 && (
+                  <div className="pt-2 border-t border-slate-100 flex items-center gap-1.5 flex-wrap text-[10px] text-slate-500">
+                    <span className="font-bold text-slate-600">Google Grounding Sources:</span>
+                    {groundedSources.map((src, sIdx) => (
+                      <a
+                        key={sIdx}
+                        href={src.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded border border-blue-200 transition-colors font-medium"
+                        title={src.title || src.url}
+                      >
+                        <span className="max-w-[130px] truncate">{src.title || src.url}</span>
+                        <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Product Photo Uploader */}

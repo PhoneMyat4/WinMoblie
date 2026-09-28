@@ -32,7 +32,9 @@ import {
   UploadCloud,
   FileUp,
   Cpu,
-  FileDown
+  FileDown,
+  Globe,
+  Sparkles
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Product, Sale, ExpenseRecord, PurchaseRecord, CashDrawerRecord, StockAdjustment, ShopSettings, StaffUser, StaffRole, RolePermissions, FacebookAdPostRecord } from '../../types';
@@ -61,6 +63,8 @@ export interface CopilotModelOption {
 }
 
 export const COPILOT_MODELS: CopilotModelOption[] = [
+  { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash (Google Search)', badge: 'Live Google Search', description: 'Real-time Google search grounding for up-to-date specs, Myanmar market prices & live mobile trends' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Google Search)', badge: 'Frontier Search', description: 'Multimodal reasoning with live Google search web grounding' },
   { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', badge: 'GPT-5.6 Flagship', description: 'Fastest & most cost-efficient GPT-5.6 for store operations' },
   { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', badge: 'GPT-5.6', description: 'Balanced speed & depth for POS inventory & sales execution' },
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', badge: 'Frontier', description: 'Frontier intelligence flagship with comprehensive deep reasoning' },
@@ -119,9 +123,16 @@ export interface ChatMessageItem {
     filename: string;
     config: any;
   };
+  searchGrounding?: boolean;
+  groundingMetadata?: {
+    searchQueries?: string[];
+    sources?: Array<{ title: string; url: string }>;
+  };
 }
 
 const QUICK_PROMPTS_BURMESE = [
+  { label: "🌐 Live Market စျေးနှုန်းစစ်မည်", prompt: "Google Search အသုံးပြုပြီး လက်ရှိ မြန်မာ့ဖုန်းစျေးကွက်အတွင်း iPhone 16 Pro Max နှင့် Galaxy S25 Ultra ပေါက်စျေးများကို စစ်ဆေးဖော်ပြပေးပါရှင်။", icon: Globe },
+  { label: "🔍 နောက်ဆုံးထွက် ဖုန်း Specs များ", prompt: "Google Search သုံးပြီး ယခုလအတွင်း အသစ်ထွက်ရှိထားသော flagship စမတ်ဖုန်းများ၏ specs များကို ရှာဖွေတင်ပြပေးပါရှင်။", icon: Globe },
   { label: "📊 နေ့စဥ်အရောင်း Z-Report", prompt: "ယနေ့အတွက် Z-Report အကျဉ်းချုပ်နှင့် စုစုပေါင်းအရောင်း၊ ကုန်ကျစရိတ်များကို မြန်မာလို ရှင်းပြပေးပါရှင်။", icon: BarChart3 },
   { label: "📱 ဖုန်းလက်ကျန်စစ်မည်", prompt: "လက်ရှိဆိုင်မှာ အသင့်ရှိတဲ့ ဖုန်းလက်ကျန်စာရင်းနှင့် ဈေးနှုန်းများကို ဖော်ပြပေးပါရှင်။", icon: Package },
   { label: "💰 ယနေ့ အမြတ်ငွေစာရင်း", prompt: "ယနေ့အတွက် ရရှိသော အသားတင်အမြတ်ငွေနှင့် အရောင်းအခြေအနေကို တွက်ချက်ပြပေးပါရှင်။", icon: TrendingUp },
@@ -132,7 +143,13 @@ const QUICK_PROMPTS_BURMESE = [
 ];
 
 const QUICK_PROMPTS_ENGLISH = [
+  { label: "🌐 Google Live Market Price", prompt: "Use real-time Google Search grounding to check current Myanmar market street prices for the latest flagship phones.", icon: Globe },
+  { label: "🔍 Search Latest Phone Specs", prompt: "Use Google Search to lookup official specs and launch details for recently announced smartphones.", icon: Globe },
   { label: "Download Daily Profit PDF", prompt: "Please generate and download today's Daily Gross Profit & P&L Audit Dossier as a PDF report.", icon: Download },
+  { label: "View Low Stock Warnings", prompt: "List all low stock items and dead stock warnings for this store.", icon: AlertTriangle },
+  { label: "Daily Z-Report Breakdown", prompt: "Provide a detailed Z-Report breakdown of today's sales, expenses, and gross profit margin.", icon: BarChart3 },
+  { label: "Show Cash Drawer Status", prompt: "What is the expected vs actual cash balance in the till right now?", icon: TrendingUp },
+  { label: "Check Top Selling Devices", prompt: "Which smartphone models generated the highest revenue and gross profit this month?", icon: Package },
   { label: "Annual Profit PDF", prompt: "Generate and download our Annual Profit and Loss Statement PDF report for this fiscal year.", icon: FileText },
   { label: "Scan Phone Box", prompt: "Please inspect this phone box photo, read the sticker, and extract brand, model, specs, and IMEI to register into inventory.", icon: ImageIcon },
   { label: "Post Ad to Facebook", prompt: "Make a Facebook advertisement post for our featured phone with AI generated photo and caption.", icon: Share2 },
@@ -210,10 +227,30 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
       const cached = localStorage.getItem('mobileshop_copilot_model');
       if (cached && typeof cached === 'string') return cached;
     } catch {}
-    return settings?.secrets?.chatAssistantModel || 'gpt-5.6-luna';
+    return settings?.secrets?.chatAssistantModel || 'gemini-3.5-flash';
   });
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [customModelInput, setCustomModelInput] = useState('');
+
+  // Google Search Grounding Toggle State (gemini-3.5-flash with googleSearch tool)
+  const [useGoogleSearch, setUseGoogleSearch] = useState<boolean>(() => {
+    try {
+      const cached = localStorage.getItem('mobileshop_copilot_google_search');
+      return cached !== null ? cached === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleGoogleSearch = () => {
+    setUseGoogleSearch(prev => {
+      const nextVal = !prev;
+      try {
+        localStorage.setItem('mobileshop_copilot_google_search', String(nextVal));
+      } catch {}
+      return nextVal;
+    });
+  };
 
   // Synchronize with settings if default changes and user hasn't set manual override
   useEffect(() => {
@@ -526,6 +563,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           history: historyPayload,
           model: selectedModel,
           language: chatLanguage,
+          useGoogleSearch: useGoogleSearch || selectedModel.includes('gemini'),
           context: {
             ...posContext,
             settings: safeSettings,
@@ -546,7 +584,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
 
       if (!data.success) {
         if (data.missingApiKey) {
-          setApiKeyWarning(data.error || 'OPENAI_API_KEY is not configured in the server environment.');
+          setApiKeyWarning(data.error || 'API Key is not configured in the server environment.');
         }
         throw new Error(data.error || 'Failed to receive response from AI Assistant.');
       } else {
@@ -604,6 +642,8 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
         createdProduct: data.createdProduct || undefined,
         updatedProduct: data.updatedProduct || undefined,
         facebookPost: data.facebookPost || undefined,
+        searchGrounding: Boolean(data.searchGrounding),
+        groundingMetadata: data.groundingMetadata || undefined,
         pdfReport: data.pdfReportConfig
           ? {
               reportType: data.pdfReportConfig.reportType,
@@ -837,6 +877,28 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
               🇺🇸 EN
             </button>
           </div>
+
+          {/* Google Search Grounding Toggle */}
+          <button
+            type="button"
+            onClick={handleToggleGoogleSearch}
+            className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              useGoogleSearch || selectedModel.includes('gemini')
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs ring-1 ring-white/30'
+                : 'bg-indigo-950/60 text-indigo-300 hover:text-white border border-indigo-700/60'
+            }`}
+            title="Toggle Live Google Search Grounding (gemini-3.5-flash with googleSearch tool)"
+          >
+            <Globe className="w-3.5 h-3.5 text-sky-300 shrink-0" />
+            <span className="hidden sm:inline">Google Search</span>
+            <span
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                useGoogleSearch || selectedModel.includes('gemini')
+                  ? 'bg-emerald-400 animate-pulse'
+                  : 'bg-slate-400'
+              }`}
+            />
+          </button>
 
           <button
             onClick={handleClearHistory}
@@ -1234,6 +1296,53 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
                           <FileDown className="w-3.5 h-3.5 text-emerald-600" />
                           <span>Export Cost Estimate PDF</span>
                         </button>
+                      </div>
+                    )}
+
+                    {/* Google Search Grounding Metadata & Sources */}
+                    {msg.groundingMetadata && (
+                      <div className="mt-2.5 p-2.5 bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-slate-50 border border-blue-200/80 rounded-xl space-y-1.5 text-xs text-slate-700">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex items-center gap-1.5 font-bold text-blue-900 text-[11px]">
+                            <Globe className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                            <span>Grounded with Google Search (gemini-3.5-flash)</span>
+                          </div>
+                          <span className="text-[10px] font-bold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-full border border-blue-200">
+                            Live Google Verified
+                          </span>
+                        </div>
+
+                        {/* Search Queries Used */}
+                        {msg.groundingMetadata.searchQueries && msg.groundingMetadata.searchQueries.length > 0 && (
+                          <div className="flex items-center gap-1 flex-wrap text-[10px] text-slate-500">
+                            <span className="font-semibold text-slate-600">Searched:</span>
+                            {msg.groundingMetadata.searchQueries.map((q, qIdx) => (
+                              <span key={qIdx} className="px-1.5 py-0.5 bg-white border border-slate-200 rounded font-mono text-slate-700">
+                                "{q}"
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Clickable Citations / Sources */}
+                        {msg.groundingMetadata.sources && msg.groundingMetadata.sources.length > 0 && (
+                          <div className="pt-1.5 border-t border-blue-200/60 flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] font-semibold text-slate-500">Live Sources:</span>
+                            {msg.groundingMetadata.sources.map((src, sIdx) => (
+                              <a
+                                key={sIdx}
+                                href={src.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 bg-white hover:bg-blue-50 border border-blue-200 hover:border-blue-400 text-blue-700 rounded-md text-[10px] font-medium transition-colors shadow-2xs"
+                                title={src.title || src.url}
+                              >
+                                <span className="max-w-[150px] truncate">{src.title || src.url}</span>
+                                <ExternalLink className="w-2.5 h-2.5 text-blue-500 shrink-0" />
+                              </a>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

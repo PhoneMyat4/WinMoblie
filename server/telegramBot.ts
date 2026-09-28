@@ -9,6 +9,7 @@ import {
   executeUpdateProductPrice,
   executeQueryInventoryProducts,
   executeGeneratePdfReport,
+  executeCheckMarketPriceGoogleSearch,
   executeOpenAiChatCompletionWithTools,
 } from './aiAssistant';
 import {
@@ -34,7 +35,9 @@ export interface TelegramAiModelOption {
 }
 
 export const SUPPORTED_TELEGRAM_MODELS: TelegramAiModelOption[] = [
-  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: 'Fastest & most cost-efficient GPT-5.6 model for high-volume workloads', badge: 'GPT-5.6 Flagship' },
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: 'Fastest & most cost-efficient GPT-5.6 model with automatic live Google Search tool', badge: 'GPT-5.6 Flagship' },
+  { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', description: 'Ultra-fast Google Gemini model with built-in real-time Live Google Search Grounding', badge: 'Live Search 🌐' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', description: 'Next-gen frontier reasoning & real-time Google Search Grounding for complex market analysis', badge: 'Next-Gen Search 🌐' },
   { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', description: 'Balanced GPT-5.6 speed and depth for POS inventory & sales execution', badge: 'GPT-5.6' },
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: 'Frontier intelligence flagship with comprehensive deep reasoning', badge: 'Frontier' },
   { id: 'gpt-5.6', name: 'GPT-5.6 Frontier', description: 'Full GPT-5.6 frontier scale for deep business & store intelligence', badge: 'Frontier' },
@@ -966,9 +969,13 @@ I am your direct, real-time AI store manager connected to your live Firestore PO
 • 🏷️ *Price & Intake Actions:*
   - _"Update selling price of iPhone 15 to 4,200,000 MMK"_
   - _"Add 2 units of Redmi Note 13 Black with IMEI..."_
+• 🌐 *Live Google Search (တိုက်ရိုက် Google ရှာဖွေမှုနှင့် ပြင်ပပေါက်ဈေး):*
+  - _"Redmi Note 14 Pro 5G ပြင်ပပေါက်ဈေး ဘယ်လောက်လဲ"_
+  - _"iPhone 16 Pro Max specs and market price in Myanmar"_
+  - _"Compare Galaxy S24 Ultra store price with market rate"_
 • ⚙️ *Commands:*
   - \`/menu\` - Reopen this Interactive Report Buttons menu
-  - \`/model\` - View current model & list available AI options
+  - \`/model\` - View current model & list available AI options (including Gemini with Google Search)
 
 _Your Telegram Chat ID: \`${chatId}\`_`;
 
@@ -1045,10 +1052,86 @@ _Your Telegram Chat ID: \`${chatId}\`_`;
         ? rawSelectedModel
         : 'gpt-5.6-luna';
 
-    const formattedMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      {
-        role: 'system',
-        content: `${AI_SYSTEM_INSTRUCTION}
+    let finalReply = '';
+    let pdfDeliveredDirectly = false;
+    let deliveredPdfFilename = '';
+    let deliveredPdfName = '';
+    const googleSearchSources: Array<{ title: string; url: string }> = [];
+
+    // =========================================================================
+    // NATIVE GEMINI REAL-TIME GOOGLE SEARCH GROUNDING IN TELEGRAM BOT
+    // =========================================================================
+    if (activeModel.toLowerCase().includes('gemini')) {
+      try {
+        console.log(`[TelegramBot] Executing direct Gemini model: ${activeModel} with Live Google Search Grounding...`);
+        const ai = getGenAI();
+        const geminiTargetModel = activeModel.includes('3.8') ? 'gemini-3.8-flash' : 'gemini-3.5-flash';
+
+        // Prepare live store context
+        let storeContextText = `\n\n[STORE REAL-TIME INVENTORY & OPERATIONAL CONTEXT]\n`;
+        storeContextText += `Store Name: ${context.settings?.shopName || 'Win Mobile & Gadgets'}\n`;
+        storeContextText += `Currency: ${context.settings?.currencySymbol || 'MMK'}\n`;
+        storeContextText += `Total In-Store Products: ${context.products?.length || 0}\n`;
+        storeContextText += `Today's Completed Sales Count: ${context.sales?.length || 0}\n`;
+        if (context.products && context.products.length > 0) {
+          storeContextText += `Key In-Stock Devices:\n`;
+          for (const p of context.products.slice(0, 20)) {
+            storeContextText += `- ${p.brand} ${p.model || p.name} (${p.ram || '-'} / ${p.rom || '-'}, Stock: ${p.stock}, Price: ${p.sellingPrice} MMK, SKU: ${p.sku})\n`;
+          }
+        }
+
+        const geminiResp = await ai.models.generateContent({
+          model: geminiTargetModel,
+          contents: `${userText}\n${storeContextText}`,
+          config: {
+            systemInstruction: `${AI_SYSTEM_INSTRUCTION}
+
+TELEGRAM BOT SPECIFIC MANDATES & STRICT SAFEGUARDS:
+- You are communicating directly with store owners and staff over Telegram.
+- Format responses cleanly with Telegram Markdown (bold headlines, bullet points, clean numbers).
+- STRICT SAFEGUARD 1: PRECISE CATEGORY FILTERING (ACCESSORIES EXCLUSION).
+  When a user asks about a phone model, show ONLY actual smartphones. Strictly exclude accessories unless explicitly asked.
+- STRICT SAFEGUARD 2: PRICE CONFIDENTIALITY.
+  NEVER reveal 'Cost Price', 'Profit', or 'Supplier Name' under ANY circumstances. Only show Selling Price.
+- STRICT SAFEGUARD 3: OUT-OF-STOCK FILTERING.
+  Only show items with positive stock (stock > 0).
+- STRICT SAFEGUARD 4: TIMEZONE ACCURACY.
+  Myanmar Time (Asia/Yangon UTC+6:30).
+- STRICT SAFEGUARD 5: CURRENCY FORMATTING.
+  Format all monetary values neatly with commas and "Ks" (e.g. 4,250,000 Ks).
+- LIVE GOOGLE SEARCH GROUNDING ACTIVE:
+  You have real-time Google Search active. Search Google for the latest smartphone street prices in Myanmar (Kyats), specs, and market comparisons.`,
+            tools: [{ googleSearch: {} }],
+          },
+        });
+
+        const candidate = geminiResp.candidates?.[0];
+        const groundingMeta = candidate?.groundingMetadata;
+        finalReply = geminiResp.text || '';
+
+        if (groundingMeta?.groundingChunks) {
+          for (const chunk of groundingMeta.groundingChunks) {
+            if (chunk.web?.uri) {
+              googleSearchSources.push({
+                title: chunk.web.title || chunk.web.uri,
+                url: chunk.web.uri,
+              });
+            }
+          }
+        }
+      } catch (geminiError: any) {
+        console.warn('[TelegramBot] Gemini direct call error, falling back to OpenAI tools:', geminiError?.message || geminiError);
+      }
+    }
+
+    // =========================================================================
+    // OPENAI TOOLS EXECUTION (FOR GPT-5.6, O3-MINI, GPT-4O, OR FALLBACK)
+    // =========================================================================
+    if (!finalReply) {
+      const formattedMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        {
+          role: 'system',
+          content: `${AI_SYSTEM_INSTRUCTION}
 
 TELEGRAM BOT SPECIFIC MANDATES & STRICT SAFEGUARDS:
 - You are communicating directly with store owners and staff over Telegram.
@@ -1068,155 +1151,161 @@ TELEGRAM BOT SPECIFIC MANDATES & STRICT SAFEGUARDS:
 - STRICT SAFEGUARD 4: TIMEZONE ACCURACY.
   All sales figures, dates, and Z-reports strictly adhere to Myanmar Time (Asia/Yangon UTC+6:30).
 - STRICT SAFEGUARD 5: CURRENCY FORMATTING.
-  Format all monetary values neatly with commas and "Ks" (e.g., 4,250,000 Ks).`,
-      },
-      {
-        role: 'user',
-        content: userText,
-      },
-    ];
+  Format all monetary values neatly with commas and "Ks" (e.g., 4,250,000 Ks).
+- LIVE GOOGLE SEARCH GROUNDING:
+  When the user asks about live market prices ("ပြင်ပပေါက်ဈေး", "market price", "retail benchmark", "အပြင်ဈေး"), competitor retail prices, or device specs, invoke 'check_market_price_google_search' to fetch verified real-time Google Search data.`,
+        },
+        {
+          role: 'user',
+          content: userText,
+        },
+      ];
 
-    // Initial tool calling pass with OpenAI
-    const aiResponse = await executeOpenAiChatCompletionWithTools(openai, {
-      model: activeModel,
-      messages: formattedMessages,
-      tools: openAiAssistantTools,
-      tool_choice: 'auto',
-      temperature: 0.3,
-    });
+      // Initial tool calling pass with OpenAI
+      const aiResponse = await executeOpenAiChatCompletionWithTools(openai, {
+        model: activeModel.toLowerCase().includes('gemini') ? 'gpt-5.6-luna' : activeModel,
+        messages: formattedMessages,
+        tools: openAiAssistantTools,
+        tool_choice: 'auto',
+        temperature: 0.3,
+      });
 
-    const choice = aiResponse.choices?.[0];
-    const assistantMessage = choice?.message;
-    const toolCalls = assistantMessage?.tool_calls;
+      const choice = aiResponse.choices?.[0];
+      const assistantMessage = choice?.message;
+      const toolCalls = assistantMessage?.tool_calls;
 
-    let finalReply = assistantMessage?.content || '';
-    let pdfDeliveredDirectly = false;
-    let deliveredPdfFilename = '';
-    let deliveredPdfName = '';
+      finalReply = assistantMessage?.content || '';
 
-    // =========================================================================
-    // REQUIREMENT 2: TOOL CALLING & SERVER-SIDE PDF GENERATION & sendDocument
-    // =========================================================================
-    if (toolCalls && toolCalls.length > 0) {
-      await sendTelegramChatAction(botToken, chatId, 'typing');
+      // =========================================================================
+      // REQUIREMENT 2: TOOL CALLING & SERVER-SIDE PDF GENERATION & sendDocument
+      // =========================================================================
+      if (toolCalls && toolCalls.length > 0) {
+        await sendTelegramChatAction(botToken, chatId, 'typing');
 
-      const toolCall = toolCalls[0];
-      if (toolCall.type === 'function') {
-        const functionName = toolCall.function.name;
-        let parsedArgs: any = {};
-        try {
-          parsedArgs = JSON.parse(toolCall.function.arguments || '{}');
-        } catch {
-          parsedArgs = {};
-        }
-
-        console.log(`[TelegramBot] Executing Tool Call: ${functionName} with args:`, parsedArgs);
-
-        let executionResult: any = null;
-
-        if (functionName === 'generate_pdf_report') {
-          // Send upload_document action to show Telegram status
-          await sendTelegramChatAction(botToken, chatId, 'upload_document');
-
-          const pdfData = executeGeneratePdfReport(parsedArgs, context);
-
+        const toolCall = toolCalls[0];
+        if (toolCall.type === 'function') {
+          const functionName = toolCall.function.name;
+          let parsedArgs: any = {};
           try {
-            // 1. Generate PDF Buffer natively on the Node.js server using jspdf and jspdf-autotable
-            const { buffer, filename, reportName } = generateServerReportPdf(pdfData);
-            console.log(
-              `[TelegramBot] Generated PDF buffer for '${filename}' (${buffer.length} bytes). Posting to Telegram sendDocument API...`
-            );
+            parsedArgs = JSON.parse(toolCall.function.arguments || '{}');
+          } catch {
+            parsedArgs = {};
+          }
 
-            // 2. Use FormData to POST that buffer to Telegram's sendDocument API endpoint
-            const caption = `📄 *${reportName}*\n📅 Period: ${pdfData.date || pdfData.year || 'Today'}\n🏪 Shop: ${context.settings?.shopName || 'Win Mobile & Gadgets'}`;
-            const docRes = await sendTelegramDocument(
-              botToken,
-              chatId,
-              buffer,
-              filename,
-              caption,
-              messageId
-            );
+          console.log(`[TelegramBot] Executing Tool Call: ${functionName} with args:`, parsedArgs);
 
-            if (docRes.ok) {
-              pdfDeliveredDirectly = true;
-              deliveredPdfFilename = filename;
-              deliveredPdfName = reportName;
-              console.log(`[TelegramBot] Successfully delivered PDF document '${filename}' to Chat ${chatId}`);
+          let executionResult: any = null;
 
-              executionResult = {
-                ...pdfData,
-                deliveredToTelegram: true,
+          if (functionName === 'generate_pdf_report') {
+            // Send upload_document action to show Telegram status
+            await sendTelegramChatAction(botToken, chatId, 'upload_document');
+
+            const pdfData = executeGeneratePdfReport(parsedArgs, context);
+
+            try {
+              // 1. Generate PDF Buffer natively on the Node.js server using jspdf and jspdf-autotable
+              const { buffer, filename, reportName } = generateServerReportPdf(pdfData);
+              console.log(
+                `[TelegramBot] Generated PDF buffer for '${filename}' (${buffer.length} bytes). Posting to Telegram sendDocument API...`
+              );
+
+              // 2. Use FormData to POST that buffer to Telegram's sendDocument API endpoint
+              const caption = `📄 *${reportName}*\n📅 Period: ${pdfData.date || pdfData.year || 'Today'}\n🏪 Shop: ${context.settings?.shopName || 'Win Mobile & Gadgets'}`;
+              const docRes = await sendTelegramDocument(
+                botToken,
+                chatId,
+                buffer,
                 filename,
-                message: `The official PDF report '${filename}' has been generated and physically sent directly as a document attachment into this Telegram chat. Do NOT say it was downloaded to a browser or local device. Explicitly tell the user in Burmese that the PDF report file is attached above in this Telegram conversation.`,
-              };
-            } else {
-              console.error('[TelegramBot] Telegram sendDocument failed:', docRes);
+                caption,
+                messageId
+              );
+
+              if (docRes.ok) {
+                pdfDeliveredDirectly = true;
+                deliveredPdfFilename = filename;
+                deliveredPdfName = reportName;
+                console.log(`[TelegramBot] Successfully delivered PDF document '${filename}' to Chat ${chatId}`);
+
+                executionResult = {
+                  ...pdfData,
+                  deliveredToTelegram: true,
+                  filename,
+                  message: `The official PDF report '${filename}' has been generated and physically sent directly as a document attachment into this Telegram chat. Do NOT say it was downloaded to a browser or local device. Explicitly tell the user in Burmese that the PDF report file is attached above in this Telegram conversation.`,
+                };
+              } else {
+                console.error('[TelegramBot] Telegram sendDocument failed:', docRes);
+                executionResult = {
+                  ...pdfData,
+                  deliveredToTelegram: false,
+                  error: docRes.description || 'Telegram sendDocument API failed',
+                };
+              }
+            } catch (pdfErr: any) {
+              console.error('[TelegramBot] Failed to render or deliver PDF Buffer:', pdfErr);
               executionResult = {
                 ...pdfData,
                 deliveredToTelegram: false,
-                error: docRes.description || 'Telegram sendDocument API failed',
+                pdfRenderError: pdfErr?.message || 'Server PDF render failed',
               };
             }
-          } catch (pdfErr: any) {
-            console.error('[TelegramBot] Failed to render or deliver PDF Buffer:', pdfErr);
-            executionResult = {
-              ...pdfData,
-              deliveredToTelegram: false,
-              pdfRenderError: pdfErr?.message || 'Server PDF render failed',
-            };
+          } else if (functionName === 'query_pos_reports') {
+            executionResult = executeQueryPosReports(parsedArgs, context);
+          } else if (functionName === 'query_inventory_products') {
+            executionResult = executeQueryInventoryProducts(parsedArgs, context);
+          } else if (functionName === 'add_inventory_item') {
+            const mutation = executeAddInventoryItem(parsedArgs, context);
+            executionResult = mutation;
+            if (mutation.createdProduct) {
+              await persistProductToFirestore(mutation.createdProduct);
+            }
+          } else if (functionName === 'update_product_price') {
+            const updateResult = executeUpdateProductPrice(parsedArgs, context);
+            executionResult = updateResult;
+            if (updateResult.updatedProduct) {
+              await persistProductToFirestore(updateResult.updatedProduct);
+            }
+          } else if (functionName === 'post_product_ad_to_facebook') {
+            executionResult = await executePostProductAdToFacebook(
+              parsedArgs,
+              context,
+              openai,
+              getGenAI
+            );
+          } else if (functionName === 'check_market_price_google_search') {
+            await sendTelegramChatAction(botToken, chatId, 'typing');
+            executionResult = await executeCheckMarketPriceGoogleSearch(parsedArgs, getGenAI);
+            if (executionResult?.sources && executionResult.sources.length > 0) {
+              googleSearchSources.push(...executionResult.sources);
+            }
+          } else {
+            executionResult = { error: `Tool ${functionName} is not recognized.` };
           }
-        } else if (functionName === 'query_pos_reports') {
-          executionResult = executeQueryPosReports(parsedArgs, context);
-        } else if (functionName === 'query_inventory_products') {
-          executionResult = executeQueryInventoryProducts(parsedArgs, context);
-        } else if (functionName === 'add_inventory_item') {
-          const mutation = executeAddInventoryItem(parsedArgs, context);
-          executionResult = mutation;
-          if (mutation.createdProduct) {
-            await persistProductToFirestore(mutation.createdProduct);
-          }
-        } else if (functionName === 'update_product_price') {
-          const updateResult = executeUpdateProductPrice(parsedArgs, context);
-          executionResult = updateResult;
-          if (updateResult.updatedProduct) {
-            await persistProductToFirestore(updateResult.updatedProduct);
-          }
-        } else if (functionName === 'post_product_ad_to_facebook') {
-          executionResult = await executePostProductAdToFacebook(
-            parsedArgs,
-            context,
-            openai,
-            getGenAI
-          );
-        } else {
-          executionResult = { error: `Tool ${functionName} is not recognized.` };
+
+          // Send intermediate typing indicator
+          await sendTelegramChatAction(botToken, chatId, 'typing');
+
+          // Feed tool results back to OpenAI for final synthesis
+          const followUpMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+            ...formattedMessages,
+            assistantMessage,
+            {
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: JSON.stringify(executionResult),
+            },
+          ];
+
+          const secondResponse = await executeOpenAiChatCompletionWithTools(openai, {
+            model: activeModel.toLowerCase().includes('gemini') ? 'gpt-5.6-luna' : activeModel,
+            messages: followUpMessages,
+            tools: openAiAssistantTools,
+            temperature: 0.3,
+          });
+
+          finalReply =
+            secondResponse.choices?.[0]?.message?.content ||
+            'Action executed successfully on store POS database.';
         }
-
-        // Send intermediate typing indicator
-        await sendTelegramChatAction(botToken, chatId, 'typing');
-
-        // Feed tool results back to OpenAI for final synthesis
-        const followUpMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-          ...formattedMessages,
-          assistantMessage,
-          {
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(executionResult),
-          },
-        ];
-
-        const secondResponse = await executeOpenAiChatCompletionWithTools(openai, {
-          model: activeModel,
-          messages: followUpMessages,
-          tools: openAiAssistantTools,
-          temperature: 0.3,
-        });
-
-        finalReply =
-          secondResponse.choices?.[0]?.message?.content ||
-          'Action executed successfully on store POS database.';
       }
     }
 
@@ -1291,6 +1380,22 @@ TELEGRAM BOT SPECIFIC MANDATES & STRICT SAFEGUARDS:
     if (pdfDeliveredDirectly && deliveredPdfFilename) {
       if (!finalReply.includes(deliveredPdfFilename)) {
         finalReply += `\n\n📄 *PDF ဖိုင် ပေးပို့မှု အောင်မြင်ပါသည်:*\n\`${deliveredPdfFilename}\` အစီရင်ခံစာ PDF ဖိုင်ကို အထက်ပါအတိုင်း Telegram တွင် တိုက်ရိုက် ပူးတွဲ ပေးပို့ပေးထားပါပြီခင်ဗျာ။`;
+      }
+    }
+
+    // If Google Search sources were retrieved and not yet mentioned, attach verified web sources
+    if (googleSearchSources.length > 0) {
+      const uniqueSources: Array<{ title: string; url: string }> = [];
+      const seenUrls = new Set<string>();
+      for (const s of googleSearchSources) {
+        if (s.url && !seenUrls.has(s.url)) {
+          seenUrls.add(s.url);
+          uniqueSources.push(s);
+        }
+      }
+      if (uniqueSources.length > 0 && !finalReply.includes('Google Search Sources') && !finalReply.includes('သတင်းရင်းမြစ်')) {
+        const sourcesText = uniqueSources.slice(0, 4).map((s) => `• [${s.title}](${s.url})`).join('\n');
+        finalReply += `\n\n🌐 *Google Search Sources (သတင်းရင်းမြစ်များ):*\n${sourcesText}`;
       }
     }
 

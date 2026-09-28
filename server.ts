@@ -13,6 +13,7 @@ import {
   executeUpdateProductPrice,
   executeQueryInventoryProducts,
   executeGeneratePdfReport,
+  executeCheckMarketPriceGoogleSearch,
   executeOpenAiChatCompletionWithTools
 } from './server/aiAssistant';
 import {
@@ -635,29 +636,17 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
         });
       }
 
-      // Exclusively read OpenAI API key from server environment
-      const targetOpenAiKey = process.env.OPENAI_API_KEY;
-      if (!targetOpenAiKey) {
-        return res.status(400).json({
-          success: false,
-          missingApiKey: true,
-          error: 'OPENAI_API_KEY is not configured in the server environment (.env). Please configure your server .env to enable the AI Copilot.',
-        });
-      }
-
       // Determine active model from request, settings, or server environment
       const requestedModel = typeof model === 'string' ? model.trim() : '';
       const settingsModel = (context?.settings as any)?.secrets?.chatAssistantModel;
       const serverEnvModel = process.env.CHAT_ASSISTANT_MODEL;
-      const candidateModel = requestedModel || settingsModel || serverEnvModel || 'gpt-5.6-luna';
+      const candidateModel = requestedModel || settingsModel || serverEnvModel || 'gemini-3.5-flash';
 
-      // Accept any valid model string (including gpt-5.6-luna, gpt-5.6-terra, gpt-5.6, gpt-5, o3-mini, etc.)
+      // Accept any valid model string
       const activeModel =
         typeof candidateModel === 'string' && /^[a-zA-Z0-9_.-]+$/.test(candidateModel)
           ? candidateModel
-          : 'gpt-5.6-luna';
-
-      const openai = getOpenAI();
+          : 'gemini-3.5-flash';
 
       const replyLanguage = req.body.language || 'my';
       let systemInstructionWithLang = AI_SYSTEM_INSTRUCTION;
@@ -665,25 +654,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
         systemInstructionWithLang += `\n\n[MANDATORY BURMESE LANGUAGE POLICY - မြန်မာဘာသာဖြင့် အပြည့်အစုံ ဖြေကြားရန်]\nအသုံးပြုသူထံ အသံဖြင့်ဖြစ်စေ စာဖြင့်ဖြစ်စေ မြန်မာဘာသာ (Unicode) ဖြင့်သာ သဘာဝကျကျ ယဥ်ကျေးစွာ ပြန်လည်ဖြေကြားပေးပါ။ ဖုန်း Model နာမည်များနှင့် နည်းပညာအသုံးအနှုန်းများကို မူရင်းအတိုင်းထားပြီး ကျန်ရှင်းပြချက်များ၊ နှုတ်ခွန်းဆက်စကားများနှင့် စာရင်းများကို မြန်မာလို အပြည့်အစုံ ရှင်းပြပါ။`;
       }
 
-      // Format conversation history for OpenAI Chat Completions API
-      const formattedMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        {
-          role: 'system',
-          content: systemInstructionWithLang,
-        },
-      ];
-
-      // Add prior turns
-      for (const item of history) {
-        if (!item || !item.content) continue;
-        const role: 'user' | 'assistant' = item.role === 'user' ? 'user' : 'assistant';
-        formattedMessages.push({
-          role,
-          content: item.content,
-        });
-      }
-
-      // Prepare user prompt and attachments for multimodal gpt-4o-mini
+      // Check for user attachments
       const imageAttachments = (attachments || []).filter((a: any) => 
         a.isImage || 
         (a.type && a.type.startsWith('image/')) || 
@@ -709,6 +680,129 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
         }).join('');
 
         promptWithFiles = `${promptWithFiles || 'Please inspect and analyze the attached document(s).'}${fileSections}`.trim();
+      }
+
+      const wantsGoogleSearch = Boolean(req.body.useGoogleSearch || activeModel.includes('gemini'));
+      const targetOpenAiKey = process.env.OPENAI_API_KEY;
+
+      // Tier 1: Gemini with Real-Time Google Search Grounding (gemini-3.5-flash / gemini-3.8-flash)
+      if (wantsGoogleSearch || (!targetOpenAiKey && process.env.GEMINI_API_KEY)) {
+        const geminiKey = process.env.GEMINI_API_KEY;
+        if (!geminiKey || geminiKey.startsWith('AQ.')) {
+          return res.status(400).json({
+            success: false,
+            missingApiKey: true,
+            error: 'GEMINI_API_KEY is not configured in the server environment (.env). Please configure your server .env to enable Google Search Grounding.',
+          });
+        }
+
+        const ai = getGenAI();
+        const geminiTargetModel = activeModel.includes('gemini-3.8') ? 'gemini-3.8-flash' : 'gemini-3.5-flash';
+
+        // Prepare store context for Gemini
+        let storeContextText = `\n\n[STORE REAL-TIME INVENTORY & OPERATIONAL CONTEXT]\n`;
+        storeContextText += `Store Name: ${context.settings?.storeName || 'Mobile Shop POS'}\n`;
+        storeContextText += `Currency: ${context.settings?.currencySymbol || 'MMK'}\n`;
+        storeContextText += `Total Inventory SKU Count: ${context.products?.length || 0}\n`;
+        storeContextText += `Today's Completed Sales Count: ${context.sales?.length || 0}\n`;
+        if (context.products && context.products.length > 0) {
+          storeContextText += `Key In-Stock Devices:\n`;
+          for (const p of context.products.slice(0, 15)) {
+            storeContextText += `- ${p.brand} ${p.model || p.name} (${p.ram || '-'} / ${p.rom || '-'}, Stock: ${p.stock}, Price: ${p.sellingPrice} MMK, SKU: ${p.sku})\n`;
+          }
+        }
+
+        const contents: any[] = [];
+        // Add conversation history
+        for (const item of history.slice(-6)) {
+          if (!item || !item.content) continue;
+          contents.push({
+            role: item.role === 'user' ? 'user' : 'model',
+            parts: [{ text: item.content }],
+          });
+        }
+
+        // Current turn parts with multimodal image support
+        const userParts: any[] = [];
+        for (const img of imageAttachments) {
+          let data = img.data || '';
+          let mime = img.type || 'image/jpeg';
+          if (data.startsWith('data:')) {
+            const parts = data.split(';base64,');
+            mime = parts[0].replace('data:', '') || 'image/jpeg';
+            data = parts[1] || '';
+          }
+          if (data) {
+            userParts.push({ inlineData: { data, mimeType: mime } });
+          }
+        }
+        userParts.push({ text: `${promptWithFiles}\n${storeContextText}` });
+        contents.push({ role: 'user', parts: userParts });
+
+        const searchResponse = await ai.models.generateContent({
+          model: geminiTargetModel,
+          contents,
+          config: {
+            systemInstruction: systemInstructionWithLang + `\n\n[LIVE GOOGLE SEARCH GROUNDING ACTIVE]\nYou are equipped with live Google Search grounding. Use Google Search to look up the latest smartphone specifications, official launch dates, current retail market prices in Myanmar (Kyats), exchange rates, tech news, and comparisons. Blend real-time Google web findings with the store's current internal inventory and sales context accurately.`,
+            tools: [{ googleSearch: {} }],
+          },
+        });
+
+        const candidate = searchResponse.candidates?.[0];
+        const groundingMeta = candidate?.groundingMetadata;
+        const sources: Array<{ title: string; url: string }> = [];
+        if (groundingMeta?.groundingChunks) {
+          for (const chunk of groundingMeta.groundingChunks) {
+            if (chunk.web?.uri) {
+              sources.push({
+                title: chunk.web.title || chunk.web.uri,
+                url: chunk.web.uri,
+              });
+            }
+          }
+        }
+
+        return res.json({
+          success: true,
+          reply: searchResponse.text || '',
+          modelUsed: geminiTargetModel,
+          searchGrounding: true,
+          groundingMetadata: {
+            searchQueries: groundingMeta?.webSearchQueries || [],
+            sources,
+          },
+          toolExecuted: null,
+          createdProduct: null,
+        });
+      }
+
+      // Tier 2: OpenAI API Key verification for legacy/OpenAI models
+      if (!targetOpenAiKey) {
+        return res.status(400).json({
+          success: false,
+          missingApiKey: true,
+          error: 'OPENAI_API_KEY is not configured in the server environment (.env). Switch to Gemini 3.5 Flash (Google Search) or configure OPENAI_API_KEY.',
+        });
+      }
+
+      const openai = getOpenAI();
+
+      // Format conversation history for OpenAI Chat Completions API
+      const formattedMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        {
+          role: 'system',
+          content: systemInstructionWithLang,
+        },
+      ];
+
+      // Add prior turns
+      for (const item of history) {
+        if (!item || !item.content) continue;
+        const role: 'user' | 'assistant' = item.role === 'user' ? 'user' : 'assistant';
+        formattedMessages.push({
+          role,
+          content: item.content,
+        });
       }
 
       // Add current user prompt with vision support
@@ -820,6 +914,9 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
             if (fbResult.facebookPost) {
               facebookPost = fbResult.facebookPost;
             }
+          } else if (functionName === 'check_market_price_google_search') {
+            const searchResult = await executeCheckMarketPriceGoogleSearch(parsedArgs, getGenAI);
+            executionResult = searchResult;
           } else {
             executionResult = { error: `Tool ${functionName} is not recognized.` };
           }
@@ -1328,7 +1425,7 @@ Output a JSON response with:
       }
 
       // Dynamic image model selection with fallback default
-      const requestedModel = (typeof model === 'string' && model.trim()) ? model.trim() : 'dall-e-3';
+      const requestedModel = (typeof model === 'string' && model.trim()) ? model.trim() : 'gemini-3.1-flash-image-preview';
       let activeImageModel = requestedModel;
 
       const targetOpenAiKey = process.env.OPENAI_API_KEY;
@@ -1342,34 +1439,34 @@ Output a JSON response with:
       // If user supplied a custom prompt or wants DALL-E
       let effectivePrompt = customPrompt?.trim() || buildProductVisualPrompt(product);
 
+      let cleanRefBase64 = '';
+      let refMimeType = 'image/jpeg';
+      if (referenceImageUrl) {
+        if (referenceImageUrl.startsWith('data:')) {
+          const parts = referenceImageUrl.split(';base64,');
+          refMimeType = parts[0].replace('data:', '') || 'image/jpeg';
+          cleanRefBase64 = parts[1] || '';
+        }
+      }
+
       // If reference image was supplied and prompt was not heavily customized, try quick visual enrichment
-      if (referenceImageUrl && !customPrompt) {
+      if (referenceImageUrl && !customPrompt && cleanRefBase64) {
         const geminiKey = process.env.GEMINI_API_KEY;
         if (geminiKey && !geminiKey.startsWith('AQ.')) {
           try {
             const ai = getGenAI();
-            let mimeType = 'image/jpeg';
-            let cleanBase64 = '';
-            if (referenceImageUrl.startsWith('data:')) {
-              const parts = referenceImageUrl.split(';base64,');
-              mimeType = parts[0].replace('data:', '') || 'image/jpeg';
-              cleanBase64 = parts[1] || '';
-            }
-
-            if (cleanBase64) {
-              const enrichRes = await ai.models.generateContent({
-                model: 'gemini-3.8-flash',
-                contents: {
-                  parts: [
-                    { inlineData: { mimeType, data: cleanBase64 } },
-                    { text: `Based on this product reference photo of ${product.brand} ${product.model}, write a 1-sentence commercial studio advertisement photography prompt (max 50 words) depicting this exact item on a sleek pedestal with studio rim lighting.` },
-                  ],
-                },
-              });
-              const enriched = enrichRes.text?.trim();
-              if (enriched && enriched.length > 20) {
-                effectivePrompt = enriched;
-              }
+            const enrichRes = await ai.models.generateContent({
+              model: 'gemini-3.8-flash',
+              contents: {
+                parts: [
+                  { inlineData: { mimeType: refMimeType, data: cleanRefBase64 } },
+                  { text: `Based on this product reference photo of ${product.brand} ${product.model}, write a 1-sentence commercial studio advertisement photography prompt (max 50 words) depicting this exact item on a sleek pedestal with studio rim lighting.` },
+                ],
+              },
+            });
+            const enriched = enrichRes.text?.trim();
+            if (enriched && enriched.length > 20) {
+              effectivePrompt = enriched;
             }
           } catch {}
         }
@@ -1379,8 +1476,75 @@ Output a JSON response with:
       let source: string = 'curated_studio';
       let engine: string = 'Commercial Studio';
 
+      // Tier 0: Google Gemini Image Generation & Editing (gemini-3.1-flash-image-preview / gemini-3.1-flash-image)
+      if (activeImageModel.includes('gemini') || activeImageModel === 'gemini-3.1-flash-image-preview') {
+        const geminiKey = process.env.GEMINI_API_KEY;
+        if (geminiKey && !geminiKey.startsWith('AQ.')) {
+          try {
+            const ai = getGenAI();
+            const candidateModels = [
+              activeImageModel,
+              'gemini-3.1-flash-image-preview',
+              'gemini-3.1-flash-image',
+              'gemini-3.1-flash-lite-image',
+            ];
+            const uniqueModels = Array.from(new Set(candidateModels));
+
+            for (const modelCandidate of uniqueModels) {
+              try {
+                let response: any;
+                if (referenceImageUrl && cleanRefBase64) {
+                  response = await ai.models.generateContent({
+                    model: modelCandidate,
+                    contents: {
+                      parts: [
+                        { inlineData: { mimeType: refMimeType, data: cleanRefBase64 } },
+                        { text: `Create a commercial studio advertisement photography image based on this product photo. Style & lighting: ${effectivePrompt}` },
+                      ],
+                    },
+                  });
+                } else {
+                  response = await ai.models.generateContent({
+                    model: modelCandidate,
+                    contents: {
+                      parts: [
+                        { text: effectivePrompt },
+                      ],
+                    },
+                    config: {
+                      imageConfig: {
+                        aspectRatio: '1:1',
+                        imageSize: '1K',
+                      },
+                    },
+                  });
+                }
+
+                if (response?.candidates?.[0]?.content?.parts) {
+                  for (const part of response.candidates[0].content.parts) {
+                    if (part.inlineData?.data) {
+                      const imgMime = part.inlineData.mimeType || 'image/png';
+                      generatedImageUrl = `data:${imgMime};base64,${part.inlineData.data}`;
+                      source = 'ai_generated';
+                      engine = `Google Gemini (${modelCandidate})`;
+                      activeImageModel = modelCandidate;
+                      break;
+                    }
+                  }
+                }
+                if (generatedImageUrl) break;
+              } catch (mErr: any) {
+                console.warn(`[SocialMarketing] Gemini model ${modelCandidate} failed:`, mErr?.message || mErr);
+              }
+            }
+          } catch (gErr: any) {
+            console.warn('[SocialMarketing] Gemini image generation initialization failed:', gErr?.message || gErr);
+          }
+        }
+      }
+
       // Tier 1 & 2: OpenAI DALL-E Generation (Honors selected model: dall-e-3 or dall-e-2)
-      if (openai && activeImageModel !== 'flux-turbo') {
+      if (!generatedImageUrl && openai && activeImageModel !== 'flux-turbo') {
         if (activeImageModel === 'dall-e-2') {
           try {
             const imgRes2 = await openai.images.generate({
@@ -1487,6 +1651,329 @@ Output a JSON response with:
       return res.status(500).json({
         success: false,
         error: err?.message || 'Failed to generate AI visual.',
+      });
+    }
+  });
+
+  // Step 2.5: Media Management - AI Image Editing with Text Prompts (gemini-3.1-flash-image-preview)
+  app.post('/api/social-marketing/edit-image', async (req, res) => {
+    try {
+      const { image, prompt, model, product } = req.body;
+      if (!image) {
+        return res.status(400).json({ success: false, error: 'Base image is required to edit.' });
+      }
+      if (!prompt || !prompt.trim()) {
+        return res.status(400).json({ success: false, error: 'Edit prompt instruction is required.' });
+      }
+
+      const geminiKey = process.env.GEMINI_API_KEY;
+      if (!geminiKey || geminiKey.startsWith('AQ.')) {
+        return res.status(400).json({
+          success: false,
+          error: 'GEMINI_API_KEY is not configured in server environment (.env). Please configure your Gemini API key.',
+        });
+      }
+
+      let mimeType = 'image/jpeg';
+      let cleanBase64 = '';
+      if (typeof image === 'string' && image.startsWith('data:')) {
+        const parts = image.split(';base64,');
+        mimeType = parts[0].replace('data:', '') || 'image/jpeg';
+        cleanBase64 = parts[1] || '';
+      } else if (typeof image === 'string') {
+        const fetchRes = await fetch(image);
+        const ab = await fetchRes.arrayBuffer();
+        cleanBase64 = Buffer.from(ab).toString('base64');
+        mimeType = fetchRes.headers.get('content-type') || 'image/jpeg';
+      }
+
+      if (!cleanBase64) {
+        return res.status(400).json({ success: false, error: 'Invalid or missing image bytes to edit.' });
+      }
+
+      const ai = getGenAI();
+      const candidateModels = [
+        model || 'gemini-3.1-flash-image-preview',
+        'gemini-3.1-flash-image-preview',
+        'gemini-3.1-flash-image',
+        'gemini-3.1-flash-lite-image',
+      ];
+      const uniqueModels = Array.from(new Set(candidateModels.filter(Boolean)));
+
+      let editedImageUrl: string | null = null;
+      let activeModelUsed = '';
+
+      for (const candidate of uniqueModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: candidate,
+            contents: {
+              parts: [
+                {
+                  inlineData: {
+                    data: cleanBase64,
+                    mimeType,
+                  },
+                },
+                {
+                  text: prompt.trim(),
+                },
+              ],
+            },
+          });
+
+          if (response?.candidates?.[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+              if (part.inlineData?.data) {
+                const outMime = part.inlineData.mimeType || 'image/png';
+                editedImageUrl = `data:${outMime};base64,${part.inlineData.data}`;
+                activeModelUsed = candidate;
+                break;
+              }
+            }
+          }
+
+          if (editedImageUrl) break;
+        } catch (err: any) {
+          console.warn(`[SocialMarketing] Gemini edit with ${candidate} failed:`, err?.message || err);
+        }
+      }
+
+      if (!editedImageUrl) {
+        return res.status(500).json({
+          success: false,
+          error: 'Gemini image editing did not return an edited image part. Please try refining your instruction prompt.',
+        });
+      }
+
+      return res.json({
+        success: true,
+        imageUrl: editedImageUrl,
+        engine: 'Gemini 3.1 Flash Image',
+        model: activeModelUsed,
+        promptUsed: prompt.trim(),
+      });
+    } catch (err: any) {
+      console.error('Error in /api/social-marketing/edit-image:', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Failed to edit visual with AI.',
+      });
+    }
+  });
+
+  // Google Search Grounded Specs & Live Myanmar Market Price (gemini-3.5-flash with googleSearch tool)
+  app.post('/api/products/search-grounded-specs', async (req, res) => {
+    try {
+      const { query, brand, model } = req.body;
+      const targetQuery = (query || `${brand || ''} ${model || ''}`).trim();
+      if (!targetQuery) {
+        return res.status(400).json({ success: false, error: 'Product name, brand, or model is required.' });
+      }
+
+      const geminiKey = process.env.GEMINI_API_KEY;
+      if (!geminiKey || geminiKey.startsWith('AQ.')) {
+        return res.status(400).json({
+          success: false,
+          error: 'GEMINI_API_KEY is not configured in server environment (.env). Please configure your Gemini API key to enable Google Search Grounding.',
+        });
+      }
+
+      const ai = getGenAI();
+      const prompt = `You are a real-time mobile tech market analyst with live Google Search access.
+Research the official technical specifications and up-to-date Myanmar retail market pricing for: "${targetQuery}".
+
+Use Google Search to find verified, accurate, current specifications, available memory configurations, official colorways, and current street prices in Myanmar Kyats (MMK).
+Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
+\`\`\`json
+{
+  "brand": "Brand Name",
+  "model": "Model Name",
+  "officialName": "Full Official Title",
+  "releaseYear": "e.g. 2024 / 2025 / 2026",
+  "display": "Screen size, panel type, refresh rate (e.g. 6.8-inch Dynamic AMOLED 2X, 120Hz)",
+  "processor": "Chipset name (e.g. Snapdragon 8 Elite / Apple A18 Pro / Dimensity 9400)",
+  "ramOptions": ["8GB", "12GB", "16GB"],
+  "romOptions": ["128GB", "256GB", "512GB", "1TB"],
+  "colors": ["Official Color 1", "Official Color 2", "Official Color 3"],
+  "camera": "Main camera specs, front camera specs",
+  "battery": "Battery capacity in mAh and charging watts",
+  "recommendedSellingPriceMmk": 1850000,
+  "marketPriceRangeMmk": {
+    "min": 1750000,
+    "max": 1950000
+  },
+  "myanmarMarketSummary": "Detailed market summary in Burmese and English describing Myanmar market pricing, availability, and retail guidance."
+}
+\`\`\`
+Ensure all pricing values are valid numbers (MMK).`;
+
+      const candidateModels = ['gemini-3.5-flash', 'gemini-3.8-flash'];
+      let lastErr: any = null;
+      let finalResult: any = null;
+      let groundingMeta: any = null;
+      let modelUsed = '';
+
+      for (const m of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: m,
+            contents: prompt,
+            config: {
+              tools: [{ googleSearch: {} }],
+            },
+          });
+
+          const rawText = response.text || '';
+          const candidate = response.candidates?.[0];
+          groundingMeta = candidate?.groundingMetadata;
+
+          const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, rawText];
+          const jsonStr = (jsonMatch[1] || rawText).trim();
+          finalResult = JSON.parse(jsonStr);
+          modelUsed = m;
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          console.warn(`[ProductSpecs] Google Search Grounding with ${m} failed:`, err?.message || err);
+        }
+      }
+
+      if (!finalResult) {
+        throw new Error(lastErr?.message || 'Failed to extract specifications with Google Search Grounding.');
+      }
+
+      const sources: Array<{ title: string; url: string }> = [];
+      if (groundingMeta?.groundingChunks) {
+        for (const chunk of groundingMeta.groundingChunks) {
+          if (chunk.web?.uri) {
+            sources.push({
+              title: chunk.web.title || chunk.web.uri,
+              url: chunk.web.uri,
+            });
+          }
+        }
+      }
+
+      return res.json({
+        success: true,
+        data: finalResult,
+        modelUsed,
+        groundingMetadata: {
+          searchQueries: groundingMeta?.webSearchQueries || [],
+          sources,
+        },
+      });
+    } catch (err: any) {
+      console.error('Error in /api/products/search-grounded-specs:', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Failed to search grounded product specs.',
+      });
+    }
+  });
+
+  // Google Search Grounded Market Price Benchmark Check
+  app.post('/api/products/market-price-check', async (req, res) => {
+    try {
+      const { brand, model, currentSellingPrice, costPrice, condition, ram, rom } = req.body;
+      const targetQuery = `${brand || ''} ${model || ''} ${ram && ram !== '-' ? ram : ''} ${rom && rom !== '-' ? rom : ''}`.trim();
+      if (!targetQuery) {
+        return res.status(400).json({ success: false, error: 'Product brand and model are required.' });
+      }
+
+      const geminiKey = process.env.GEMINI_API_KEY;
+      if (!geminiKey || geminiKey.startsWith('AQ.')) {
+        return res.status(400).json({
+          success: false,
+          error: 'GEMINI_API_KEY is not configured in server environment (.env).',
+        });
+      }
+
+      const ai = getGenAI();
+      const prompt = `You are a real-time mobile market analyst for Myanmar retail shops.
+Check live Google Search data for the current Myanmar street price of this device:
+Device: ${targetQuery}
+Condition: ${condition || 'brand_new'}
+Store's Current Selling Price: ${currentSellingPrice ? `${currentSellingPrice} MMK` : 'Not set'}
+Store's Cost Price: ${costPrice ? `${costPrice} MMK` : 'Not set'}
+
+Perform a Google Search to determine current market prices in Yangon/Mandalay shops.
+Output your findings in JSON format inside a \`\`\`json ... \`\`\` block:
+\`\`\`json
+{
+  "marketStatus": "competitive",
+  "averageMarketPriceMmk": 1500000,
+  "marketRangeMmk": { "min": 1400000, "max": 1600000 },
+  "priceDifferenceMmk": 0,
+  "pricingAdvice": "Advice on whether to increase, hold, or discount price",
+  "summaryBurmese": "Myanmar language analysis for the store owner with advice on competitive retail pricing",
+  "summaryEnglish": "English language summary with key market observations"
+}
+\`\`\`
+Ensure all numbers are integers without commas.`;
+
+      const candidateModels = ['gemini-3.5-flash', 'gemini-3.8-flash'];
+      let lastErr: any = null;
+      let analysisResult: any = null;
+      let groundingMeta: any = null;
+      let modelUsed = '';
+
+      for (const m of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: m,
+            contents: prompt,
+            config: {
+              tools: [{ googleSearch: {} }],
+            },
+          });
+
+          const rawText = response.text || '';
+          const candidate = response.candidates?.[0];
+          groundingMeta = candidate?.groundingMetadata;
+
+          const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, rawText];
+          const jsonStr = (jsonMatch[1] || rawText).trim();
+          analysisResult = JSON.parse(jsonStr);
+          modelUsed = m;
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          console.warn(`[MarketPriceCheck] Google Search Grounding with ${m} failed:`, err?.message || err);
+        }
+      }
+
+      if (!analysisResult) {
+        throw new Error(lastErr?.message || 'Failed to check market price with Google Search Grounding.');
+      }
+
+      const sources: Array<{ title: string; url: string }> = [];
+      if (groundingMeta?.groundingChunks) {
+        for (const chunk of groundingMeta.groundingChunks) {
+          if (chunk.web?.uri) {
+            sources.push({
+              title: chunk.web.title || chunk.web.uri,
+              url: chunk.web.uri,
+            });
+          }
+        }
+      }
+
+      return res.json({
+        success: true,
+        analysis: analysisResult,
+        modelUsed,
+        groundingMetadata: {
+          searchQueries: groundingMeta?.webSearchQueries || [],
+          sources,
+        },
+      });
+    } catch (err: any) {
+      console.error('Error in /api/products/market-price-check:', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Failed to check market price with Google Search Grounding.',
       });
     }
   });

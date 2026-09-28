@@ -125,9 +125,80 @@
         "clientDevice": { "type": "string" }
       },
       "required": ["id", "timestamp", "staffId", "staffName", "staffRole", "actionType", "category", "severity", "summary"]
+    },
+    "storeLocation": {
+      "title": "Store Location & Warehouse",
+      "description": "Retail branch store and central warehouse locations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["warehouse", "branch"] },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "managerId": { "type": "string" },
+        "managerName": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "name", "type", "isActive"]
+    },
+    "branchInventory": {
+      "title": "Branch Localized Inventory",
+      "description": "Location-scoped stock counts, reservations, and localized price overrides",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "locationId": { "type": "string" },
+        "onHandStock": { "type": "number" },
+        "reservedStock": { "type": "number" },
+        "availableStock": { "type": "number" },
+        "minThreshold": { "type": "number" },
+        "localSellingPrice": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "productId", "locationId", "onHandStock", "availableStock"]
+    },
+    "stockTransfer": {
+      "title": "Inter-Branch Stock Transfer",
+      "description": "Three-way handshake stock transfer requests, dispatches, and receipts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "transferNumber": { "type": "string" },
+        "fromLocationId": { "type": "string" },
+        "toLocationId": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "requested", "approved", "dispatched", "received", "rejected", "cancelled"] },
+        "items": { "type": "array" },
+        "totalRequestedQty": { "type": "number" },
+        "totalDispatchedQty": { "type": "number" },
+        "totalReceivedQty": { "type": "number" },
+        "rejectionReason": { "type": "string" },
+        "damageLogId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "transferNumber", "fromLocationId", "toLocationId", "status", "items"]
     }
   },
   "firestore": {
+    "/locations/{locationId}": {
+      "entity": "storeLocation",
+      "description": "Multi-branch store and warehouse locations"
+    },
+    "/branch_inventory/{docId}": {
+      "entity": "branchInventory",
+      "description": "Location-scoped inventory stock and availability ledger"
+    },
+    "/stock_transfers/{transferId}": {
+      "entity": "stockTransfer",
+      "description": "Inter-branch stock transfer requests, in-transit manifests, and discrepancy tracking"
+    },
+    "/device_units/{imei}": {
+      "description": "Serialized 15-digit IMEI devices tracked across warehouses and branches"
+    },
     "/staffUsers/{userId}": {
       "entity": "staffUser",
       "description": "Staff account records and role permissions"

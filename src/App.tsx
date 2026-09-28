@@ -57,11 +57,14 @@ import { SocialMediaMarketing } from './components/marketing/SocialMediaMarketin
 import { StaffPayrollDashboard } from './components/payroll/StaffPayrollDashboard';
 import { AuditLogManager } from './components/audit/AuditLogManager';
 import { AuditLogger } from './utils/auditLogger';
+import { BranchManager } from './components/branches/BranchManager';
+import { StoreLocation } from './types';
 import { useGlobalNewTabLinks } from './hooks/useGlobalNewTabLinks';
 import { usePeriodicSync } from './hooks/usePeriodicSync';
 import { FirebaseAuthService } from './services/firebaseAuthService';
 import { firestoreSync } from './services/firestoreSyncService';
 import { updateDocumentFavicon } from './utils/favicon';
+import { LanguageProvider } from './context/LanguageContext';
 
 const VALID_TABS: AppTab[] = [
   'dashboard',
@@ -72,6 +75,7 @@ const VALID_TABS: AppTab[] = [
   'quarantine_rma',
   'stock_check',
   'purchases',
+  'branches',
   'daily_profit',
   'monthly_profit',
   'personal_finance',
@@ -127,6 +131,8 @@ export default function App() {
   const [stockAudits, setStockAudits] = useState<StockAuditSession[]>(StorageService.getStockAudits());
   const [settings, setSettings] = useState<ShopSettings>(StorageService.getSettings());
   const [rolePermissions, setRolePermissions] = useState<Record<StaffRole, RolePermissions>>(StorageService.getRolePermissions());
+  const [locations, setLocations] = useState<StoreLocation[]>(() => StorageService.getLocations());
+  const [activeLocationId, setActiveLocationId] = useState<string>(() => StorageService.getActiveLocationId());
 
   // Authentication & Terminal Lock State (Check both sessionStorage & localStorage for new-tab continuity)
   const [isLocked, setIsLocked] = useState<boolean>(() => {
@@ -297,13 +303,27 @@ export default function App() {
       setStockAdjustments(StorageService.getStockAdjustments());
       setPriceChanges(StorageService.getPriceChanges());
       setStockAudits(StorageService.getStockAudits());
-      setSettings(StorageService.getSettings());
-      setRolePermissions(StorageService.getRolePermissions());
+      setSettings(prev => {
+        const next = StorageService.getSettings();
+        return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
+      });
+      setRolePermissions(prev => {
+        const next = StorageService.getRolePermissions();
+        return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
+      });
+      setLocations(StorageService.getLocations());
+      setActiveLocationId(StorageService.getActiveLocationId());
 
       // Sync auth & lock status across tabs
       const isAuth = sessionStorage.getItem('mobileshop_session_auth') === 'true' || 
                      localStorage.getItem('mobileshop_auth_active') === 'true';
       setIsLocked(!isAuth);
+    };
+
+    const handleLocationChange = () => {
+      setActiveLocationId(StorageService.getActiveLocationId());
+      setLocations(StorageService.getLocations());
+      setProducts(StorageService.getProducts());
     };
 
     // Initialize Firebase Auth & Realtime synchronization if authenticated
@@ -316,9 +336,11 @@ export default function App() {
 
     window.addEventListener('mobileshop_data_updated', handleStorageUpdate);
     window.addEventListener('storage', handleStorageUpdate);
+    window.addEventListener('mobileshop_location_changed', handleLocationChange);
     return () => {
       window.removeEventListener('mobileshop_data_updated', handleStorageUpdate);
       window.removeEventListener('storage', handleStorageUpdate);
+      window.removeEventListener('mobileshop_location_changed', handleLocationChange);
       firestoreSync.stopRealtimeSync();
     };
   }, []);
@@ -417,6 +439,10 @@ export default function App() {
   };
 
   // Handlers
+  const handleClearActivePreOrder = useCallback(() => {
+    setPreOrderToFulfillInPos(null);
+  }, []);
+
   const handleCompleteSale = (newSale: Sale, updatedProducts: Product[], updatedCustomer?: Customer) => {
     StorageService.saveSale(newSale);
     StorageService.saveProducts(updatedProducts);
@@ -754,18 +780,27 @@ export default function App() {
 
   if (isLocked) {
     return (
-      <LoginScreen
-        staffUsers={staffUsers}
-        settings={settings}
-        onLoginSuccess={handleLoginSuccess}
-      />
+      <LanguageProvider 
+        initialLanguage={settings.systemLanguage || 'my'} 
+        onLanguageChange={(newLang) => handleUpdateSettings({ ...settings, systemLanguage: newLang })}
+      >
+        <LoginScreen
+          staffUsers={staffUsers}
+          settings={settings}
+          onLoginSuccess={handleLoginSuccess}
+        />
+      </LanguageProvider>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-row text-slate-800 antialiased selection:bg-emerald-500 selection:text-white w-full max-w-full overflow-x-clip">
-      
-      {/* Left Side Navigation Sidebar */}
+    <LanguageProvider 
+      initialLanguage={settings.systemLanguage || 'my'} 
+      onLanguageChange={(newLang) => handleUpdateSettings({ ...settings, systemLanguage: newLang })}
+    >
+      <div className="min-h-screen bg-slate-100 flex flex-row text-slate-800 antialiased selection:bg-emerald-500 selection:text-white w-full max-w-full overflow-x-clip">
+        
+        {/* Left Side Navigation Sidebar */}
       <Navigation
         activeTab={activeTab}
         onTabChange={(tab) => setActiveTab(tab)}
@@ -796,6 +831,13 @@ export default function App() {
           currentStaffUser={currentActiveUser}
           rolePermissions={rolePermissions}
           syncInfo={syncInfo}
+          locations={locations}
+          activeLocationId={activeLocationId}
+          onLocationChange={(newLocId) => {
+            setActiveLocationId(newLocId);
+            setProducts(StorageService.getProducts());
+          }}
+          onOpenBranchesTab={() => setActiveTab('branches')}
           canGoBack={canGoBack}
           canGoForward={canGoForward}
           onOpenNewSale={() => setActiveTab('pos')}
@@ -849,7 +891,7 @@ export default function App() {
               customers={customers}
               settings={settings}
               activePreOrderToFulfill={preOrderToFulfillInPos}
-              onClearActivePreOrder={() => setPreOrderToFulfillInPos(null)}
+              onClearActivePreOrder={handleClearActivePreOrder}
               onCompleteSale={handleCompleteSale}
               onAddNewCustomer={handleSaveCustomer}
             />
@@ -930,6 +972,17 @@ export default function App() {
               rolePermissions={rolePermissions}
               onSavePurchase={handleSavePurchase}
               onSaveSupplier={handleSaveSupplier}
+            />
+          )}
+
+          {activeTab === 'branches' && (
+            <BranchManager
+              products={products}
+              currentStaffUser={currentActiveUser}
+              settings={settings}
+              staffUsers={staffUsers}
+              onSaveStaffUser={handleSaveStaffUser}
+              onOpenDamageQuarantine={() => setActiveTab('quarantine_rma')}
             />
           )}
 
@@ -1047,6 +1100,7 @@ export default function App() {
           {activeTab === 'roles' && (
             <UserRolesManager
               staffUsers={staffUsers}
+              locations={locations}
               settings={settings}
               rolePermissions={rolePermissions}
               onSaveStaffUser={handleSaveStaffUser}
@@ -1194,6 +1248,7 @@ export default function App() {
         rolePermissions={rolePermissions}
       />
 
-    </div>
+      </div>
+    </LanguageProvider>
   );
 }

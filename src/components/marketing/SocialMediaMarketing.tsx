@@ -35,7 +35,12 @@ import {
   Facebook,
   ImagePlus,
   RotateCcw,
-  X
+  X,
+  Wand2,
+  Download,
+  Sliders,
+  Palette,
+  ArrowLeftRight
 } from 'lucide-react';
 import { 
   Product, 
@@ -80,8 +85,9 @@ const DEFAULT_SOCIAL_STATE: SocialMarketingState = {
   // Step 2: Media Management
   mediaGallery: [],
   aiImagePrompt: '',
-  selectedImageModel: 'dall-e-3',
+  selectedImageModel: 'gemini-3.1-flash-image-preview',
   isGeneratingAiImage: false,
+  isEditingAiImage: false,
   referenceImageUrl: null,
   referenceImageName: null,
   isAnalyzingReference: false,
@@ -162,6 +168,13 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
   const mediaFileInputRef = useRef<HTMLInputElement | null>(null);
   const trainingFileInputRef = useRef<HTMLInputElement | null>(null);
   const referencePhotoInputRef = useRef<HTMLInputElement | null>(null);
+
+  // AI Image Editing State (Gemini 3.1 Flash Image Preview)
+  const [editingModalOpen, setEditingModalOpen] = useState(false);
+  const [targetImageForEdit, setTargetImageForEdit] = useState<SocialMarketingMediaItem | null>(null);
+  const [editPromptInput, setEditPromptInput] = useState('');
+  const [isEditingImage, setIsEditingImage] = useState(false);
+  const [editedImageResult, setEditedImageResult] = useState<string | null>(null);
 
   // Auto-persist state changes to StorageService or clear if empty
   useEffect(() => {
@@ -531,6 +544,81 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
       setSocialState(prev => ({ ...prev, isGeneratingAiImage: false }));
       showToast('error', err.message || 'AI image service unavailable.');
     }
+  };
+
+  // Open AI Image Editing Studio Modal (Gemini 3.1 Flash Image Preview)
+  const handleOpenEditModal = (item: SocialMarketingMediaItem) => {
+    setTargetImageForEdit(item);
+    setEditPromptInput('');
+    setEditedImageResult(null);
+    setEditingModalOpen(true);
+  };
+
+  // Perform Gemini AI Image Edit using Text Prompts
+  const handleApplyAiEdit = async (overridePrompt?: string) => {
+    if (!targetImageForEdit) {
+      showToast('error', 'No image selected to edit.');
+      return;
+    }
+    const promptToUse = (overridePrompt || editPromptInput).trim();
+    if (!promptToUse) {
+      showToast('error', 'Please enter an edit instruction (e.g., "Add a bold SALE 10% OFF badge in the top right corner").');
+      return;
+    }
+
+    setIsEditingImage(true);
+    try {
+      const response = await authenticatedFetch('/api/social-marketing/edit-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: targetImageForEdit.url,
+          prompt: promptToUse,
+          model: socialState.selectedImageModel || 'gemini-3.1-flash-image-preview',
+          product: selectedProduct,
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success && data.imageUrl) {
+        setEditedImageResult(data.imageUrl);
+        playSuccessBeep();
+        showToast('success', `Image edited successfully with ${data.engine || 'Gemini 3.1 Flash'}!`);
+      } else {
+        throw new Error(data.error || 'Failed to edit image with AI.');
+      }
+    } catch (err: any) {
+      console.error('Error in handleApplyAiEdit:', err);
+      playErrorBeep();
+      showToast('error', err.message || 'AI Image Edit failed.');
+    } finally {
+      setIsEditingImage(false);
+    }
+  };
+
+  // Save the edited visual into the media gallery
+  const handleSaveEditedImageToGallery = () => {
+    if (!editedImageResult || !targetImageForEdit) return;
+
+    const newItem: SocialMarketingMediaItem = {
+      id: `ai-edit-${Date.now()}`,
+      url: editedImageResult,
+      source: 'ai_generated',
+      title: `Gemini Edit: ${editPromptInput ? editPromptInput.slice(0, 30) : 'Edited Visual'}`,
+      isSelected: true,
+      addedAt: new Date().toISOString(),
+    };
+
+    setSocialState(prev => ({
+      ...prev,
+      mediaGallery: [newItem, ...prev.mediaGallery],
+    }));
+
+    setEditingModalOpen(false);
+    setEditedImageResult(null);
+    setTargetImageForEdit(null);
+    setEditPromptInput('');
+    showToast('success', 'Edited image saved to Media Gallery!');
   };
 
   // =========================================================================
@@ -1252,9 +1340,42 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
                   {/* Radio Cards for Models */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2.5">
                     <label
+                      htmlFor="image-model-radio-gemini"
+                      className={`relative p-2.5 rounded-xl border cursor-pointer transition-all ${
+                        (socialState.selectedImageModel || 'gemini-3.1-flash-image-preview') === 'gemini-3.1-flash-image-preview'
+                          ? 'bg-gradient-to-br from-indigo-50/95 to-purple-50/90 dark:from-indigo-950/70 dark:to-purple-950/60 border-indigo-500 shadow-xs ring-2 ring-indigo-500/50'
+                          : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1.5">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <input
+                            id="image-model-radio-gemini"
+                            type="radio"
+                            name="ai-image-model-selection"
+                            value="gemini-3.1-flash-image-preview"
+                            checked={(socialState.selectedImageModel || 'gemini-3.1-flash-image-preview') === 'gemini-3.1-flash-image-preview'}
+                            onChange={() => setSocialState(prev => ({ ...prev, selectedImageModel: 'gemini-3.1-flash-image-preview' }))}
+                            className="w-3.5 h-3.5 text-indigo-600 border-slate-300 focus:ring-indigo-500 shrink-0"
+                          />
+                          <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1 shrink-0 whitespace-nowrap">
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                            gemini-3.1-flash-image
+                          </span>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-indigo-600 text-white shadow-2xs shrink-0 whitespace-nowrap">
+                          Google Gemini • Create & Edit
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 pl-5 leading-tight font-medium">
+                        Next-gen image synthesis & multimodal text-prompted editing.
+                      </p>
+                    </label>
+
+                    <label
                       htmlFor="image-model-radio-dalle3"
                       className={`relative p-2.5 rounded-xl border cursor-pointer transition-all ${
-                        (socialState.selectedImageModel || 'dall-e-3') === 'dall-e-3'
+                        socialState.selectedImageModel === 'dall-e-3'
                           ? 'bg-indigo-50/90 dark:bg-indigo-950/60 border-indigo-500 shadow-xs ring-1 ring-indigo-500/50'
                           : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                       }`}
@@ -1266,7 +1387,7 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
                             type="radio"
                             name="ai-image-model-selection"
                             value="dall-e-3"
-                            checked={(socialState.selectedImageModel || 'dall-e-3') === 'dall-e-3'}
+                            checked={socialState.selectedImageModel === 'dall-e-3'}
                             onChange={() => setSocialState(prev => ({ ...prev, selectedImageModel: 'dall-e-3' }))}
                             className="w-3.5 h-3.5 text-indigo-600 border-slate-300 focus:ring-indigo-500 shrink-0"
                           />
@@ -1280,58 +1401,48 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-5 leading-tight">
-                        Ultra-detailed studio rendering, HD textures & photorealistic lighting.
-                      </p>
-                    </label>
-
-                    <label
-                      htmlFor="image-model-radio-dalle2"
-                      className={`relative p-2.5 rounded-xl border cursor-pointer transition-all ${
-                        socialState.selectedImageModel === 'dall-e-2'
-                          ? 'bg-blue-50/90 dark:bg-blue-950/60 border-blue-500 shadow-xs ring-1 ring-blue-500/50'
-                          : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-1.5">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <input
-                            id="image-model-radio-dalle2"
-                            type="radio"
-                            name="ai-image-model-selection"
-                            value="dall-e-2"
-                            checked={socialState.selectedImageModel === 'dall-e-2'}
-                            onChange={() => setSocialState(prev => ({ ...prev, selectedImageModel: 'dall-e-2' }))}
-                            className="w-3.5 h-3.5 text-blue-600 border-slate-300 focus:ring-blue-500 shrink-0"
-                          />
-                          <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1 shrink-0 whitespace-nowrap">
-                            <Zap className="w-3 h-3 text-amber-500 shrink-0" />
-                            dall-e-2
-                          </span>
-                        </div>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 shrink-0 whitespace-nowrap">
-                          Fast / Budget
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-5 leading-tight">
-                        Rapid visual generation, lower latency & cost-efficient commercial ads.
+                        Ultra-detailed studio rendering & photorealistic lighting.
                       </p>
                     </label>
                   </div>
 
                   {/* Dropdown Select Option */}
                   <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap shrink-0">Dropdown Select:</span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap shrink-0">Engine / Model:</span>
                     <select
                       id="ai-image-model-select"
-                      value={socialState.selectedImageModel || 'dall-e-3'}
+                      value={socialState.selectedImageModel || 'gemini-3.1-flash-image-preview'}
                       onChange={(e) => setSocialState(prev => ({ ...prev, selectedImageModel: e.target.value }))}
                       className="w-full sm:flex-1 px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
                     >
+                      <option value="gemini-3.1-flash-image-preview">gemini-3.1-flash-image-preview — Google Gemini (Recommended • Create & Text-Prompted Image Editing)</option>
                       <option value="dall-e-3">dall-e-3 — Pro / High-Quality (Ultra-detailed 1024x1024 Commercial)</option>
                       <option value="dall-e-2">dall-e-2 — Fast / Budget (Standard 1024x1024 Commercial)</option>
                       <option value="flux-turbo">flux-turbo — Real-Time / Instant (Ultra-Fast Studio Photography)</option>
                     </select>
                   </div>
+                </div>
+
+                {/* Quick Prompt Ideas Pills */}
+                <div className="flex items-center gap-1.5 mb-2 overflow-x-auto pb-1 text-[11px] no-scrollbar">
+                  <span className="text-slate-400 font-medium shrink-0 flex items-center gap-1">
+                    <Wand2 className="w-3 h-3 text-indigo-500" /> Ideas:
+                  </span>
+                  {[
+                    'Studio acrylic pedestal with sharp rim lighting',
+                    'Dark luxury marble with neon purple ambient glow',
+                    'Festive Thingyan water splash & vibrant holiday ribbon',
+                    'Clean minimalist wooden desk with soft natural light',
+                  ].map((idea, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setSocialState(prev => ({ ...prev, aiImagePrompt: idea }))}
+                      className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-300 border border-slate-200 dark:border-slate-700 shrink-0 transition-colors cursor-pointer"
+                    >
+                      {idea.slice(0, 32)}...
+                    </button>
+                  ))}
                 </div>
 
                 {/* Prompt Row */}
@@ -1343,7 +1454,7 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
                     onChange={(e) => setSocialState(prev => ({ ...prev, aiImagePrompt: e.target.value }))}
                     placeholder={
                       socialState.referenceImageUrl
-                        ? "Custom prompt (or leave blank to auto-synthesize from reference photo)..."
+                        ? "Prompt: e.g. Place on luxury marble pedestal with studio rim light..."
                         : "Enter prompt: e.g. Studio dark pedestal with dramatic rim lighting..."
                     }
                     className="w-full sm:flex-1 min-w-0 px-3 py-2 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
@@ -1353,17 +1464,17 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
                     id="btn-generate-ai-image"
                     onClick={handleGenerateAiImage}
                     disabled={socialState.isGeneratingAiImage}
-                    className="w-full sm:w-auto px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer shadow-xs shrink-0"
+                    className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer shadow-xs shrink-0"
                   >
                     {socialState.isGeneratingAiImage ? (
                       <>
                         <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
-                        <span>Rendering...</span>
+                        <span>Creating with Gemini...</span>
                       </>
                     ) : (
                       <>
                         <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                        <span>Generate AI Image</span>
+                        <span>Create AI Visual</span>
                       </>
                     )}
                   </button>
@@ -1525,18 +1636,33 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
                           </span>
                         </div>
 
-                        {/* Bottom Delete Button */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteMediaItem(item.id);
-                          }}
-                          className="absolute bottom-1.5 right-1.5 p-1 bg-black/60 hover:bg-rose-600 text-white rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Remove image"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {/* Bottom Actions Bar */}
+                        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between pointer-events-auto">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEditModal(item);
+                            }}
+                            className="px-2 py-0.5 bg-indigo-600/90 hover:bg-indigo-600 text-white rounded text-[10px] font-semibold flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-xs cursor-pointer backdrop-blur-xs"
+                            title="Edit image with text prompt (Gemini 3.1 Flash)"
+                          >
+                            <Wand2 className="w-3 h-3" />
+                            <span>AI Edit</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteMediaItem(item.id);
+                            }}
+                            className="p-1 bg-black/60 hover:bg-rose-600 text-white rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                            title="Remove image"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -2008,6 +2134,186 @@ export const SocialMediaMarketing: React.FC<SocialMediaMarketingProps> = ({
           cartItemCount={selectedProduct ? 1 : 0}
           settings={settings}
         />
+      )}
+
+      {/* GEMINI AI IMAGE EDITOR MODAL (Text-Prompted Image Transformation) */}
+      {editingModalOpen && targetImageForEdit && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+            {/* Modal Header */}
+            <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-indigo-50/90 via-purple-50/50 to-white dark:from-slate-850 dark:via-slate-850 dark:to-slate-900 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                  <Wand2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <span>AI Image Studio & Editor</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
+                      gemini-3.1-flash-image-preview
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Use natural language text prompts to add badges, transform backgrounds, or enhance studio visuals
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4">
+              {/* Visual Preview Comparison Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Source Image */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                    <span>Original Source Image</span>
+                  </span>
+                  <div className="aspect-square w-full bg-slate-950 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 relative flex items-center justify-center">
+                    <img
+                      src={targetImageForEdit.url}
+                      alt="Source for AI Edit"
+                      className="w-full h-full object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                    <span className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 text-white text-[10px] font-semibold backdrop-blur-xs">
+                      Original
+                    </span>
+                  </div>
+                </div>
+
+                {/* Edited Result */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>Gemini AI Edited Result</span>
+                  </span>
+                  <div className="aspect-square w-full bg-slate-950 rounded-xl overflow-hidden border border-indigo-200 dark:border-indigo-900/60 relative flex items-center justify-center">
+                    {isEditingImage ? (
+                      <div className="flex flex-col items-center justify-center gap-3 p-4 text-center">
+                        <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
+                        <div>
+                          <p className="text-xs font-semibold text-white">Gemini is editing visual...</p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">Synthesizing requested edits & lighting</p>
+                        </div>
+                      </div>
+                    ) : editedImageResult ? (
+                      <>
+                        <img
+                          src={editedImageResult}
+                          alt="AI Edited Result"
+                          className="w-full h-full object-contain"
+                          referrerPolicy="no-referrer"
+                        />
+                        <span className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-bold shadow-xs">
+                          ✨ Gemini Enhanced
+                        </span>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-2 p-4 text-center text-slate-500">
+                        <Wand2 className="w-8 h-8 opacity-40" />
+                        <p className="text-xs font-medium">Type your edit prompt below and click "Apply Gemini Edit"</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Prompt Suggestions */}
+              <div>
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 block">
+                  Quick Edit Inspirations:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    "Add a bold red sale badge with '10% OFF' in top corner",
+                    "Change background to dark luxury marble with soft ambient light",
+                    "Add festive water splashes and holiday Thingyan celebration ribbon",
+                    "Add futuristic cyan and purple neon cyberpunk rim lighting",
+                    "Clean up background and place on a sleek wooden display stand",
+                    "Add gift box with red ribbon beside the phone",
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setEditPromptInput(preset)}
+                      className="px-2.5 py-1 rounded-lg text-[11px] bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-300 border border-slate-200 dark:border-slate-700 transition-colors text-left cursor-pointer"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Text Prompt Input */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center justify-between">
+                  <span>Describe the edits you want to apply:</span>
+                  <span className="text-[11px] text-slate-400">Natural language text prompt</span>
+                </label>
+                <div className="relative">
+                  <textarea
+                    rows={2}
+                    value={editPromptInput}
+                    onChange={(e) => setEditPromptInput(e.target.value)}
+                    placeholder="e.g., Add a stylish gold badge 'Special Promotion' in the top right, and add soft studio rim lighting..."
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 resize-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setEditingModalOpen(false)}
+                className="px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleApplyAiEdit()}
+                  disabled={isEditingImage || !editPromptInput.trim()}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                >
+                  {isEditingImage ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Editing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="w-3.5 h-3.5" />
+                      <span>Apply Gemini Edit</span>
+                    </>
+                  )}
+                </button>
+
+                {editedImageResult && (
+                  <button
+                    type="button"
+                    onClick={handleSaveEditedImageToGallery}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Save to Media Gallery</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

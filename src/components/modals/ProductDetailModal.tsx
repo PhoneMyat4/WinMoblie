@@ -29,13 +29,19 @@ import {
   Image as ImageIcon,
   Upload,
   ZoomIn,
-  Eye
+  Eye,
+  Globe,
+  Sparkles,
+  RefreshCw,
+  ArrowRightLeft
 } from 'lucide-react';
 import { Product, ShopSettings } from '../../types';
 import { formatCurrency, formatDate, formatDateTime, formatImei, getCategoryLabel, getConditionLabel } from '../../utils/formatters';
 import { getColorDotHex } from '../../utils/variantUtils';
 import { ProductPhotoUploader } from '../common/ProductPhotoUploader';
+import { authenticatedFetch } from '../../utils/apiClient';
 import { isPhoneCategory } from '../../data/categoryTaxonomy';
+import { StorageService } from '../../utils/storage';
 
 interface ProductDetailModalProps {
   product: Product;
@@ -60,6 +66,43 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState<boolean>(false);
   const [tempPhotoUrl, setTempPhotoUrl] = useState<string | undefined>(product.imageUrl);
   const [isZoomOpen, setIsZoomOpen] = useState<boolean>(false);
+
+  // Google Search Grounding Market Price Benchmark State (gemini-3.5-flash with googleSearch tool)
+  const [isLoadingMarketCheck, setIsLoadingMarketCheck] = useState<boolean>(false);
+  const [marketCheckData, setMarketCheckData] = useState<any>(null);
+  const [marketCheckError, setMarketCheckError] = useState<string | null>(null);
+  const [showMarketModal, setShowMarketModal] = useState<boolean>(false);
+
+  const handleCheckMarketPrice = async () => {
+    setIsLoadingMarketCheck(true);
+    setMarketCheckError(null);
+    setShowMarketModal(true);
+    try {
+      const res = await authenticatedFetch('/api/products/market-price-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brand: product.brand,
+          model: product.model || product.name,
+          currentSellingPrice: product.sellingPrice,
+          costPrice: product.costPrice,
+          condition: product.condition,
+          ram: product.ram,
+          rom: product.rom,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.analysis) {
+        setMarketCheckData(data);
+      } else {
+        throw new Error(data.error || 'Failed to check live Myanmar market price.');
+      }
+    } catch (err: any) {
+      setMarketCheckError(err.message || 'Market price check failed.');
+    } finally {
+      setIsLoadingMarketCheck(false);
+    }
+  };
 
   const cond = getConditionLabel(product.condition);
   const isPhone = isPhoneCategory(product.category) || Boolean(product.rom && product.rom !== '-') || Boolean(product.imeiPairs?.length) || Boolean(product.imeiList?.length);
@@ -245,7 +288,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               </div>
             </div>
 
-            {/* Photo details & Quick Photo Button */}
+            {/* Photo details & Quick Actions */}
             <div className="flex-1 min-w-0 flex flex-col justify-between self-stretch text-center sm:text-left">
               <div>
                 <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap mb-1">
@@ -301,6 +344,22 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                     <span>View High-Res</span>
                   </button>
                 )}
+                {/* Google Search Live Market Price Check */}
+                <button
+                  type="button"
+                  onClick={handleCheckMarketPrice}
+                  disabled={isLoadingMarketCheck}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                  title="Check live market street prices in Myanmar with Google Search Grounding"
+                >
+                  {isLoadingMarketCheck ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Globe className="w-3.5 h-3.5 text-blue-200" />
+                  )}
+                  <span>Live Market Benchmark</span>
+                  <span className="px-1 py-0.2 rounded bg-white/20 text-[9px] font-black uppercase">Search</span>
+                </button>
               </div>
             </div>
 
@@ -367,6 +426,66 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               </p>
             </div>
 
+          </div>
+
+          {/* Multi-Branch & Warehouse Localized Stock Distribution */}
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-emerald-600" />
+                <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
+                  Multi-Branch & Central Warehouse Stock Ledger
+                </h4>
+              </div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                Localized Units
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+              {StorageService.getCrossBranchStock(product.id).map((entry) => {
+                const isWh = entry.location.type === 'warehouse';
+                const isCurrent = entry.location.id === StorageService.getActiveLocationId();
+
+                return (
+                  <div
+                    key={entry.location.id}
+                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                      isCurrent
+                        ? 'bg-slate-900 text-white border-slate-800'
+                        : 'bg-white border-slate-200 text-slate-800'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1">
+                        <span className="font-bold text-xs truncate">{entry.location.name}</span>
+                        <span className={`text-[9px] font-mono font-bold px-1 rounded ${
+                          isCurrent ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {entry.location.code}
+                        </span>
+                      </div>
+                      <p className={`text-[10px] ${isCurrent ? 'text-slate-400' : 'text-slate-400'}`}>
+                        {isWh ? 'Central Warehouse' : 'Branch Store'}
+                      </p>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className={`text-xs font-black px-1.5 py-0.5 rounded ${
+                        entry.available > 0
+                          ? isCurrent ? 'text-emerald-400' : 'text-emerald-600'
+                          : isCurrent ? 'text-rose-400' : 'text-rose-600'
+                      }`}>
+                        {entry.available} avail
+                      </span>
+                      <p className={`text-[9px] ${isCurrent ? 'text-slate-400' : 'text-slate-400'}`}>
+                        ({entry.onHand} on-hand)
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Phone Hardware Specifications */}
@@ -744,6 +863,195 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
             />
             <div className="mt-3 text-center text-white/80 text-xs font-medium">
               <span>{product.brand} - {product.name}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Google Search Live Market Price Benchmark Modal */}
+      {showMarketModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-modal-backdrop">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden animate-modal-content">
+            {/* Header */}
+            <div className="p-5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-white/15 backdrop-blur-xs border border-white/20 flex items-center justify-center shrink-0">
+                  <Globe className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-extrabold text-base text-white">Live Market Benchmark</h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-white/20 text-white uppercase tracking-wider">
+                      Google Search Grounding
+                    </span>
+                  </div>
+                  <p className="text-xs text-blue-100/90 mt-0.5 font-medium">
+                    {product.brand} {product.model || product.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowMarketModal(false)}
+                className="p-1.5 text-white/80 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="p-6 overflow-y-auto space-y-4 text-slate-800 text-xs sm:text-sm">
+              {isLoadingMarketCheck && (
+                <div className="py-12 flex flex-col items-center justify-center text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 animate-spin">
+                    <RefreshCw className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm">Searching Google in Real-Time...</h4>
+                    <p className="text-xs text-slate-500 mt-1 max-w-xs">
+                      Checking latest Myanmar retail prices, Yangon & Mandalay stores, and currency exchange benchmarks via Gemini 3.5 Flash Search Grounding.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {marketCheckError && !isLoadingMarketCheck && (
+                <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-rose-800 space-y-2">
+                  <div className="flex items-center gap-2 font-bold text-sm">
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    <span>Search Grounding Error</span>
+                  </div>
+                  <p className="text-xs">{marketCheckError}</p>
+                  <button
+                    onClick={handleCheckMarketPrice}
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Retry Live Search</span>
+                  </button>
+                </div>
+              )}
+
+              {marketCheckData?.analysis && !isLoadingMarketCheck && (
+                <>
+                  {/* Status Banner */}
+                  <div className="p-4 rounded-2xl border bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-white border-blue-200">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Market Status</span>
+                        <span className="px-2.5 py-0.5 rounded-lg text-xs font-black bg-blue-100 text-blue-800 uppercase">
+                          {marketCheckData.analysis.marketStatus || 'Competitive'}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Model: {marketCheckData.modelUsed || 'gemini-3.5-flash'}
+                      </span>
+                    </div>
+
+                    {/* Price Comparison Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mt-3 pt-3 border-t border-blue-100">
+                      <div className="p-2.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                        <span className="text-[10px] text-slate-500 font-medium block">Average Market Price</span>
+                        <span className="text-base font-extrabold text-blue-900 block mt-0.5">
+                          {formatCurrency(marketCheckData.analysis.averageMarketPriceMmk || 0, settings.currencySymbol)}
+                        </span>
+                      </div>
+
+                      <div className="p-2.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                        <span className="text-[10px] text-slate-500 font-medium block">Your Selling Price</span>
+                        <span className="text-base font-extrabold text-indigo-900 block mt-0.5">
+                          {formatCurrency(product.sellingPrice, settings.currencySymbol)}
+                        </span>
+                      </div>
+
+                      <div className="p-2.5 bg-white rounded-xl border border-slate-200 shadow-2xs col-span-2 sm:col-span-1">
+                        <span className="text-[10px] text-slate-500 font-medium block">Market Range</span>
+                        <span className="text-xs font-bold text-slate-700 block mt-0.5">
+                          {marketCheckData.analysis.marketRangeMmk?.min ? formatCurrency(marketCheckData.analysis.marketRangeMmk.min, '') : '-'} ~ {marketCheckData.analysis.marketRangeMmk?.max ? formatCurrency(marketCheckData.analysis.marketRangeMmk.max, settings.currencySymbol) : '-'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Burmese Market Advice */}
+                  {marketCheckData.analysis.summaryBurmese && (
+                    <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-2xl">
+                      <div className="flex items-center gap-1.5 text-amber-900 font-bold text-xs mb-1">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                        <span>မြန်မာဈေးကွက် သုံးသပ်ချက်နှင့် အကြံပြုချက် (Market Analysis):</span>
+                      </div>
+                      <p className="text-xs text-amber-950 font-medium leading-relaxed whitespace-pre-line">
+                        {marketCheckData.analysis.summaryBurmese}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* English Advice / Strategy */}
+                  {marketCheckData.analysis.pricingAdvice && (
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                      <span className="text-[11px] font-bold text-slate-700 block mb-0.5">Retail Pricing Advice:</span>
+                      <p className="text-xs text-slate-600 leading-normal">
+                        {marketCheckData.analysis.pricingAdvice}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Google Search Queries Executed */}
+                  {marketCheckData.groundingMetadata?.searchQueries?.length > 0 && (
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <Search className="w-3 h-3 text-slate-400" />
+                        <span>Google Search Queries Executed:</span>
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {marketCheckData.groundingMetadata.searchQueries.map((query: string, qIdx: number) => (
+                          <span key={qIdx} className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[11px] text-slate-700 font-mono">
+                            {query}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Grounded Citation Sources */}
+                  {marketCheckData.groundingMetadata?.sources?.length > 0 && (
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <Globe className="w-3 h-3 text-blue-500" />
+                        <span>Verified Live Sources:</span>
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {marketCheckData.groundingMetadata.sources.map((src: any, sIdx: number) => (
+                          <a
+                            key={sIdx}
+                            href={src.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs font-medium text-blue-600 hover:text-blue-800 hover:border-blue-300 transition-colors shadow-2xs"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span className="max-w-[200px] truncate">{src.title || src.url}</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+              <span className="text-[11px] text-slate-400 font-medium">
+                Real-time search results powered by Google Search Grounding
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowMarketModal(false)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

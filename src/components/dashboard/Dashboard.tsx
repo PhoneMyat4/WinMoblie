@@ -37,6 +37,7 @@ import { calculateRunningCapital } from '../../utils/capitalUtils';
 import { AppLink } from '../common/AppLink';
 import { CashPoolTransferModal } from '../financial/CashPoolTransferModal';
 import { useFinancialPrivacy, PrivacyToggleButton } from '../../utils/useFinancialPrivacy';
+import { useLanguage } from '../../context/LanguageContext';
 
 interface DashboardProps {
   products: Product[];
@@ -69,6 +70,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onOpenNewExpense,
   onViewInvoice,
 }) => {
+  const { t, isBurmese } = useLanguage();
   const todayStr = new Date().toISOString().split('T')[0];
   const effectivePerms = getEffectiveUserPermissions(currentStaffUser, rolePermissions);
 
@@ -168,11 +170,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-black text-slate-900 tracking-tight">Store Dashboard Overview</h2>
-            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800">Live Terminal</span>
+            <h2 className="text-xl font-black text-slate-900 tracking-tight">
+              {isBurmese ? 'ဆိုင်လုပ်ငန်း ပင်မဒက်ရှ်ဘုတ်' : 'Store Dashboard Overview'}
+            </h2>
+            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800">
+              {isBurmese ? 'တိုက်ရိုက်လည်ပတ်မှု' : 'Live Terminal'}
+            </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Logged in as <strong className="text-slate-800">{settings.currentStaffName}</strong> ({settings.currentStaffRole}) • Today: {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            {isBurmese ? 'လော့ဂ်အင်ဝင်ထားသူ' : 'Logged in as'}: <strong className="text-slate-800">{settings.currentStaffName}</strong> ({settings.currentStaffRole}) • {isBurmese ? 'ယနေ့ရက်စွဲ' : 'Today'}: {new Date().toLocaleDateString(isBurmese ? 'my-MM' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
           </p>
         </div>
 
@@ -195,7 +201,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               title="Open Business Reports (Right click to open in new tab/window)"
             >
               <BarChart3 className="w-4 h-4 shrink-0" />
-              <span>Reports</span>
+              <span>{t('tab.reports', 'Reports')}</span>
               <ExternalLink className="w-3 h-3 opacity-70 hidden sm:inline shrink-0" />
             </AppLink>
           )}
@@ -210,7 +216,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               title="Manage Pre-Orders & Bookings (Right click to open in new tab/window)"
             >
               <CalendarClock className="w-4 h-4 shrink-0 text-purple-600" />
-              <span>Pre-Orders</span>
+              <span>{t('tab.pre_orders', 'Pre-Orders')}</span>
               <ExternalLink className="w-3 h-3 opacity-70 hidden sm:inline shrink-0" />
             </AppLink>
           )}
@@ -225,7 +231,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               title="Launch POS Terminal (Right click to open in new tab/window)"
             >
               <ShoppingBag className="w-4 h-4 shrink-0" />
-              <span>POS Register</span>
+              <span>{t('tab.pos', 'POS Register')}</span>
               <ExternalLink className="w-3 h-3 hidden sm:inline shrink-0" />
             </AppLink>
           )}
@@ -239,7 +245,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               title="Stock Purchase (Right click to open in new tab/window)"
             >
               <Truck className="w-4 h-4 shrink-0" />
-              <span>+ Purchase</span>
+              <span>{isBurmese ? '+ ပစ္စည်းအဝယ်သွင်း' : '+ Purchase'}</span>
             </AppLink>
           )}
 
@@ -252,7 +258,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               title="Record Expense (Right click to open in new tab/window)"
             >
               <Receipt className="w-4 h-4 shrink-0" />
-              <span>+ Expense</span>
+              <span>{isBurmese ? '+ အသုံးစရိတ်' : '+ Expense'}</span>
             </AppLink>
           )}
 
@@ -265,7 +271,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             title="Open Team Chat & Notice Board"
           >
             <Megaphone className="w-4 h-4 shrink-0 text-amber-600" />
-            <span>Notice Board & Chat</span>
+            <span>{isBurmese ? 'ကြော်ငြာနှင့် စကားပြော' : 'Notice Board & Chat'}</span>
             <ExternalLink className="w-3 h-3 opacity-70 hidden sm:inline shrink-0" />
           </AppLink>
 
@@ -278,7 +284,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             title="Transfer / Adjust Cash between Physical Drawer & Digital Pool"
           >
             <ArrowRightLeft className="w-4 h-4 shrink-0 text-indigo-600" />
-            <span>Transfer Cash ⇄</span>
+            <span>{isBurmese ? 'ငွေလွှဲပြောင်း ⇄' : 'Transfer Cash ⇄'}</span>
           </button>
         </div>
       </div>
@@ -435,7 +441,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         {/* Today's Sales */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs hover:border-emerald-300 transition-all">
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
-            <span>Today's Total Sales</span>
+            <span>{t('dash.today_revenue', "Today's Total Sales")}</span>
             <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
@@ -444,9 +450,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {formatAmount(todayRevenue, settings.currencySymbol)}
           </p>
           <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 text-slate-500">
-            <span>{todaySales.length} Orders completed</span>
+            <span>{todaySales.length} {isBurmese ? 'ပြေစာ ရောင်းချပြီး' : 'Orders completed'}</span>
             {effectivePerms.canViewCostAndProfit && (
-              <span className="text-emerald-600 font-bold">~{profitMarginPercent}% Margin</span>
+              <span className="text-emerald-600 font-bold">~{profitMarginPercent}% {isBurmese ? 'အမြတ်' : 'Margin'}</span>
             )}
           </div>
         </div>
@@ -461,7 +467,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
           }`}
         >
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
-            <span className="group-hover:text-indigo-600 transition-colors">Daily Gross Profit</span>
+            <span className="group-hover:text-indigo-600 transition-colors">
+              {t('dash.today_gross_profit', 'Daily Gross Profit')}
+            </span>
             <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100 flex items-center justify-center transition-colors">
               <DollarSign className="w-4 h-4" />
             </div>
@@ -474,7 +482,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 text-slate-500">
                 <span>COGS: {formatAmount(todayCost, settings.currencySymbol)}</span>
                 <span className="text-indigo-600 font-bold group-hover:underline flex items-center gap-0.5">
-                  Analyze P&L →
+                  {isBurmese ? 'အမြတ်/ရှုံး စစ်ဆေးမည် →' : 'Analyze P&L →'}
                 </span>
               </div>
             </>
@@ -484,7 +492,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 ••••••••
               </p>
               <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 text-slate-400">
-                <span>Profit view restricted</span>
+                <span>{isBurmese ? 'ကြည့်ရှုခွင့် ကန့်သတ်ထားပါသည်' : 'Profit view restricted'}</span>
               </div>
             </>
           )}
@@ -493,7 +501,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         {/* Today's Expenses */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs hover:border-rose-300 transition-all">
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
-            <span>Today's Expenses</span>
+            <span>{isBurmese ? 'ယနေ့ အသုံးစရိတ်' : "Today's Expenses"}</span>
             <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
               <ArrowUpRight className="w-4 h-4" />
             </div>
@@ -502,7 +510,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {formatAmount(todayExpensesTotal, settings.currencySymbol)}
           </p>
           <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 text-slate-500">
-            <span>{todayExpenses.length} Vouchers recorded</span>
+            <span>{todayExpenses.length} {isBurmese ? 'ဘောက်ချာ မှတ်တမ်းတင်ပြီး' : 'Vouchers recorded'}</span>
             {effectivePerms.canRecordExpenses && (
               <AppLink 
                 tab="expenses"
@@ -510,7 +518,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 className="text-rose-600 hover:underline font-semibold"
                 title="View Expenses (Right click to open in new tab/window)"
               >
-                View →
+                {isBurmese ? 'ကြည့်ရှုမည် →' : 'View →'}
               </AppLink>
             )}
           </div>
@@ -520,7 +528,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="bg-slate-900 text-white p-4 rounded-2xl shadow-md flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
-              <span>Expected Drawer Cash</span>
+              <span>{t('fin.expected_cash', 'Expected Drawer Cash')}</span>
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             </div>
             <p className="text-2xl font-black text-emerald-400">
@@ -528,14 +536,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </p>
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 pt-2 border-t border-slate-800">
-            <span>Float: {formatAmount(cashDrawer.openingBalance || cashDrawer.openingFloat, settings.currencySymbol)}</span>
+            <span>{isBurmese ? 'မတည်ငွေ:' : 'Float:'} {formatAmount(cashDrawer.openingBalance || cashDrawer.openingFloat, settings.currencySymbol)}</span>
             <AppLink 
               tab="cash_drawer"
               toTab={onNavigateTab}
               className="text-emerald-400 hover:text-emerald-300 font-bold"
               title="Reconcile Cash Register (Right click to open in new tab/window)"
             >
-              Reconcile →
+              {isBurmese ? 'စစ်ဆေးညှိနှိုင်းမည် →' : 'Reconcile →'}
             </AppLink>
           </div>
         </div>
@@ -549,8 +557,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-bold text-slate-900">7-Day Sales Trend (Kyats)</h3>
-              <p className="text-[11px] text-slate-500">Daily revenue performance</p>
+              <h3 className="text-sm font-bold text-slate-900">
+                {isBurmese ? '၇ ရက်အတွင်း အရောင်းပြဇယား' : '7-Day Sales Trend (Kyats)'}
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                {isBurmese ? 'နေ့စဥ် ရောင်းရငွေ အခြေအနေ' : 'Daily revenue performance'}
+              </p>
             </div>
             <AppLink
               tab="sales_history"
@@ -558,7 +570,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               className="text-xs font-bold text-blue-600 hover:text-blue-700 inline-flex items-center gap-1"
               title="View Full Sales History (Right click to open in new tab/window)"
             >
-              Full History <ArrowUpRight className="w-3.5 h-3.5" />
+              {isBurmese ? 'အရောင်းမှတ်တမ်းစုံ' : 'Full History'} <ArrowUpRight className="w-3.5 h-3.5" />
             </AppLink>
           </div>
 
@@ -585,9 +597,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                     <div className="text-center">
                       <p className={`text-[11px] font-bold ${isToday ? 'text-emerald-700' : 'text-slate-600'}`}>
-                        {day.label}
+                        {isToday && isBurmese ? 'ယနေ့' : day.label}
                       </p>
-                      <p className="text-[9px] text-slate-400">{day.orders} sales</p>
+                      <p className="text-[9px] text-slate-400">
+                        {day.orders} {isBurmese ? 'ခု' : 'sales'}
+                      </p>
                     </div>
                   </div>
                 );
@@ -600,14 +614,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-bold text-slate-900">Payment Channels</h3>
-              <p className="text-[11px] text-slate-500">KPay, Wave, Yoma, KBZ, Cash breakdown</p>
+              <h3 className="text-sm font-bold text-slate-900">
+                {isBurmese ? 'ငွေပေးချေမှုပုံစံများ' : 'Payment Channels'}
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                {isBurmese ? 'KPay၊ Wave၊ ဘဏ်များနှင့် ငွေသား ခွဲခြမ်းစိတ်ဖြာချက်' : 'KPay, Wave, Yoma, KBZ, Cash breakdown'}
+              </p>
             </div>
           </div>
 
           <div className="space-y-2.5 pt-1">
             {Object.keys(paymentBreakdown).length === 0 ? (
-              <p className="text-xs text-slate-400 py-6 text-center">No transactions recorded yet.</p>
+              <p className="text-xs text-slate-400 py-6 text-center">
+                {isBurmese ? 'အရောင်းမှတ်တမ်း မရှိသေးပါ' : 'No transactions recorded yet.'}
+              </p>
             ) : (
               Object.entries(paymentBreakdown).map(([method, data]) => {
                 const info = getPaymentMethodInfo(method as any);
@@ -638,7 +658,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-            <span>Total Inflow:</span>
+            <span>{isBurmese ? 'စုစုပေါင်း ဝင်ငွေ:' : 'Total Inflow:'}</span>
             <span className="font-bold text-slate-900 font-mono">
               {formatAmount(
                 sales.filter(s => s.status === 'completed').reduce((a, s) => a + s.grandTotal, 0),
@@ -661,8 +681,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <AlertTriangle className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900">Low Stock Warnings</h3>
-                <p className="text-[11px] text-slate-500">{lowStockProducts.length} items below safety threshold</p>
+                <h3 className="text-sm font-bold text-slate-900">
+                  {isBurmese ? 'စတော့နည်းနေသော ပစ္စည်းများ' : 'Low Stock Warnings'}
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  {lowStockProducts.length} {isBurmese ? 'မျိုး လက်ကျန်နည်းနေပါသည်' : 'items below safety threshold'}
+                </p>
               </div>
             </div>
             <AppLink
@@ -671,7 +695,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               className="text-xs font-bold text-amber-600 hover:text-amber-700"
               title="Open Inventory Manager (Right click to open in new tab/window)"
             >
-              Inventory Manager →
+              {isBurmese ? 'စတော့စာရင်း →' : 'Inventory Manager →'}
             </AppLink>
           </div>
 
@@ -679,8 +703,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {lowStockProducts.length === 0 ? (
               <div className="text-center py-8 text-slate-400">
                 <CheckCircle className="w-8 h-8 mx-auto mb-1 text-emerald-500 opacity-60" />
-                <p className="text-xs font-bold text-slate-700">All Stock Healthy!</p>
-                <p className="text-[11px]">No products are currently under minimum stock threshold.</p>
+                <p className="text-xs font-bold text-slate-700">
+                  {isBurmese ? 'စတော့အားလုံး အခြေအနေကောင်းမွန်ပါသည်!' : 'All Stock Healthy!'}
+                </p>
+                <p className="text-[11px]">
+                  {isBurmese ? 'သတ်မှတ်အနည်းဆုံးအရေအတွက်အောက် ရောက်နေသော ပစ္စည်းမရှိပါ' : 'No products are currently under minimum stock threshold.'}
+                </p>
               </div>
             ) : (
               lowStockProducts.map(prod => (
@@ -694,7 +722,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                   <div className="text-right">
                     <span className="inline-block px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-md text-xs font-black">
-                      {prod.stock} Left (Min: {prod.minStockAlert})
+                      {prod.stock} {isBurmese ? 'ခုကျန်' : 'Left'} (Min: {prod.minStockAlert})
                     </span>
                   </div>
 
@@ -703,7 +731,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     onClick={onOpenNewPurchase}
                     className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-bold rounded-lg shrink-0 cursor-pointer"
                   >
-                    + Purchase
+                    {isBurmese ? '+ ပစ္စည်းသွင်း' : '+ Purchase'}
                   </button>
                 </div>
               ))
@@ -719,8 +747,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <Smartphone className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900">Top Selling Products</h3>
-                <p className="text-[11px] text-slate-500">Highest grossing items in store</p>
+                <h3 className="text-sm font-bold text-slate-900">
+                  {t('dash.top_selling', 'Top Selling Products')}
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  {isBurmese ? 'ဆိုင်တွင် ရောင်းအားအကောင်းဆုံး ပစ္စည်းများ' : 'Highest grossing items in store'}
+                </p>
               </div>
             </div>
             <AppLink
@@ -729,13 +761,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
               className="text-xs font-bold text-indigo-600 hover:text-indigo-700 cursor-pointer"
               title="View Full Reports (Right click to open in new tab/window)"
             >
-              Full Report →
+              {isBurmese ? 'အစီရင်ခံစာစုံ →' : 'Full Report →'}
             </AppLink>
           </div>
 
           <div className="divide-y divide-slate-100">
             {topSellingList.length === 0 ? (
-              <p className="text-xs text-slate-400 py-8 text-center">No sales completed yet.</p>
+              <p className="text-xs text-slate-400 py-8 text-center">
+                {isBurmese ? 'အရောင်းမှတ်တမ်း မရှိသေးပါ' : 'No sales completed yet.'}
+              </p>
             ) : (
               topSellingList.map((item, idx) => (
                 <div key={item.product.id || idx} className="py-2.5 flex items-center justify-between gap-3">
@@ -746,7 +780,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div className="truncate">
                       <p className="text-xs font-bold text-slate-900 truncate">{item.product.name}</p>
                       <p className="text-[10px] text-slate-500">
-                        {item.quantity} units sold • {item.product.brand}
+                        {item.quantity} {isBurmese ? 'လုံး ရောင်းရပြီး' : 'units sold'} • {item.product.brand}
                       </p>
                     </div>
                   </div>
@@ -755,7 +789,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <p className="text-xs font-black text-slate-900 font-mono">
                       {formatAmount(item.revenue, settings.currencySymbol)}
                     </p>
-                    <p className="text-[10px] text-emerald-600 font-semibold">Revenue</p>
+                    <p className="text-[10px] text-emerald-600 font-semibold">
+                      {isBurmese ? 'ရောင်းရငွေ' : 'Revenue'}
+                    </p>
                   </div>
                 </div>
               ))
@@ -769,8 +805,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
           <div>
-            <h3 className="text-sm font-bold text-slate-900">Recent Store Invoices</h3>
-            <p className="text-[11px] text-slate-500">Latest transactions from register</p>
+            <h3 className="text-sm font-bold text-slate-900">
+              {t('dash.recent_sales', 'Recent Store Invoices')}
+            </h3>
+            <p className="text-[11px] text-slate-500">
+              {isBurmese ? 'ကောင်တာမှ နောက်ဆုံး အရောင်းပြေစာ မှတ်တမ်းများ' : 'Latest transactions from register'}
+            </p>
           </div>
           <AppLink
             tab="sales_history"
@@ -778,7 +818,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             className="text-xs font-bold text-blue-600 hover:text-blue-700"
             title="View All Sales (Right click to open in new tab/window)"
           >
-            View All ({sales.length}) →
+            {isBurmese ? 'အားလုံးကြည့်မည်' : 'View All'} ({sales.length}) →
           </AppLink>
         </div>
 
@@ -786,13 +826,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider">
-                <th className="py-3 px-4">Invoice #</th>
-                <th className="py-3 px-4">Date & Time</th>
-                <th className="py-3 px-4">Customer</th>
-                <th className="py-3 px-4">Items</th>
-                <th className="py-3 px-4">Payment Channel</th>
-                <th className="py-3 px-4 text-right">Total (Ks)</th>
-                <th className="py-3 px-4 text-center">Action</th>
+                <th className="py-3 px-4">{isBurmese ? 'ပြေစာအမှတ်' : 'Invoice #'}</th>
+                <th className="py-3 px-4">{isBurmese ? 'ရက်စွဲနှင့် အချိန်' : 'Date & Time'}</th>
+                <th className="py-3 px-4">{t('pos.customer', 'Customer')}</th>
+                <th className="py-3 px-4">{isBurmese ? 'ပစ္စည်းများ' : 'Items'}</th>
+                <th className="py-3 px-4">{isBurmese ? 'ငွေပေးချေမှုပုံစံ' : 'Payment Channel'}</th>
+                <th className="py-3 px-4 text-right">{t('common.total', 'Total')} ({settings.currencySymbol})</th>
+                <th className="py-3 px-4 text-center">{t('common.actions', 'Action')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -849,7 +889,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         onClick={() => onViewInvoice(sale)}
                         className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-semibold rounded-lg transition-colors cursor-pointer"
                       >
-                        Receipt
+                        {isBurmese ? 'ဘောက်ချာ' : 'Receipt'}
                       </button>
                     </td>
                   </tr>
@@ -868,8 +908,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <ExternalLink className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-white">Multi-Screen & New-Tab Workstations</h3>
-              <p className="text-[11px] text-slate-400">Launch separate operational modules across dual monitors or browser tabs</p>
+              <h3 className="text-sm font-bold text-white">
+                {isBurmese ? 'မျက်နှာပြင်စုံနှင့် Tab အသစ် လုပ်ငန်းခွင်' : 'Multi-Screen & New-Tab Workstations'}
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                {isBurmese ? 'မော်နီတာနှစ်ခု သို့မဟုတ် Tab သီးခြားခွဲ၍ လုပ်ငန်းဆောင်ရွက်နိုင်ပါသည်' : 'Launch separate operational modules across dual monitors or browser tabs'}
+              </p>
             </div>
           </div>
           <span className="text-[10px] font-mono px-2.5 py-1 bg-slate-800 text-slate-300 rounded-lg border border-slate-700 w-fit">

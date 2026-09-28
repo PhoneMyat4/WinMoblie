@@ -43,7 +43,12 @@ import {
   AuditCategory,
   AuditSeverity,
   MonthlyCapitalSnapshot,
-  CapitalCashTransfer
+  CapitalCashTransfer,
+  StoreLocation,
+  BranchInventory,
+  StockTransfer,
+  StockTransferItem,
+  TransferStatus
 } from '../types';
 import { 
   initialSettings, 
@@ -114,6 +119,10 @@ export const STORAGE_KEYS = {
   MONTHLY_CAPITAL_SNAPSHOTS: 'mobileshop_monthly_capital_snapshots_v2',
   CASH_TRANSFERS: 'mobileshop_cash_transfers_v2',
   HIDE_FINANCIAL_DIGITS: 'mobileshop_hide_financial_digits_v2',
+  LOCATIONS: 'mobileshop_locations_v2',
+  ACTIVE_LOCATION_ID: 'mobileshop_active_location_id_v2',
+  BRANCH_INVENTORY: 'mobileshop_branch_inventory_v2',
+  STOCK_TRANSFERS: 'mobileshop_stock_transfers_v2',
 };
 
 // Cross-tab broadcast channel for instantaneous reactive tab synchronization
@@ -199,7 +208,9 @@ function setItem<T>(key: string, value: T, notify = true): void {
     localStorage.setItem(STORAGE_KEYS.LAST_UPDATED, String(now));
     
     if (notify) {
-      window.dispatchEvent(new CustomEvent('mobileshop_data_updated', { detail: { key, timestamp: now } }));
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('mobileshop_data_updated', { detail: { key, timestamp: now } }));
+      }, 0);
       if (tabBroadcastChannel) {
         tabBroadcastChannel.postMessage({ type: 'DATA_UPDATED', key, timestamp: now });
       }
@@ -246,6 +257,9 @@ export interface StorageChangeHandler {
   onStaffUserUpsert?: (user: StaffUser) => void;
   onStaffUsersBatch?: (users: StaffUser[]) => void;
   onStaffUserDelete?: (id: string) => void;
+  onLocationsBatch?: (locations: StoreLocation[]) => void;
+  onBranchInventoryBatch?: (inventory: BranchInventory[]) => void;
+  onStockTransfersBatch?: (transfers: StockTransfer[]) => void;
 }
 
 let activeStorageSyncHandler: StorageChangeHandler | null = null;
@@ -284,6 +298,82 @@ export function isMockStaffUser(u: { id?: string; name?: string; username?: stri
   )) return true;
   return false;
 }
+
+export const DEFAULT_LOCATIONS: StoreLocation[] = [
+  {
+    id: 'loc_wh_central',
+    code: 'WH-CENTRAL',
+    name: 'Central Distribution Warehouse',
+    type: 'warehouse',
+    address: 'Industrial Zone 1, Yangon',
+    phone: '09-450001122',
+    managerName: 'Ko Kyaw Zin',
+    isActive: true,
+    isDefault: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'loc_br_yangon_01',
+    code: 'BR-YGN-01',
+    name: 'Yangon Flagship Store',
+    type: 'branch',
+    address: 'No. 124, Bogyoke Aung San Road, Pabedan, Yangon',
+    phone: '09-798881234',
+    managerName: 'Daw Thandar',
+    isActive: true,
+    isDefault: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'loc_br_mandalay_01',
+    code: 'BR-MDY-01',
+    name: 'Mandalay 78th Branch',
+    type: 'branch',
+    address: '78th Street, Between 31st & 32nd Streets, Chanayethazan, Mandalay',
+    phone: '09-250009988',
+    managerName: 'U Aung Ko',
+    isActive: true,
+    isDefault: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+];
+
+export const DEFAULT_TRANSFERS: StockTransfer[] = [
+  {
+    id: 'trf_demo_001',
+    transferNumber: 'TRF-2026-1001',
+    fromLocationId: 'loc_wh_central',
+    fromLocationName: 'Central Distribution Warehouse',
+    toLocationId: 'loc_br_yangon_01',
+    toLocationName: 'Yangon Flagship Store',
+    status: 'received',
+    items: [
+      {
+        productId: 'prod_1',
+        productName: 'iPhone 15 Pro Max',
+        brand: 'Apple',
+        model: 'iPhone 15 Pro Max',
+        sku: 'IPHONE-15-PM-256',
+        requestedQty: 5,
+        dispatchedQty: 5,
+        receivedQty: 5,
+        discrepancyQty: 0,
+      }
+    ],
+    totalRequestedQty: 5,
+    totalDispatchedQty: 5,
+    totalReceivedQty: 5,
+    requestedBy: { staffId: 'staff_1', name: 'Daw Thandar', date: '2026-09-20T08:00:00.000Z' },
+    approvedBy: { staffId: 'staff_admin', name: 'Store Owner', date: '2026-09-20T08:30:00.000Z' },
+    dispatchedBy: { staffId: 'staff_wh', name: 'Ko Kyaw Zin', date: '2026-09-20T09:00:00.000Z' },
+    receivedBy: { staffId: 'staff_1', name: 'Daw Thandar', date: '2026-09-20T14:30:00.000Z' },
+    notes: 'Initial flagship restock',
+    createdAt: '2026-09-20T08:00:00.000Z',
+    updatedAt: '2026-09-20T14:30:00.000Z',
+    dispatchedAt: '2026-09-20T09:00:00.000Z',
+    receivedAt: '2026-09-20T14:30:00.000Z',
+  }
+];
 
 export const StorageService = {
   setSyncHandler: (handler: StorageChangeHandler | null) => {
@@ -376,7 +466,7 @@ export const StorageService = {
       // ignore
     }
 
-    setItem(STORAGE_KEYS.SETTINGS, cleanSettings);
+    setItem(STORAGE_KEYS.SETTINGS, cleanSettings, triggerSync);
     if (triggerSync && activeStorageSyncHandler?.onSettingsUpsert) {
       activeStorageSyncHandler.onSettingsUpsert(cleanSettings);
     }
@@ -390,9 +480,9 @@ export const StorageService = {
     }
     // Filter out mock staff users
     const filtered = raw.filter(u => u && !isMockStaffUser(u));
-    // If mock users existed in storage, immediately persist the clean list
+    // If mock users existed in storage, immediately persist the clean list without emitting events
     if (filtered.length !== raw.length) {
-      setItem(STORAGE_KEYS.STAFF_USERS, filtered);
+      setItem(STORAGE_KEYS.STAFF_USERS, filtered, false);
     }
     return filtered.map((u, idx) => ({
       ...u,
@@ -418,7 +508,7 @@ export const StorageService = {
     StorageService.saveStaffUsers([], true);
   },
   saveStaffUsers: (users: StaffUser[], triggerSync = true) => {
-    setItem(STORAGE_KEYS.STAFF_USERS, users);
+    setItem(STORAGE_KEYS.STAFF_USERS, users, triggerSync);
     if (triggerSync && activeStorageSyncHandler?.onStaffUsersBatch) {
       activeStorageSyncHandler.onStaffUsersBatch(users);
     }
@@ -458,8 +548,8 @@ export const StorageService = {
       Inventory_Staff: { ...DEFAULT_ROLE_PERMISSIONS.Inventory_Staff, ...(raw.Inventory_Staff || {}) },
     };
   },
-  saveRolePermissions: (permissions: Record<StaffRole, RolePermissions>) => {
-    setItem(STORAGE_KEYS.ROLE_PERMISSIONS, permissions);
+  saveRolePermissions: (permissions: Record<StaffRole, RolePermissions>, triggerSync = true) => {
+    setItem(STORAGE_KEYS.ROLE_PERMISSIONS, permissions, triggerSync);
   },
   resetRolePermissions: (role?: StaffRole): Record<StaffRole, RolePermissions> => {
     const current = StorageService.getRolePermissions();
@@ -537,7 +627,7 @@ export const StorageService = {
       imeiPairs: Array.isArray(p.imeiPairs) ? p.imeiPairs : [],
     }));
   },
-  saveProducts: (products: Product[]) => setItem(STORAGE_KEYS.PRODUCTS, products),
+  saveProducts: (products: Product[], triggerSync = true) => setItem(STORAGE_KEYS.PRODUCTS, products, triggerSync),
   saveProduct: (product: Product, changedByStaff?: string, triggerSync = true) => {
     const products = StorageService.getProducts();
     const index = products.findIndex(p => p.id === product.id);
@@ -599,7 +689,7 @@ export const StorageService = {
     } else {
       products.unshift(product);
     }
-    StorageService.saveProducts(products);
+    StorageService.saveProducts(products, false);
 
     if (triggerSync && activeStorageSyncHandler?.onProductUpsert) {
       activeStorageSyncHandler.onProductUpsert(product);
@@ -656,7 +746,7 @@ export const StorageService = {
       }
     });
 
-    StorageService.saveProducts(currentList);
+    StorageService.saveProducts(currentList, false);
     if (triggerSync && activeStorageSyncHandler?.onProductUpsert) {
       newProducts.forEach(np => activeStorageSyncHandler?.onProductUpsert?.(np));
     }
@@ -691,7 +781,7 @@ export const StorageService = {
 
   // Damage Logs (3-Phase Quarantine, Assessment & Disposition System)
   getDamageLogs: (): DamageLog[] => getItem(STORAGE_KEYS.DAMAGE_LOGS, initialDamageLogs),
-  saveDamageLogs: (logs: DamageLog[]) => setItem(STORAGE_KEYS.DAMAGE_LOGS, logs),
+  saveDamageLogs: (logs: DamageLog[], triggerSync = true) => setItem(STORAGE_KEYS.DAMAGE_LOGS, logs, triggerSync),
   addDamageLog: (log: DamageLog) => {
     const logs = StorageService.getDamageLogs();
     logs.unshift(log);
@@ -714,7 +804,7 @@ export const StorageService = {
 
   // User Activity & Audit Log History
   getAuditLogs: (): AuditLogEntry[] => getItem(STORAGE_KEYS.AUDIT_LOGS, initialAuditLogs),
-  saveAuditLogs: (logs: AuditLogEntry[]) => setItem(STORAGE_KEYS.AUDIT_LOGS, logs),
+  saveAuditLogs: (logs: AuditLogEntry[], triggerSync = true) => setItem(STORAGE_KEYS.AUDIT_LOGS, logs, triggerSync),
   addAuditLog: (entry: AuditLogEntry | (Partial<AuditLogEntry> & { actionType: AuditActionType; category: AuditCategory; severity: AuditSeverity; summary: string })): AuditLogEntry => {
     const fullEntry: AuditLogEntry = {
       id: entry.id || `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -745,7 +835,7 @@ export const StorageService = {
 
   // Stock Adjustments (Flexible Quantity Adjust logging)
   getStockAdjustments: (): StockAdjustment[] => getItem(STORAGE_KEYS.STOCK_ADJUSTMENTS, initialStockAdjustments),
-  saveStockAdjustments: (adjustments: StockAdjustment[]) => setItem(STORAGE_KEYS.STOCK_ADJUSTMENTS, adjustments),
+  saveStockAdjustments: (adjustments: StockAdjustment[], triggerSync = true) => setItem(STORAGE_KEYS.STOCK_ADJUSTMENTS, adjustments, triggerSync),
   recordStockAdjustment: (adjustment: StockAdjustment) => {
     const adjustments = StorageService.getStockAdjustments();
     adjustments.unshift(adjustment);
@@ -785,7 +875,7 @@ export const StorageService = {
 
   // Product Price Change History & Activity Tracking
   getPriceChanges: (): PriceChangeRecord[] => getItem(STORAGE_KEYS.PRICE_CHANGES, initialPriceChanges),
-  savePriceChanges: (records: PriceChangeRecord[]) => setItem(STORAGE_KEYS.PRICE_CHANGES, records),
+  savePriceChanges: (records: PriceChangeRecord[], triggerSync = true) => setItem(STORAGE_KEYS.PRICE_CHANGES, records, triggerSync),
   recordPriceChange: (record: PriceChangeRecord) => {
     const records = StorageService.getPriceChanges();
     records.unshift(record);
@@ -849,7 +939,7 @@ export const StorageService = {
 
   // Physical Stock Audits & Stock Taking Sessions
   getStockAudits: (): StockAuditSession[] => getItem(STORAGE_KEYS.STOCK_AUDITS, initialStockAudits),
-  saveStockAudits: (audits: StockAuditSession[]) => setItem(STORAGE_KEYS.STOCK_AUDITS, audits),
+  saveStockAudits: (audits: StockAuditSession[], triggerSync = true) => setItem(STORAGE_KEYS.STOCK_AUDITS, audits, triggerSync),
   saveStockAudit: (audit: StockAuditSession) => {
     const audits = StorageService.getStockAudits();
     const index = audits.findIndex(a => a.id === audit.id);
@@ -987,11 +1077,13 @@ export const StorageService = {
       quantity: number;
       selectedImei?: string;
       selectedImei2?: string;
-    }>
+    }>,
+    locationIdOverride?: string
   ): { success: boolean; error?: string; updatedProducts: Product[] } => {
     // 1. Fetch FRESH current products directly from storage to eliminate stale React component state
     const currentProducts = StorageService.getProducts();
     const updatedProducts = [...currentProducts];
+    const targetLocId = locationIdOverride || StorageService.getActiveLocationId();
 
     // 2. Validate availability across all cart items before making any modifications
     for (const item of cartItems) {
@@ -1069,6 +1161,13 @@ export const StorageService = {
         imeiList: updatedImeiList,
         imeiPairs: updatedImeiPairs,
       };
+
+      // 4. Also atomically decrement localized branch_inventory ledger for targetLocId
+      try {
+        StorageService.updateBranchStock(prod.id, targetLocId, -totalQtySold, 0, false);
+      } catch (branchStockErr) {
+        console.warn('Failed to update local branch stock:', branchStockErr);
+      }
     }
 
     return {
@@ -1960,7 +2059,7 @@ export const StorageService = {
     const expenses = getItem<ExpenseRecord[]>(STORAGE_KEYS.EXPENSES, initialExpenses);
     return expenses;
   },
-  saveExpenses: (expenses: ExpenseRecord[]) => setItem(STORAGE_KEYS.EXPENSES, expenses),
+  saveExpenses: (expenses: ExpenseRecord[], triggerSync = true) => setItem(STORAGE_KEYS.EXPENSES, expenses, triggerSync),
   saveExpense: (expense: ExpenseRecord, triggerSync = true) => {
     const expenses = StorageService.getExpenses();
     const index = expenses.findIndex(e => e.id === expense.id);
@@ -2028,7 +2127,7 @@ export const StorageService = {
         : c
     );
   },
-  saveExpenseCategories: (categories: ExpenseCategoryItem[]) => {
+  saveExpenseCategories: (categories: ExpenseCategoryItem[], triggerSync = true) => {
     // Ensure transport_delivery is always preserved and permanent
     const hasTransport = categories.some(c => c.id === 'transport_delivery');
     let finalCategories = categories;
@@ -2053,7 +2152,7 @@ export const StorageService = {
           : c
       );
     }
-    setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, finalCategories);
+    setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, finalCategories, triggerSync);
   },
   saveExpenseCategory: (category: ExpenseCategoryItem) => {
     const categories = StorageService.getExpenseCategories();
@@ -2086,7 +2185,7 @@ export const StorageService = {
 
   // Customers
   getCustomers: (): Customer[] => getItem(STORAGE_KEYS.CUSTOMERS, initialCustomers),
-  saveCustomers: (customers: Customer[]) => setItem(STORAGE_KEYS.CUSTOMERS, customers),
+  saveCustomers: (customers: Customer[], triggerSync = true) => setItem(STORAGE_KEYS.CUSTOMERS, customers, triggerSync),
   saveCustomer: (customer: Customer, triggerSync = true) => {
     const customers = StorageService.getCustomers();
     const index = customers.findIndex(c => c.id === customer.id);
@@ -2095,7 +2194,7 @@ export const StorageService = {
     } else {
       customers.unshift(customer);
     }
-    StorageService.saveCustomers(customers);
+    StorageService.saveCustomers(customers, false);
     if (triggerSync && activeStorageSyncHandler?.onCustomerUpsert) {
       activeStorageSyncHandler.onCustomerUpsert(customer);
     }
@@ -2109,12 +2208,12 @@ export const StorageService = {
     const merged = Array.from(map.values()).sort((a, b) => {
       return (b.totalSpent || 0) - (a.totalSpent || 0);
     });
-    setItem(STORAGE_KEYS.CUSTOMERS, merged);
+    setItem(STORAGE_KEYS.CUSTOMERS, merged, triggerSync);
   },
 
   // Suppliers
   getSuppliers: (): Supplier[] => getItem(STORAGE_KEYS.SUPPLIERS, initialSuppliers),
-  saveSuppliers: (suppliers: Supplier[]) => setItem(STORAGE_KEYS.SUPPLIERS, suppliers),
+  saveSuppliers: (suppliers: Supplier[], triggerSync = true) => setItem(STORAGE_KEYS.SUPPLIERS, suppliers, triggerSync),
   saveSupplier: (supplier: Supplier, triggerSync = true) => {
     const suppliers = StorageService.getSuppliers();
     const index = suppliers.findIndex(s => s.id === supplier.id);
@@ -2123,7 +2222,7 @@ export const StorageService = {
     } else {
       suppliers.unshift(supplier);
     }
-    StorageService.saveSuppliers(suppliers);
+    StorageService.saveSuppliers(suppliers, false);
     if (triggerSync && activeStorageSyncHandler?.onSupplierUpsert) {
       activeStorageSyncHandler.onSupplierUpsert(supplier);
     }
@@ -2140,7 +2239,7 @@ export const StorageService = {
 
   // Cash Drawer
   getCashDrawer: (): CashDrawerRecord => getItem(STORAGE_KEYS.CASH_DRAWER, initialCashDrawer),
-  saveCashDrawer: (drawer: CashDrawerRecord) => setItem(STORAGE_KEYS.CASH_DRAWER, drawer),
+  saveCashDrawer: (drawer: CashDrawerRecord, triggerSync = true) => setItem(STORAGE_KEYS.CASH_DRAWER, drawer, triggerSync),
   recordCashTransaction: (type: string, amount: number, description: string) => {
     const drawer = StorageService.getCashDrawer();
     const now = new Date().toISOString();
@@ -2280,7 +2379,7 @@ export const StorageService = {
     const orders = StorageService.getPreOrders();
     return orders.filter(o => o.status === 'Pending');
   },
-  savePreOrders: (orders: PreOrder[]) => setItem(STORAGE_KEYS.PRE_ORDERS, orders),
+  savePreOrders: (orders: PreOrder[], triggerSync = true) => setItem(STORAGE_KEYS.PRE_ORDERS, orders, triggerSync),
   savePreOrder: (order: PreOrder) => {
     const orders = StorageService.getPreOrders();
     const index = orders.findIndex(o => o.id === order.id);
@@ -2455,8 +2554,8 @@ export const StorageService = {
   getAnnouncements: (): Announcement[] => {
     return getItem(STORAGE_KEYS.ANNOUNCEMENTS, initialAnnouncements);
   },
-  saveAnnouncements: (announcements: Announcement[]) => {
-    setItem(STORAGE_KEYS.ANNOUNCEMENTS, announcements);
+  saveAnnouncements: (announcements: Announcement[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.ANNOUNCEMENTS, announcements, triggerSync);
   },
   addAnnouncement: (announcement: Announcement) => {
     const list = StorageService.getAnnouncements();
@@ -2546,8 +2645,8 @@ export const StorageService = {
   getChatChannels: (): ChatChannel[] => {
     return getItem(STORAGE_KEYS.CHAT_CHANNELS, initialChatChannels);
   },
-  saveChatChannels: (channels: ChatChannel[]) => {
-    setItem(STORAGE_KEYS.CHAT_CHANNELS, channels);
+  saveChatChannels: (channels: ChatChannel[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.CHAT_CHANNELS, channels, triggerSync);
   },
   addChatChannel: (channel: ChatChannel) => {
     const list = StorageService.getChatChannels();
@@ -2561,8 +2660,8 @@ export const StorageService = {
     if (!channelId) return all;
     return all.filter(m => m.channelId === channelId);
   },
-  saveChatMessages: (messages: ChatMessage[]) => {
-    setItem(STORAGE_KEYS.CHAT_MESSAGES, messages);
+  saveChatMessages: (messages: ChatMessage[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.CHAT_MESSAGES, messages, triggerSync);
   },
   addChatMessage: (msg: ChatMessage) => {
     const all = getItem<ChatMessage[]>(STORAGE_KEYS.CHAT_MESSAGES, initialChatMessages);
@@ -2620,7 +2719,7 @@ export const StorageService = {
   // Credit Sales & Accounts Receivable
   // ==========================================
   getCreditSales: (): CreditSaleRecord[] => getItem<CreditSaleRecord[]>(STORAGE_KEYS.CREDIT_SALES, initialCreditSales),
-  saveCreditSales: (creditSales: CreditSaleRecord[]) => setItem(STORAGE_KEYS.CREDIT_SALES, creditSales),
+  saveCreditSales: (creditSales: CreditSaleRecord[], triggerSync = true) => setItem(STORAGE_KEYS.CREDIT_SALES, creditSales, triggerSync),
   saveCreditSale: (creditSale: CreditSaleRecord) => {
     const list = StorageService.getCreditSales();
     const index = list.findIndex(c => c.id === creditSale.id);
@@ -3354,8 +3453,8 @@ export const StorageService = {
   getPersonalWallets: (): PersonalWallet[] => {
     return getItem<PersonalWallet[]>(STORAGE_KEYS.PERSONAL_WALLETS, initialPersonalWallets);
   },
-  savePersonalWallets: (wallets: PersonalWallet[]) => {
-    setItem(STORAGE_KEYS.PERSONAL_WALLETS, wallets);
+  savePersonalWallets: (wallets: PersonalWallet[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.PERSONAL_WALLETS, wallets, triggerSync);
   },
   savePersonalWallet: (wallet: PersonalWallet) => {
     const wallets = StorageService.getPersonalWallets();
@@ -3379,8 +3478,8 @@ export const StorageService = {
   getPersonalTransactions: (): PersonalTransaction[] => {
     return getItem<PersonalTransaction[]>(STORAGE_KEYS.PERSONAL_TRANSACTIONS, initialPersonalTransactions);
   },
-  savePersonalTransactions: (transactions: PersonalTransaction[]) => {
-    setItem(STORAGE_KEYS.PERSONAL_TRANSACTIONS, transactions);
+  savePersonalTransactions: (transactions: PersonalTransaction[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.PERSONAL_TRANSACTIONS, transactions, triggerSync);
   },
   savePersonalTransaction: (tx: PersonalTransaction) => {
     const transactions = StorageService.getPersonalTransactions();
@@ -3527,15 +3626,15 @@ export const StorageService = {
   getPersonalBudgets: (): PersonalBudget[] => {
     return getItem<PersonalBudget[]>(STORAGE_KEYS.PERSONAL_BUDGETS, initialPersonalBudgets);
   },
-  savePersonalBudgets: (budgets: PersonalBudget[]) => {
-    setItem(STORAGE_KEYS.PERSONAL_BUDGETS, budgets);
+  savePersonalBudgets: (budgets: PersonalBudget[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.PERSONAL_BUDGETS, budgets, triggerSync);
   },
 
   getPersonalSavingsGoals: (): PersonalSavingsGoal[] => {
     return getItem<PersonalSavingsGoal[]>(STORAGE_KEYS.PERSONAL_GOALS, initialPersonalSavingsGoals);
   },
-  savePersonalSavingsGoals: (goals: PersonalSavingsGoal[]) => {
-    setItem(STORAGE_KEYS.PERSONAL_GOALS, goals);
+  savePersonalSavingsGoals: (goals: PersonalSavingsGoal[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.PERSONAL_GOALS, goals, triggerSync);
   },
   savePersonalSavingsGoal: (goal: PersonalSavingsGoal) => {
     const goals = StorageService.getPersonalSavingsGoals();
@@ -3555,8 +3654,8 @@ export const StorageService = {
   getPersonalDebts: (): PersonalDebtIOU[] => {
     return getItem<PersonalDebtIOU[]>(STORAGE_KEYS.PERSONAL_DEBTS, initialPersonalDebts);
   },
-  savePersonalDebts: (debts: PersonalDebtIOU[]) => {
-    setItem(STORAGE_KEYS.PERSONAL_DEBTS, debts);
+  savePersonalDebts: (debts: PersonalDebtIOU[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.PERSONAL_DEBTS, debts, triggerSync);
   },
   savePersonalDebt: (debt: PersonalDebtIOU) => {
     const debts = StorageService.getPersonalDebts();
@@ -3586,8 +3685,8 @@ export const StorageService = {
   getFacebookPosts: (): FacebookAdPostRecord[] => {
     return getItem<FacebookAdPostRecord[]>(STORAGE_KEYS.FACEBOOK_POSTS, []);
   },
-  saveFacebookPosts: (posts: FacebookAdPostRecord[]) => {
-    setItem(STORAGE_KEYS.FACEBOOK_POSTS, posts);
+  saveFacebookPosts: (posts: FacebookAdPostRecord[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.FACEBOOK_POSTS, posts, triggerSync);
   },
   saveFacebookPost: (post: FacebookAdPostRecord) => {
     const posts = StorageService.getFacebookPosts();
@@ -3598,6 +3697,498 @@ export const StorageService = {
       posts.unshift(post);
     }
     StorageService.saveFacebookPosts(posts);
+  },
+
+  // =========================================================================
+  // MULTI-BRANCH & WAREHOUSE MANAGEMENT ("GLOBAL CATALOG WITH LOCALIZED STOCK")
+  // =========================================================================
+
+  getLocations: (): StoreLocation[] => {
+    let locs = getItem<StoreLocation[]>(STORAGE_KEYS.LOCATIONS, []);
+    if (!locs || locs.length === 0) {
+      locs = [...DEFAULT_LOCATIONS];
+      setItem(STORAGE_KEYS.LOCATIONS, locs, false);
+    }
+    return locs;
+  },
+
+  saveLocations: (locations: StoreLocation[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.LOCATIONS, locations, triggerSync);
+    if (triggerSync && activeStorageSyncHandler?.onLocationsBatch) {
+      activeStorageSyncHandler.onLocationsBatch(locations);
+    }
+  },
+
+  saveLocation: (location: StoreLocation, triggerSync = true): StoreLocation[] => {
+    const locs = StorageService.getLocations();
+    const idx = locs.findIndex(l => l.id === location.id);
+    if (idx >= 0) {
+      locs[idx] = { ...locs[idx], ...location, updatedAt: new Date().toISOString() };
+    } else {
+      locs.push({ ...location, createdAt: location.createdAt || new Date().toISOString() });
+    }
+    StorageService.saveLocations(locs, triggerSync);
+    return locs;
+  },
+
+  deleteLocation: (id: string, triggerSync = true): StoreLocation[] => {
+    const locs = StorageService.getLocations().filter(l => l.id !== id);
+    StorageService.saveLocations(locs, triggerSync);
+    // If active location was deleted, fallback to default
+    if (StorageService.getActiveLocationId() === id) {
+      const defaultLoc = locs.find(l => l.isDefault) || locs[0];
+      if (defaultLoc) {
+        StorageService.setActiveLocationId(defaultLoc.id);
+      }
+    }
+    return locs;
+  },
+
+  getActiveLocationId: (): string => {
+    const cached = getItem<string>(STORAGE_KEYS.ACTIVE_LOCATION_ID, '');
+    if (cached) return cached;
+    const locs = StorageService.getLocations();
+    const def = locs.find(l => l.isDefault) || locs[0] || DEFAULT_LOCATIONS[0];
+    setItem(STORAGE_KEYS.ACTIVE_LOCATION_ID, def.id, false);
+    return def.id;
+  },
+
+  setActiveLocationId: (locationId: string): void => {
+    setItem(STORAGE_KEYS.ACTIVE_LOCATION_ID, locationId, false);
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('mobileshop_location_changed', { detail: { locationId } }));
+      }, 0);
+    }
+  },
+
+  getActiveLocation: (): StoreLocation => {
+    const id = StorageService.getActiveLocationId();
+    const locs = StorageService.getLocations();
+    return locs.find(l => l.id === id) || locs[0] || DEFAULT_LOCATIONS[0];
+  },
+
+  // Branch Localized Inventory Ledger
+  getBranchInventoryList: (locationIdFilter?: string): BranchInventory[] => {
+    let raw = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.BRANCH_INVENTORY) : null;
+    let list: BranchInventory[];
+    
+    // Auto-seed initial branch inventory from products only once if key has never been set
+    if (raw === null) {
+      const products = StorageService.getProducts();
+      const activeLocId = StorageService.getActiveLocationId();
+      list = products.map(p => ({
+        id: `${p.id}_${activeLocId}`,
+        productId: p.id,
+        locationId: activeLocId,
+        onHandStock: p.stock || 0,
+        reservedStock: 0,
+        availableStock: p.stock || 0,
+        minThreshold: p.minStockAlert || 2,
+        localSellingPrice: p.sellingPrice,
+        updatedAt: new Date().toISOString(),
+      }));
+      setItem(STORAGE_KEYS.BRANCH_INVENTORY, list, false);
+    } else {
+      list = getItem<BranchInventory[]>(STORAGE_KEYS.BRANCH_INVENTORY, []);
+    }
+
+    if (locationIdFilter) {
+      return list.filter(item => item.locationId === locationIdFilter);
+    }
+    return list;
+  },
+
+  saveBranchInventoryList: (inventoryList: BranchInventory[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.BRANCH_INVENTORY, inventoryList, triggerSync);
+    if (triggerSync && activeStorageSyncHandler?.onBranchInventoryBatch) {
+      activeStorageSyncHandler.onBranchInventoryBatch(inventoryList);
+    }
+  },
+
+  getBranchProductStock: (productId: string, locationId?: string): BranchInventory => {
+    const locId = locationId || StorageService.getActiveLocationId();
+    const list = StorageService.getBranchInventoryList();
+    const existing = list.find(item => item.productId === productId && item.locationId === locId);
+    if (existing) {
+      return existing;
+    }
+
+    // Default entry if not yet recorded (pure synthesized read, never write to storage during render)
+    const product = StorageService.getProducts().find(p => p.id === productId);
+    const fallbackStock = locId === StorageService.getActiveLocationId() ? (product?.stock || 0) : 0;
+    const newEntry: BranchInventory = {
+      id: `${productId}_${locId}`,
+      productId,
+      locationId: locId,
+      onHandStock: fallbackStock,
+      reservedStock: 0,
+      availableStock: fallbackStock,
+      minThreshold: product?.minStockAlert || 2,
+      localSellingPrice: product?.sellingPrice,
+      updatedAt: new Date().toISOString(),
+    };
+    return newEntry;
+  },
+
+  saveBranchInventory: (entry: BranchInventory, triggerSync = true) => {
+    const list = StorageService.getBranchInventoryList();
+    const idx = list.findIndex(i => i.id === entry.id || (i.productId === entry.productId && i.locationId === entry.locationId));
+    const sanitized = {
+      ...entry,
+      id: entry.id || `${entry.productId}_${entry.locationId}`,
+      availableStock: Math.max(0, (entry.onHandStock || 0) - (entry.reservedStock || 0)),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (idx >= 0) {
+      list[idx] = sanitized;
+    } else {
+      list.push(sanitized);
+    }
+    StorageService.saveBranchInventoryList(list, triggerSync);
+  },
+
+  updateBranchStock: (productId: string, locationId: string, deltaOnHand: number, deltaReserved = 0, triggerSync = true): BranchInventory => {
+    const current = StorageService.getBranchProductStock(productId, locationId);
+    const newOnHand = Math.max(0, current.onHandStock + deltaOnHand);
+    const newReserved = Math.max(0, current.reservedStock + deltaReserved);
+    const updated: BranchInventory = {
+      ...current,
+      onHandStock: newOnHand,
+      reservedStock: newReserved,
+      availableStock: Math.max(0, newOnHand - newReserved),
+      updatedAt: new Date().toISOString(),
+    };
+    StorageService.saveBranchInventory(updated, triggerSync);
+    return updated;
+  },
+
+  syncProductToBranchInventory: (product: Product): void => {
+    const activeLocId = StorageService.getActiveLocationId();
+    StorageService.updateBranchStock(product.id, activeLocId, 0); // Ensures entry exists
+  },
+
+  getCrossBranchStock: (productId: string): Array<{ location: StoreLocation; onHand: number; reserved: number; available: number; localPrice?: number }> => {
+    const locations = StorageService.getLocations();
+    const inventoryList = StorageService.getBranchInventoryList();
+    const product = StorageService.getProducts().find(p => p.id === productId);
+
+    return locations.map(loc => {
+      const entry = inventoryList.find(i => i.productId === productId && i.locationId === loc.id);
+      if (entry) {
+        return {
+          location: loc,
+          onHand: entry.onHandStock,
+          reserved: entry.reservedStock,
+          available: entry.availableStock,
+          localPrice: entry.localSellingPrice,
+        };
+      }
+      // If no branch entry yet, default branch has product stock, others 0
+      const isDefault = loc.isDefault || loc.id === 'loc_br_yangon_01';
+      const onHand = isDefault ? (product?.stock || 0) : 0;
+      return {
+        location: loc,
+        onHand,
+        reserved: 0,
+        available: onHand,
+        localPrice: product?.sellingPrice,
+      };
+    });
+  },
+
+  // Stock Transfers (3-Way Handshake)
+  getStockTransfers: (): StockTransfer[] => {
+    let transfers = getItem<StockTransfer[]>(STORAGE_KEYS.STOCK_TRANSFERS, []);
+    if (!transfers || transfers.length === 0) {
+      transfers = [...DEFAULT_TRANSFERS];
+      setItem(STORAGE_KEYS.STOCK_TRANSFERS, transfers, false);
+    }
+    return transfers;
+  },
+
+  saveStockTransfers: (transfers: StockTransfer[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.STOCK_TRANSFERS, transfers, triggerSync);
+    if (triggerSync && activeStorageSyncHandler?.onStockTransfersBatch) {
+      activeStorageSyncHandler.onStockTransfersBatch(transfers);
+    }
+  },
+
+  saveStockTransfer: (transfer: StockTransfer, triggerSync = true) => {
+    const transfers = StorageService.getStockTransfers();
+    const idx = transfers.findIndex(t => t.id === transfer.id);
+    if (idx >= 0) {
+      transfers[idx] = transfer;
+    } else {
+      transfers.unshift(transfer);
+    }
+    StorageService.saveStockTransfers(transfers, triggerSync);
+  },
+
+  createStockTransfer: (payload: {
+    fromLocationId: string;
+    toLocationId: string;
+    items: Array<{ productId: string; requestedQty: number }>;
+    requestedBy: { staffId: string; name: string };
+    notes?: string;
+  }): StockTransfer => {
+    const locations = StorageService.getLocations();
+    const products = StorageService.getProducts();
+    const fromLoc = locations.find(l => l.id === payload.fromLocationId) || locations[0];
+    const toLoc = locations.find(l => l.id === payload.toLocationId) || locations[1];
+
+    const transferItems: StockTransferItem[] = payload.items.map(item => {
+      const prod = products.find(p => p.id === item.productId);
+      return {
+        productId: item.productId,
+        productName: prod?.name || 'Mobile Device',
+        brand: prod?.brand || 'Brand',
+        model: prod?.model || 'Model',
+        sku: prod?.sku || 'SKU',
+        requestedQty: item.requestedQty,
+        dispatchedQty: 0,
+        receivedQty: 0,
+        imeiList: [],
+        receivedImeiList: [],
+        discrepancyQty: 0,
+      };
+    });
+
+    const totalRequestedQty = transferItems.reduce((sum, i) => sum + i.requestedQty, 0);
+    const dateStr = new Date().toISOString();
+    const randNum = Math.floor(1000 + Math.random() * 9000);
+    const transferNumber = `TRF-${new Date().getFullYear()}-${randNum}`;
+
+    const newTransfer: StockTransfer = {
+      id: `trf_${Date.now()}_${randNum}`,
+      transferNumber,
+      fromLocationId: fromLoc.id,
+      fromLocationName: fromLoc.name,
+      toLocationId: toLoc.id,
+      toLocationName: toLoc.name,
+      status: 'requested',
+      items: transferItems,
+      totalRequestedQty,
+      totalDispatchedQty: 0,
+      totalReceivedQty: 0,
+      requestedBy: { ...payload.requestedBy, date: dateStr },
+      notes: payload.notes || '',
+      createdAt: dateStr,
+      updatedAt: dateStr,
+    };
+
+    // Atomic rule: On Request, increase origin branch reservedStock
+    for (const item of transferItems) {
+      StorageService.updateBranchStock(item.productId, fromLoc.id, 0, item.requestedQty);
+    }
+
+    StorageService.saveStockTransfer(newTransfer);
+    return newTransfer;
+  },
+
+  approveStockTransfer: (transferId: string, staff: { staffId: string; name: string }): StockTransfer => {
+    const transfers = StorageService.getStockTransfers();
+    const idx = transfers.findIndex(t => t.id === transferId);
+    if (idx === -1) throw new Error('Transfer record not found.');
+
+    const transfer = transfers[idx];
+    if (transfer.status !== 'requested') {
+      throw new Error(`Cannot approve transfer in status: ${transfer.status}`);
+    }
+
+    const updated: StockTransfer = {
+      ...transfer,
+      status: 'approved',
+      approvedBy: { ...staff, date: new Date().toISOString() },
+      updatedAt: new Date().toISOString(),
+    };
+    transfers[idx] = updated;
+    StorageService.saveStockTransfers(transfers);
+    return updated;
+  },
+
+  rejectStockTransfer: (transferId: string, staff: { staffId: string; name: string }, reason: string): StockTransfer => {
+    const transfers = StorageService.getStockTransfers();
+    const idx = transfers.findIndex(t => t.id === transferId);
+    if (idx === -1) throw new Error('Transfer record not found.');
+
+    const transfer = transfers[idx];
+    if (transfer.status !== 'requested' && transfer.status !== 'approved') {
+      throw new Error(`Cannot reject transfer in status: ${transfer.status}`);
+    }
+
+    // Release origin branch reservedStock back to available
+    for (const item of transfer.items) {
+      StorageService.updateBranchStock(item.productId, transfer.fromLocationId, 0, -item.requestedQty);
+    }
+
+    const updated: StockTransfer = {
+      ...transfer,
+      status: 'rejected',
+      rejectedBy: { ...staff, date: new Date().toISOString() },
+      rejectionReason: reason || 'Transfer request declined by manager',
+      updatedAt: new Date().toISOString(),
+    };
+    transfers[idx] = updated;
+    StorageService.saveStockTransfers(transfers);
+    return updated;
+  },
+
+  dispatchStockTransfer: (
+    transferId: string,
+    staff: { staffId: string; name: string },
+    dispatchDetails: Array<{ productId: string; dispatchedQty: number; imeiList?: string[] }>
+  ): StockTransfer => {
+    const transfers = StorageService.getStockTransfers();
+    const idx = transfers.findIndex(t => t.id === transferId);
+    if (idx === -1) throw new Error('Transfer record not found.');
+
+    const transfer = transfers[idx];
+    if (transfer.status !== 'approved' && transfer.status !== 'requested') {
+      throw new Error(`Cannot dispatch transfer in status: ${transfer.status}`);
+    }
+
+    const updatedItems = transfer.items.map(item => {
+      const match = dispatchDetails.find(d => d.productId === item.productId);
+      const dispatchedQty = match ? match.dispatchedQty : item.requestedQty;
+      const imeiList = match?.imeiList || [];
+      return {
+        ...item,
+        dispatchedQty,
+        imeiList,
+      };
+    });
+
+    const totalDispatchedQty = updatedItems.reduce((sum, i) => sum + i.dispatchedQty, 0);
+
+    // Atomic rule on Dispatch:
+    // Deduct onHandStock and release reservedStock from origin branch
+    for (const item of updatedItems) {
+      StorageService.updateBranchStock(
+        item.productId,
+        transfer.fromLocationId,
+        -item.dispatchedQty,
+        -item.requestedQty
+      );
+    }
+
+    const dateStr = new Date().toISOString();
+    const updated: StockTransfer = {
+      ...transfer,
+      status: 'dispatched',
+      items: updatedItems,
+      totalDispatchedQty,
+      dispatchedBy: { ...staff, date: dateStr },
+      dispatchedAt: dateStr,
+      updatedAt: dateStr,
+    };
+
+    transfers[idx] = updated;
+    StorageService.saveStockTransfers(transfers);
+    return updated;
+  },
+
+  receiveStockTransfer: (
+    transferId: string,
+    staff: { staffId: string; name: string },
+    receivedDetails: Array<{ productId: string; receivedQty: number; verifiedImeis?: string[] }>,
+    discrepancyReason?: string
+  ): { transfer: StockTransfer; damageLogCreated?: DamageLog } => {
+    const transfers = StorageService.getStockTransfers();
+    const idx = transfers.findIndex(t => t.id === transferId);
+    if (idx === -1) throw new Error('Transfer record not found.');
+
+    const transfer = transfers[idx];
+    if (transfer.status !== 'dispatched') {
+      throw new Error(`Cannot receive transfer in status: ${transfer.status}`);
+    }
+
+    let hasAnyDiscrepancy = false;
+    let totalDiscrepancyUnits = 0;
+    let firstDiscrepantProdId = '';
+
+    const updatedItems = transfer.items.map(item => {
+      const match = receivedDetails.find(r => r.productId === item.productId);
+      const receivedQty = match !== undefined ? match.receivedQty : item.dispatchedQty;
+      const receivedImeis = match?.verifiedImeis || item.imeiList || [];
+      const discrepancyQty = Math.max(0, item.dispatchedQty - receivedQty);
+
+      if (discrepancyQty > 0) {
+        hasAnyDiscrepancy = true;
+        totalDiscrepancyUnits += discrepancyQty;
+        if (!firstDiscrepantProdId) firstDiscrepantProdId = item.productId;
+      }
+
+      return {
+        ...item,
+        receivedQty,
+        receivedImeiList: receivedImeis,
+        discrepancyQty,
+      };
+    });
+
+    const totalReceivedQty = updatedItems.reduce((sum, i) => sum + i.receivedQty, 0);
+
+    // Atomic rule on Receive: Increment onHandStock at destination branch
+    for (const item of updatedItems) {
+      StorageService.updateBranchStock(item.productId, transfer.toLocationId, item.receivedQty);
+    }
+
+    let damageLogCreated: DamageLog | undefined = undefined;
+    const dateStr = new Date().toISOString();
+
+    // Discrepancy handling: Auto-create DamageLog/Shrinkage record
+    if (hasAnyDiscrepancy && firstDiscrepantProdId) {
+      const prod = StorageService.getProducts().find(p => p.id === firstDiscrepantProdId);
+      const damageId = `dmg_trf_${Date.now()}`;
+      damageLogCreated = {
+        id: damageId,
+        logNumber: `DMG-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+        productId: firstDiscrepantProdId,
+        productName: prod?.name || 'Device Transit Discrepancy',
+        brand: prod?.brand || 'Brand',
+        category: prod?.category || 'accessories_gadgets',
+        sku: prod?.sku || 'SKU',
+        barcode: prod?.barcode || 'BARCODE',
+        costImpact: (prod?.costPrice || 0) * totalDiscrepancyUnits,
+        originalSellingPrice: (prod?.sellingPrice || 0) * totalDiscrepancyUnits,
+        quarantinedQuantity: totalDiscrepancyUnits,
+        locationId: transfer.toLocationId,
+        locationName: transfer.toLocationName,
+        transferId: transfer.id,
+        status: 'Quarantined',
+        phase: 'assessment',
+        reportedAt: dateStr,
+        reportedBy: staff.name,
+        damageReason: 'Customer return',
+        quarantineNotes: `Transit shrinkage: ${totalDiscrepancyUnits} unit(s) missing on receipt for ${transfer.transferNumber}. Note: ${discrepancyReason || 'Discrepancy reported on delivery arrival'}`,
+      };
+
+      try {
+        const damageLogs = StorageService.getDamageLogs();
+        damageLogs.unshift(damageLogCreated);
+        StorageService.saveDamageLogs(damageLogs);
+      } catch (err) {
+        console.warn('Failed to auto-log transit damage:', err);
+      }
+    }
+
+    const updated: StockTransfer = {
+      ...transfer,
+      status: 'received',
+      items: updatedItems,
+      totalReceivedQty,
+      receivedBy: { ...staff, date: dateStr },
+      receivedAt: dateStr,
+      discrepancyReason: discrepancyReason || undefined,
+      damageLogId: damageLogCreated?.id || undefined,
+      updatedAt: dateStr,
+    };
+
+    transfers[idx] = updated;
+    StorageService.saveStockTransfers(transfers);
+    return { transfer: updated, damageLogCreated };
   },
 
   touchLastUpdated: (customTimestamp?: number): void => {

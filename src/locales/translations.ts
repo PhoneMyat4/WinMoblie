@@ -1,0 +1,252 @@
+export type Language = 'my' | 'en';
+
+export interface TranslationDictionary {
+  [key: string]: {
+    en: string;
+    my: string;
+  };
+}
+
+export const TRANSLATIONS: TranslationDictionary = {
+  // Navigation & Group Titles
+  'nav.operations': { en: 'Operations', my: 'လုပ်ငန်းလည်ပတ်မှု' },
+  'nav.inventory_supply': { en: 'Inventory & Supply', my: 'စတော့နှင့် ပစ္စည်းပေးသွင်းမှု' },
+  'nav.financials': { en: 'Financials', my: 'ဘဏ္ဍာရေးစာရင်း' },
+  'nav.analytics_reports': { en: 'Analytics & Reports', my: 'အစီရင်ခံစာများ' },
+  'nav.crm_staff': { en: 'CRM & Staff', my: 'ဖောက်သည်နှင့် ဝန်ထမ်း' },
+  'nav.administration': { en: 'Administration', my: 'စနစ်စီမံခန့်ခွဲမှု' },
+
+  // Tabs
+  'tab.dashboard': { en: 'Dashboard', my: 'ပင်မဒက်ရှ်ဘုတ်' },
+  'tab.pos': { en: 'POS Register', my: 'အရောင်းကောင်တာ (POS)' },
+  'tab.pre_orders': { en: 'Pre-Orders & Bookings', my: 'ကြိုတင်အော်ဒါများ' },
+  'tab.sales_history': { en: 'Sale History & Refunds', my: 'အရောင်းမှတ်တမ်းနှင့် ပြန်အမ်းငွေ' },
+  'tab.social_marketing': { en: 'Social Media Marketing', my: 'ဆိုရှယ်မီဒီယာ ဈေးကွက်' },
+  'tab.inventory': { en: 'Inventory & Stock Adjust', my: 'စတော့စာရင်းနှင့် ညှိနှိုင်းမှု' },
+  'tab.quarantine_rma': { en: 'Damage & Quarantine RMA', my: 'ပျက်စီးပစ္စည်း သီးသန့်ခွဲထုတ်မှု' },
+  'tab.stock_check': { en: 'Stock Check & Audit', my: 'စတော့စစ်ဆေးခြင်း' },
+  'tab.purchases': { en: 'Purchases / Stock-In', my: 'ကုန်ပစ္စည်းအဝယ်/သွင်းယူမှု' },
+  'tab.daily_profit': { en: 'Daily & Annual Profit', my: 'နေ့စဥ်နှင့် နှစ်ချုပ်အမြတ်' },
+  'tab.personal_finance': { en: 'Personal Finance', my: 'ကိုယ်ပိုင်ဘဏ္ဍာရေး' },
+  'tab.credit_sales': { en: 'Credit Sales & AR', my: 'အကြွေးအရောင်းနှင့် ပြန်ဆပ်ငွေ' },
+  'tab.cash_drawer': { en: 'Cash Drawer & Shifts', my: 'ငွေသိမ်းအံဆွဲနှင့် အဆိုင်း' },
+  'tab.expenses': { en: 'Shop Expenses', my: 'ဆိုင်အသုံးစရိတ်များ' },
+  'tab.reports': { en: 'Business Reports', my: 'စီးပွားရေး အစီရင်ခံစာများ' },
+  'tab.team_chat': { en: 'Team Chat & Notice Board', my: 'ဝန်ထမ်းစကားပြောနှင့် ကြော်ငြာ' },
+  'tab.staff_payroll': { en: 'Staff Payroll & KPIs', my: 'လစာနှင့် စွမ်းဆောင်ရည်' },
+  'tab.crm': { en: 'Customers & Suppliers', my: 'ဖောက်သည်နှင့် ပေးသွင်းသူများ' },
+  'tab.roles': { en: 'Roles & Security', my: 'ရာထူးနှင့် လုံခြုံရေး' },
+  'tab.audit_logs': { en: 'System Audit Logs', my: 'စနစ်မှတ်တမ်းများ' },
+  'tab.invoice_customizer': { en: 'Invoice Customizer', my: 'ပြေစာပုံစံစိတ်ကြိုက်ပြင်' },
+  'tab.settings': { en: 'Settings', my: 'စနစ်ဆက်တင်များ' },
+
+  // Navbar & Global Actions
+  'navbar.search_placeholder': { en: 'Search products, IMEI, invoice, customer (Ctrl+K)...', my: 'ပစ္စည်း၊ IMEI၊ ပြေစာ၊ ဖောက်သည် ရှာရန် (Ctrl+K)...' },
+  'navbar.new_sale': { en: 'New Sale', my: 'အရောင်းသစ်' },
+  'navbar.stock_in': { en: 'Stock In', my: 'ပစ္စည်းသွင်း' },
+  'navbar.cash_in': { en: 'Cash In', my: 'ငွေသွင်း' },
+  'navbar.cash_out': { en: 'Cash Out', my: 'ငွေထုတ်' },
+  'navbar.drawer_balance': { en: 'Drawer', my: 'အံဆွဲငွေ' },
+  'navbar.lock_terminal': { en: 'Lock', my: 'စက်ပိတ်/သော့ခတ်' },
+  'navbar.logout': { en: 'Log Out', my: 'ထွက်မည်' },
+  'navbar.sound_on': { en: 'Sound Effects On', my: 'အသံဖွင့်ထားသည်' },
+  'navbar.sound_off': { en: 'Sound Muted', my: 'အသံပိတ်ထားသည်' },
+  'navbar.ai_copilot': { en: 'AI Store Copilot', my: 'AI စတိုးလက်ထောက်' },
+  'navbar.syncing': { en: 'Syncing...', my: 'ဒေတာချိတ်ဆက်နေဆဲ...' },
+  'navbar.synced': { en: 'Synced', my: 'ဒေတာချိန်ညှိပြီး' },
+  'navbar.offline': { en: 'Offline Mode', my: 'အော့ဖ်လိုင်းမုဒ်' },
+  'navbar.language': { en: 'Language', my: 'ဘာသာစကား' },
+
+  // Common Actions & Labels
+  'common.save': { en: 'Save', my: 'သိမ်းဆည်းမည်' },
+  'common.cancel': { en: 'Cancel', my: 'မလုပ်တော့ပါ' },
+  'common.delete': { en: 'Delete', my: 'ဖျက်မည်' },
+  'common.edit': { en: 'Edit', my: 'ပြင်ဆင်မည်' },
+  'common.close': { en: 'Close', my: 'ပိတ်မည်' },
+  'common.confirm': { en: 'Confirm', my: 'အတည်ပြုသည်' },
+  'common.back': { en: 'Back', my: 'နောက်သို့' },
+  'common.next': { en: 'Next', my: 'ရှေ့သို့' },
+  'common.search': { en: 'Search', my: 'ရှာဖွေပါ' },
+  'common.filter': { en: 'Filter', my: 'စစ်ထုတ်ပါ' },
+  'common.all': { en: 'All', my: 'အားလုံး' },
+  'common.loading': { en: 'Loading...', my: 'လုပ်ဆောင်နေဆဲ...' },
+  'common.success': { en: 'Success', my: 'အောင်မြင်ပါသည်' },
+  'common.error': { en: 'Error', my: 'မှားယွင်းမှု' },
+  'common.warning': { en: 'Warning', my: 'သတိပေးချက်' },
+  'common.export': { en: 'Export', my: 'ထုတ်ယူမည်' },
+  'common.import': { en: 'Import', my: 'သွင်းယူမည်' },
+  'common.print': { en: 'Print', my: 'ပရင့်ထုတ်မည်' },
+  'common.download': { en: 'Download', my: 'ဒေါင်းလုဒ်ဆွဲမည်' },
+  'common.date': { en: 'Date', my: 'ရက်စွဲ' },
+  'common.time': { en: 'Time', my: 'အချိန်' },
+  'common.amount': { en: 'Amount', my: 'ငွေပမာဏ' },
+  'common.status': { en: 'Status', my: 'အခြေအနေ' },
+  'common.actions': { en: 'Actions', my: 'လုပ်ဆောင်ချက်များ' },
+  'common.total': { en: 'Total', my: 'စုစုပေါင်း' },
+  'common.subtotal': { en: 'Subtotal', my: 'ကျသင့်ငွေ' },
+  'common.discount': { en: 'Discount', my: 'လျှော့ဈေး' },
+  'common.tax': { en: 'Tax', my: 'အခွန်' },
+  'common.notes': { en: 'Notes', my: 'မှတ်ချက်' },
+
+  // POS Register
+  'pos.cart_empty': { en: 'Cart is empty', my: 'ခြင်းတောင်းထဲတွင် ပစ္စည်းမရှိသေးပါ' },
+  'pos.scan_barcode': { en: 'Scan barcode or click items to add', my: 'ဘားကုဒ်စကင်ဖတ်ပါ သို့မဟုတ် ပစ္စည်းကို ရွေးချယ်ပါ' },
+  'pos.items_in_cart': { en: 'Items in Cart', my: 'ခြင်းတောင်းထဲရှိ ပစ္စည်းများ' },
+  'pos.customer': { en: 'Customer', my: 'ဝယ်ယူသူ' },
+  'pos.select_customer': { en: 'Select Customer', my: 'ဝယ်ယူသူရွေးချယ်ပါ' },
+  'pos.walk_in': { en: 'Walk-in Customer', my: 'သာမန်ဝယ်ယူသူ' },
+  'pos.add_new_customer': { en: 'New Customer', my: 'ဝယ်ယူသူအသစ်' },
+  'pos.payment_method': { en: 'Payment Method', my: 'ငွေပေးချေမှုပုံစံ' },
+  'pos.cash': { en: 'Cash', my: 'ငွေသား' },
+  'pos.kpay': { en: 'KBZPay', my: 'KBZPay' },
+  'pos.wave': { en: 'WavePay', my: 'WavePay' },
+  'pos.card': { en: 'Card', my: 'ကတ်' },
+  'pos.split': { en: 'Split Tender', my: 'ရောနှောပေးချေမှု' },
+  'pos.credit': { en: 'Credit / Pay Later', my: 'အကြွေး / နောက်မှပေး' },
+  'pos.tender_amount': { en: 'Tender Amount', my: 'ဝယ်သူပေးငွေ' },
+  'pos.change_due': { en: 'Change Due', my: 'ပြန်အမ်းငွေ' },
+  'pos.complete_sale': { en: 'Complete Sale', my: 'အရောင်းအတည်ပြုမည်' },
+  'pos.hold_cart': { en: 'Hold Cart', my: 'အရောင်းခေတ္တဆိုင်းငံ့' },
+  'pos.clear_cart': { en: 'Clear Cart', my: 'ခြင်းတောင်းရှင်းမည်' },
+  'pos.select_imei': { en: 'Select IMEI', my: 'IMEI နံပါတ်ရွေးပါ' },
+  'pos.warranty': { en: 'Warranty', my: 'အာမခံ' },
+  'pos.print_receipt': { en: 'Print Receipt', my: 'ဘောက်ချာထုတ်မည်' },
+  'pos.receipt_printed': { en: 'Receipt Printed', my: 'ဘောက်ချာထုတ်ပြီး' },
+
+  // Inventory
+  'inv.total_units': { en: 'Total Units in Stock', my: 'လက်ကျန်စုစုပေါင်း (လုံး)' },
+  'inv.total_value': { en: 'Total Retail Value', my: 'စတော့စုစုပေါင်းတန်ဖိုး' },
+  'inv.low_stock': { en: 'Low Stock Alert', my: 'စတော့နည်းနေသောပစ္စည်း' },
+  'inv.cost_price': { en: 'Cost Price', my: 'ဝယ်ဈေး' },
+  'inv.selling_price': { en: 'Selling Price', my: 'ရောင်းဈေး' },
+  'inv.margin': { en: 'Margin', my: 'အမြတ်ရာခိုင်နှုန်း' },
+  'inv.product_name': { en: 'Product Name', my: 'ပစ္စည်းအမည်' },
+  'inv.category': { en: 'Category', my: 'အမျိုးအစား' },
+  'inv.stock_level': { en: 'Stock Level', my: 'လက်ကျန်အရေအတွက်' },
+  'inv.barcode': { en: 'Barcode', my: 'ဘားကုဒ်' },
+  'inv.add_product': { en: 'Add Product', my: 'ပစ္စည်းအသစ်ထည့်မည်' },
+  'inv.bulk_import': { en: 'Bulk Import', my: 'အများအပြားသွင်းမည်' },
+  'inv.report_damage': { en: 'Report Damage', my: 'ချွတ်ယွင်းမှုမှတ်တမ်းတင်' },
+  'inv.whole_log': { en: 'Whole Inventory Log', my: 'စတော့လှုပ်ရှားမှုမှတ်တမ်းစုံ' },
+  'inv.in_stock': { en: 'In Stock', my: 'ပစ္စည်းရှိသည်' },
+  'inv.out_of_stock': { en: 'Out of Stock', my: 'ပစ္စည်းပြတ်နေသည်' },
+
+  // Financials & Shifts
+  'fin.gross_revenue': { en: 'Gross Revenue', my: 'စုစုပေါင်းရောင်းရငွေ' },
+  'fin.gross_profit': { en: 'Gross Profit', my: 'စုစုပေါင်းအမြတ်' },
+  'fin.net_profit': { en: 'Net Operating Profit', my: 'အသားတင်အမြတ်' },
+  'fin.operating_expenses': { en: 'Operating Expenses', my: 'ဆိုင်လည်ပတ်စရိတ်များ' },
+  'fin.opening_float': { en: 'Opening Float', my: 'အဆိုင်းမတည်ငွေ' },
+  'fin.closing_cash': { en: 'Closing Count', my: 'အဆိုင်းပိတ်ငွေ' },
+  'fin.expected_cash': { en: 'Expected in Drawer', my: 'စနစ်ရှိရမည့်ငွေ' },
+  'fin.variance': { en: 'Variance (Over/Short)', my: 'ငွေပို/ငွေလို ကွဲလွဲမှု' },
+  'fin.start_shift': { en: 'Start Shift', my: 'အဆိုင်းစတင်မည်' },
+  'fin.close_shift': { en: 'Close Shift', my: 'အဆိုင်းပိတ်သိမ်းမည်' },
+
+  // Settings
+  'settings.store_profile': { en: 'Store Profile', my: 'ဆိုင်အချက်အလက်' },
+  'settings.shop_name': { en: 'Shop Name', my: 'ဆိုင်အမည်' },
+  'settings.tagline': { en: 'Tagline / Slogan', my: 'ဆောင်ပုဒ် / ကြွေးကြော်သံ' },
+  'settings.phone': { en: 'Phone Number', my: 'ဖုန်းနံပါတ်' },
+  'settings.address': { en: 'Store Address', my: 'ဆိုင်လိပ်စာ' },
+  'settings.system_language': { en: 'System Language', my: 'စနစ်သုံးဘာသာစကား' },
+  'settings.lang_burmese': { en: 'Burmese (မြန်မာဘာသာ)', my: 'မြန်မာဘာသာ (Burmese)' },
+  'settings.lang_english': { en: 'English (အင်္ဂလိပ်ဘာသာ)', my: 'အင်္ဂလိပ်ဘာသာ (English)' },
+  'settings.save_changes': { en: 'Save Settings', my: 'ဆက်တင်များသိမ်းဆည်းမည်' },
+  'settings.user_manual': { en: 'Operations Manual (PDF)', my: 'စနစ်အသုံးပြုနည်းလမ်းညွှန်လက်စွဲ (PDF)' },
+
+  // Payment Modal
+  'payment.title': { en: 'Checkout & Payment Settlement', my: 'ငွေပေးချေမှုနှင့် အရောင်းအတည်ပြုခြင်း' },
+  'payment.payable_amount': { en: 'Total Amount Payable', my: 'ပေးချေရမည့် စုစုပေါင်းငွေ' },
+  'payment.method_selection': { en: 'Payment Channel', my: 'ငွေပေးချေမှုပုံစံ ရွေးချယ်ပါ' },
+  'payment.cash_received': { en: 'Cash Tendered', my: 'ဝယ်ယူသူပေးအပ်ငွေ' },
+  'payment.change_due': { en: 'Change Due', my: 'ပြန်အမ်းငွေ' },
+  'payment.shortage': { en: 'Remaining Due / Shortage', my: 'ပေးရန်ကျန်ငွေ' },
+  'payment.exact_amount': { en: 'Exact Amount', my: 'အပြေအကျေ' },
+  'payment.quick_cash': { en: 'Quick Cash Tender', my: 'အမြန်ငွေသားပမာဏ' },
+  'payment.tx_ref': { en: 'Transaction Ref / Last 6 Digits', my: 'ငွေလွှဲပြေစာနံပါတ် (နောက်ဆုံး ၆ လုံး)' },
+  'payment.account_name': { en: 'Sender Account Name', my: 'ငွေလွှဲသူအကောင့်အမည်' },
+  'payment.confirm_sale': { en: 'Confirm & Complete Sale', my: 'အရောင်းအတည်ပြုမည်' },
+  'payment.split_cash_portion': { en: 'Cash Portion', my: 'ငွေသားပေးချေမှု' },
+  'payment.split_digital_portion': { en: 'Digital Portion', my: 'ဒစ်ဂျစ်တယ်လွှဲငွေ' },
+  'payment.credit_sale': { en: 'Credit Sale (Accounts Receivable)', my: 'အကြွေးအရောင်းစာရင်း' },
+  'payment.credit_down_payment': { en: 'Down Payment (Initial Deposit)', my: 'စပေါ်ငွေ / ကနဦးပေးငွေ' },
+  'payment.credit_principal': { en: 'Remaining Credit Principal', my: 'ကျန်ရှိအကြွေးပမာဏ' },
+  'payment.credit_term_days': { en: 'Payment Term (Days)', my: 'ဆပ်ရမည့်ကာလ (ရက်)' },
+  'payment.credit_due_date': { en: 'Due Date', my: 'နောက်ဆုံးပေးသွင်းရမည့်ရက်' },
+  'payment.installments': { en: 'Installment Frequency', my: 'အရစ်ကျပေးသွင်းမှုပုံစံ' },
+  'payment.guarantor_name': { en: 'Guarantor Name', my: 'အာမခံသူအမည်' },
+  'payment.guarantor_phone': { en: 'Guarantor Phone', my: 'အာမခံသူဖုန်း' },
+  'payment.guarantor_nrc': { en: 'Guarantor NRC', my: 'အာမခံသူ မှတ်ပုံတင်' },
+  'payment.collateral': { en: 'Collateral Description', my: 'အပေါင်ပစ္စည်းအချက်အလက်' },
+  'payment.notes': { en: 'Notes / Promissory Terms', my: 'မှတ်ချက် / အာမခံသဘောတူညီချက်' },
+  'payment.loyalty_points': { en: 'Loyalty Points Available', my: 'လက်ရှိရရှိထားသော အမှတ်များ' },
+  'payment.use_points': { en: 'Redeem Points for Discount', my: 'အမှတ်များဖြင့် လျှော့ယူမည်' },
+  'payment.points_discount': { en: 'Points Discount Applied', my: 'အမှတ်လျှော့ငွေ' },
+
+  // Dashboard & Metrics
+  'dash.today_revenue': { en: "Today's Revenue", my: 'ယနေ့ရောင်းရငွေ' },
+  'dash.today_gross_profit': { en: "Today's Gross Profit", my: 'ယနေ့စုစုပေါင်းအမြတ်' },
+  'dash.margin': { en: 'Margin', my: 'အမြတ်ရာခိုင်နှုန်း' },
+  'dash.today_orders': { en: 'Completed Orders', my: 'ပြီးစီးသော အရောင်းပြေစာ' },
+  'dash.total_stock_value': { en: 'Inventory Valuation', my: 'စတော့လက်ကျန်တန်ဖိုး' },
+  'dash.low_stock_items': { en: 'Low Stock Alert Items', my: 'စတော့နည်းနေသော ပစ္စည်းများ' },
+  'dash.running_capital': { en: 'Live Running Capital', my: 'လည်ပတ်ငွေရင်း စုစုပေါင်း' },
+  'dash.cash_in_drawer': { en: 'Drawer Liquid Cash', my: 'အံဆွဲလက်ကျန်ငွေ' },
+  'dash.recent_sales': { en: 'Recent POS Transactions', my: 'လတ်တလော အရောင်းမှတ်တမ်းများ' },
+  'dash.top_selling': { en: 'Top Selling Products', my: 'အရောင်းရဆုံး ပစ္စည်းများ' },
+  'dash.quick_actions': { en: 'Quick Operations', my: 'အမြန်လုပ်ဆောင်ချက်များ' },
+  'dash.new_sale_btn': { en: 'New Sale (POS)', my: 'အရောင်းသစ် ဖွင့်မည်' },
+  'dash.stock_in_btn': { en: 'Stock In / PO', my: 'ပစ္စည်းအဝယ်သွင်းမည်' },
+  'dash.record_expense_btn': { en: 'Shop Expense', my: 'အသုံးစရိတ် မှတ်တမ်းတင်မည်' },
+  'dash.cash_transfer_btn': { en: 'Cash Transfer', my: 'ငွေလွှဲပြောင်းမှု' },
+
+  // Auth & Lock Screen
+  'auth.locked_title': { en: 'Terminal Locked', my: 'စနစ်သော့ခတ်ထားပါသည်' },
+  'auth.locked_desc': { en: 'Sign in to resume mobile shop operations', my: 'လုပ်ငန်းလည်ပတ်မှု ဆက်လက်ဆောင်ရွက်ရန် လော့ဂ်အင်ဝင်ပါ' },
+  'auth.username': { en: 'Username', my: 'အသုံးပြုသူအမည် (Username)' },
+  'auth.password': { en: 'Password / PIN', my: 'စကားဝှက် / လျှို့ဝှက်နံပါတ်' },
+  'auth.remember_me': { en: 'Remember Username', my: 'အသုံးပြုသူအမည် မှတ်ထားမည်' },
+  'auth.sign_in': { en: 'Unlock & Sign In', my: 'စနစ်ဖွင့်၍ ဝင်ရောက်မည်' },
+  'auth.signing_in': { en: 'Authenticating...', my: 'အတည်ပြုနေဆဲ...' },
+  'auth.select_account': { en: 'Select Account', my: 'ဝန်ထမ်းအကောင့် ရွေးချယ်ပါ' },
+
+  // Product Categories
+  'cat.brand_new_phones': { en: 'Brand New Phones', my: 'ဖုန်းအသစ်စက်စက်' },
+  'cat.pre_owned_phones': { en: 'Pre-owned / Used Phones', my: 'တစ်ပတ်ရစ်ဖုန်းများ' },
+  'cat.accessories_gadgets': { en: 'Accessories & Gadgets', my: 'ဖုန်းအပိုပစ္စည်းနှင့် ဆက်စပ်ပစ္စည်းများ' },
+  'cat.spare_parts': { en: 'Spare Parts & Screens', my: 'အပိုပစ္စည်းနှင့် မျက်နှာပြင်များ' },
+  'cat.sim_cards': { en: 'SIM Cards & Top-up', my: 'ဆင်းမ်ကတ်နှင့် ဖုန်းငွေဖြည့်ကတ်' },
+  'cat.cookware': { en: 'Cookware', my: 'အိမ်သုံးပစ္စည်း' },
+
+  // Conditions
+  'cond.brand_new': { en: 'Brand New (Sealed)', my: 'အသစ်စက်စက် (ဘူးပိတ်)' },
+  'cond.used_grade_a_plus': { en: 'Used: Like New (99%)', my: 'အသစ်နီးပါး (၉၉%)' },
+  'cond.used_grade_a': { en: 'Used: Excellent (95%)', my: 'အထူးကောင်းမွန် (၉၅%)' },
+  'cond.used_grade_b': { en: 'Used: Good (90%)', my: 'အခြေအနေကောင်း (၉၀%)' },
+  'cond.used_grade_c': { en: 'Used: Fair (85%)', my: 'အသင့်အတင့် (၈၅%)' },
+
+  // Customers & Suppliers
+  'crm.customer_name': { en: 'Customer Name', my: 'ဝယ်ယူသူအမည်' },
+  'crm.phone': { en: 'Phone Number', my: 'ဖုန်းနံပါတ်' },
+  'crm.email': { en: 'Email Address', my: 'အီးမေးလ်' },
+  'crm.address': { en: 'Address', my: 'လိပ်စာ' },
+  'crm.credit_balance': { en: 'Outstanding Credit Balance', my: 'ကျန်ရှိအကြွေးငွေ' },
+  'crm.loyalty_points': { en: 'Loyalty Points', my: 'အမှတ်' },
+  'crm.customer_type': { en: 'Customer Type', my: 'ဖောက်သည်အမျိုးအစား' },
+  'crm.add_customer': { en: 'Add Customer', my: 'ဖောက်သည်အသစ်ထည့်မည်' },
+  'crm.all_customers': { en: 'All Customers', my: 'ဖောက်သည်အားလုံး' },
+  'crm.suppliers': { en: 'Suppliers', my: 'ကုန်ပစ္စည်းပေးသွင်းသူများ' },
+  'crm.add_supplier': { en: 'Add Supplier', my: 'ပေးသွင်းသူအသစ်ထည့်မည်' },
+};
+
+/**
+ * Translation helper function
+ */
+export function translate(key: string, language: Language = 'my', fallback?: string): string {
+  const item = TRANSLATIONS[key];
+  if (item) {
+    return item[language] || item['en'] || fallback || key;
+  }
+  return fallback || key;
+}

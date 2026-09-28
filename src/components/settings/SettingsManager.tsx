@@ -1787,6 +1787,20 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               />
             </div>
 
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                System Language / စနစ်သုံးဘာသာစကား
+              </label>
+              <select
+                value={formData.systemLanguage || 'my'}
+                onChange={(e) => setFormData({ ...formData, systemLanguage: e.target.value as 'my' | 'en' })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold bg-white text-slate-900 cursor-pointer"
+              >
+                <option value="my">🇲🇲 မြန်မာဘာသာ (Burmese)</option>
+                <option value="en">🇬🇧 English</option>
+              </select>
+            </div>
+
             <div className="sm:col-span-2">
               <label className="block text-xs font-semibold text-slate-700 mb-1">Street Address</label>
               <input

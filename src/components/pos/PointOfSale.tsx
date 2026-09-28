@@ -39,7 +39,9 @@ import {
   CalendarClock,
   Utensils,
   ShieldAlert,
-  Info
+  Info,
+  Building2,
+  ArrowRightLeft
 } from 'lucide-react';
 import { 
   Product, 
@@ -63,6 +65,7 @@ import { PosLiveScannerModal } from './PosLiveScannerModal';
 import { PosProductHoverPreview, PosProductMobileDetailModal } from './PosProductHoverPreview';
 import { PreOrderSearchModal } from '../modals/PreOrderSearchModal';
 import { PreOrderFormModal } from '../modals/PreOrderFormModal';
+import { CrossBranchStockModal } from '../branches/CrossBranchStockModal';
 import { StorageService } from '../../utils/storage';
 import { firestoreSync } from '../../services/firestoreSyncService';
 import { AppLink } from '../common/AppLink';
@@ -76,6 +79,7 @@ import {
   playWarningBeep, 
   playErrorBeep 
 } from '../../utils/scannerAudio';
+import { useLanguage } from '../../context/LanguageContext';
 
 interface PointOfSaleProps {
   products: Product[];
@@ -96,6 +100,8 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
   onCompleteSale,
   onAddNewCustomer,
 }) => {
+  const { t, isBurmese } = useLanguage();
+
   // Pre-Orders State
   const [preOrders, setPreOrders] = useState<PreOrder[]>(() => StorageService.getPreOrders());
   const [isPreOrderSearchModalOpen, setIsPreOrderSearchModalOpen] = useState<boolean>(false);
@@ -188,6 +194,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
   const [newCustName, setNewCustName] = useState<string>('');
   const [newCustPhone, setNewCustPhone] = useState<string>('');
   const [newCustAddress, setNewCustAddress] = useState<string>('');
+  const [crossBranchProduct, setCrossBranchProduct] = useState<Product | null>(null);
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId) || null;
 
@@ -863,16 +870,21 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
     });
   }, [customers, products, scannerSoundEnabled, settings.currencySymbol]);
 
+  const onClearActivePreOrderRef = useRef(onClearActivePreOrder);
+  onClearActivePreOrderRef.current = onClearActivePreOrder;
+  const handleSelectPreOrderRef = useRef(handleSelectPreOrderForFulfillment);
+  handleSelectPreOrderRef.current = handleSelectPreOrderForFulfillment;
+
   // Sync external pre-order prop when opened from Pre-Orders manager
   useEffect(() => {
     if (activePreOrderToFulfill && activePreOrderToFulfill.id !== lastFulfilledPreOrderIdRef.current) {
       lastFulfilledPreOrderIdRef.current = activePreOrderToFulfill.id;
-      handleSelectPreOrderForFulfillment(activePreOrderToFulfill);
-      if (onClearActivePreOrder) {
-        onClearActivePreOrder();
+      handleSelectPreOrderRef.current(activePreOrderToFulfill);
+      if (onClearActivePreOrderRef.current) {
+        onClearActivePreOrderRef.current();
       }
     }
-  }, [activePreOrderToFulfill, handleSelectPreOrderForFulfillment, onClearActivePreOrder]);
+  }, [activePreOrderToFulfill]);
 
   // Calculations
   const subtotal = cart.reduce((sum, item) => {
@@ -968,6 +980,8 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
       pointsEarned: paymentInfo.pointsEarned,
       pointsRedeemed: paymentInfo.pointsRedeemed,
       soldBy: settings.currentStaffName,
+      locationId: StorageService.getActiveLocationId(),
+      locationName: StorageService.getActiveLocation().name,
       status: 'completed',
       preOrderId: activePreOrderFulfillment?.id,
       preOrderNumber: activePreOrderFulfillment?.preOrderNumber,
@@ -2115,6 +2129,21 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                           </div>
                           <button
                             type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCloseHoverPreview();
+                              setCrossBranchProduct(product);
+                            }}
+                            title="Check Stock in Other Branches & Warehouses"
+                            className="p-1 rounded-md text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors flex items-center justify-center cursor-pointer"
+                          >
+                            <Building2 
+                              style={{ width: '18px', height: '19px' }} 
+                              className="shrink-0" 
+                            />
+                          </button>
+                          <button
+                            type="button"
                             id={`pos-preview-btn-${product.id}`}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -2389,8 +2418,8 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
             {cart.length === 0 ? (
               <div className="py-12 text-center text-slate-400">
                 <ShoppingCart className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                <p className="text-xs font-semibold">Cart is empty</p>
-                <p className="text-[11px]">Click items from catalog or scan barcodes to begin.</p>
+                <p className="text-xs font-semibold">{t('pos.cart_empty', 'Cart is empty')}</p>
+                <p className="text-[11px]">{t('pos.scan_barcode', 'Click items from catalog or scan barcodes to begin.')}</p>
               </div>
             ) : (
               cart.map((item, index) => {
@@ -2639,29 +2668,29 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
             {/* Calculations Breakdown */}
             <div className="space-y-1 text-slate-600">
               <div className="flex justify-between">
-                <span>Subtotal:</span>
+                <span>{t('common.subtotal', 'Subtotal')}:</span>
                 <span className="font-semibold">{formatCurrency(subtotal, settings.currencySymbol)}</span>
               </div>
               {totalDiscount > 0 && (
                 <div className="flex justify-between text-rose-600">
-                  <span>Total Discount:</span>
+                  <span>{t('common.discount', 'Total Discount')}:</span>
                   <span className="font-semibold">-{formatCurrency(totalDiscount, settings.currencySymbol)}</span>
                 </div>
               )}
               {taxEnabled && taxAmount > 0 && (
                 <div className="flex justify-between">
-                  <span>Tax ({settings.taxRatePercent}%):</span>
+                  <span>{t('common.tax', 'Tax')} ({settings.taxRatePercent}%):</span>
                   <span>{formatCurrency(taxAmount, settings.currencySymbol)}</span>
                 </div>
               )}
               {activePreOrderFulfillment && activePreOrderFulfillment.depositAmount > 0 && (
                 <div className="flex justify-between text-emerald-700 font-bold bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">
-                  <span>Pre-Paid Deposit Deduction:</span>
+                  <span>{isBurmese ? 'ကြိုတင်ပေးစရံငွေ နုတ်ပယ်မှု:' : 'Pre-Paid Deposit Deduction:'}</span>
                   <span>-{formatCurrency(activePreOrderFulfillment.depositAmount, settings.currencySymbol)}</span>
                 </div>
               )}
               <div className="flex justify-between text-base font-black text-slate-900 pt-1.5 border-t border-slate-200">
-                <span>Net Total:</span>
+                <span>{isBurmese ? 'ကျသင့်ငွေ စုစုပေါင်း:' : 'Net Total:'}</span>
                 <span className="text-emerald-700">{formatCurrency(grandTotal, settings.currencySymbol)}</span>
               </div>
             </div>
@@ -2675,7 +2704,11 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
               className="w-full mt-3 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-sm rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <CreditCard className="w-5 h-5" />
-              Charge {formatCurrency(grandTotal, settings.currencySymbol)}
+              <span>
+                {isBurmese 
+                  ? `ငွေချေမည် ${formatCurrency(grandTotal, settings.currencySymbol)}` 
+                  : `Charge ${formatCurrency(grandTotal, settings.currencySymbol)}`}
+              </span>
             </button>
           </div>
 
@@ -2805,6 +2838,15 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
         onClose={() => setMobilePreviewProduct(null)}
         onAddToCart={addToCart}
       />
+
+      {/* Cross-Branch Stock Lookup Modal */}
+      {crossBranchProduct && (
+        <CrossBranchStockModal
+          product={crossBranchProduct}
+          currencySymbol={settings.currencySymbol}
+          onClose={() => setCrossBranchProduct(null)}
+        />
+      )}
 
     </div>
   );

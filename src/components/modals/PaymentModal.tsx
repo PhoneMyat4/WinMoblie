@@ -21,6 +21,7 @@ import {
 import confetti from 'canvas-confetti';
 import { PaymentMethod, Customer, ShopSettings, CreditInstallmentPlan } from '../../types';
 import { formatCurrency, formatDate, getPaymentMethodInfo } from '../../utils/formatters';
+import { useLanguage } from '../../context/LanguageContext';
 
 interface PaymentModalProps {
   subtotal: number;
@@ -103,6 +104,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   onClose,
   onConfirmSale,
 }) => {
+  const { t, isBurmese } = useLanguage();
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [cashTendered, setCashTendered] = useState<number>(grandTotal);
   const [transactionRef, setTransactionRef] = useState<string>('');
@@ -277,8 +279,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
           <div>
-            <h3 className="text-base font-bold text-slate-900">Checkout & Settle Bill</h3>
-            <p className="text-xs text-slate-500">Select payment channel & finalize register receipt</p>
+            <h3 className="text-base font-bold text-slate-900">{t('payment.title', 'Checkout & Settle Bill')}</h3>
+            <p className="text-xs text-slate-500">
+              {isBurmese ? 'ငွေပေးချေမှုပုံစံ ရွေးချယ်ပြီး အရောင်းပြေစာ ထုတ်ယူပါ' : 'Select payment channel & finalize register receipt'}
+            </p>
           </div>
           <button
             id="close-payment-modal-btn"
@@ -295,20 +299,20 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           {/* Total Payable Box */}
           <div className="bg-slate-900 text-white p-5 rounded-2xl shadow-md flex items-center justify-between">
             <div>
-              <p className="text-xs text-slate-300 font-bold uppercase tracking-wider">Total Amount Due</p>
+              <p className="text-xs text-slate-300 font-bold uppercase tracking-wider">{t('payment.payable_amount', 'Total Amount Due')}</p>
               <h2 className="text-3xl font-black text-emerald-400 mt-1">
                 {formatCurrency(finalPayable, settings.currencySymbol)}
               </h2>
               {usePoints && (
                 <p className="text-xs text-indigo-300 mt-0.5">
-                  Points applied: -{formatCurrency(pointsDiscountValue, settings.currencySymbol)}
+                  {isBurmese ? 'အမှတ်လျှော့ငွေ' : 'Points applied'}: -{formatCurrency(pointsDiscountValue, settings.currencySymbol)}
                 </p>
               )}
             </div>
 
             {customer && (
               <div className="text-right border-l border-slate-700 pl-4">
-                <p className="text-xs text-slate-400">Customer</p>
+                <p className="text-xs text-slate-400">{t('pos.customer', 'Customer')}</p>
                 <p className="text-sm font-bold text-white">{customer.name}</p>
                 <p className="text-xs text-indigo-300 font-mono">{customer.phone}</p>
               </div>
@@ -321,15 +325,15 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               <div className="flex items-center justify-between font-bold text-indigo-950">
                 <span className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                  <span>Fulfilling Pre-Order: {preOrderFulfillment.preOrderNumber}</span>
+                  <span>{isBurmese ? 'ကြိုတင်အော်ဒါ ပစ္စည်းထုတ်ပေးခြင်း' : 'Fulfilling Pre-Order'}: {preOrderFulfillment.preOrderNumber}</span>
                 </span>
                 <span className="text-[11px] font-mono bg-indigo-100 text-indigo-900 px-2 py-0.5 rounded">
-                  Deposit Credited
+                  {isBurmese ? 'စပေါ်ငွေ ခုနှိမ်ပြီး' : 'Deposit Credited'}
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 pt-1">
-                <div>Device Agreed Price: <span className="font-bold text-slate-900">{formatCurrency(preOrderFulfillment.fullPrice, settings.currencySymbol)}</span></div>
-                <div className="text-right">Deposit Deducted: <span className="font-bold text-emerald-700">-{formatCurrency(preOrderFulfillment.depositAmount, settings.currencySymbol)}</span></div>
+                <div>{isBurmese ? 'ပစ္စည်းသတ်မှတ်ဈေး' : 'Device Agreed Price'}: <span className="font-bold text-slate-900">{formatCurrency(preOrderFulfillment.fullPrice, settings.currencySymbol)}</span></div>
+                <div className="text-right">{isBurmese ? 'စပေါ်ငွေ နုတ်ပြီး' : 'Deposit Deducted'}: <span className="font-bold text-emerald-700">-{formatCurrency(preOrderFulfillment.depositAmount, settings.currencySymbol)}</span></div>
               </div>
             </div>
           )}
@@ -340,9 +344,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-indigo-600" />
                 <div>
-                  <p className="font-bold text-indigo-900">Redeem Loyalty Points</p>
+                  <p className="font-bold text-indigo-900">{t('payment.use_points', 'Redeem Loyalty Points')}</p>
                   <p className="text-indigo-700 text-[11px]">
-                    Use {maxRedeemablePoints} points for {formatCurrency(maxRedeemablePoints, settings.currencySymbol)} discount
+                    {isBurmese 
+                      ? `${maxRedeemablePoints} မှတ် အသုံးပြု၍ ${formatCurrency(maxRedeemablePoints, settings.currencySymbol)} လျှော့ငွေရယူပါ`
+                      : `Use ${maxRedeemablePoints} points for ${formatCurrency(maxRedeemablePoints, settings.currencySymbol)} discount`}
                   </p>
                 </div>
               </div>
@@ -365,12 +371,23 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           {/* Payment Methods Grid */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wider">
-              Select Myanmar Payment Channel
+              {t('payment.method_selection', 'Select Payment Channel')}
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {MYANMAR_PAYMENT_CHANNELS.map((chan) => {
                 const Icon = chan.icon;
                 const isSelected = method === chan.id;
+                const localizedLabel = isBurmese
+                  ? (chan.id === 'cash' ? 'ငွေသား (MMK)' :
+                     chan.id === 'split' ? 'ရောနှောပေးချေမှု' :
+                     chan.id === 'credit' ? 'အကြွေးအရောင်း' : chan.label)
+                  : chan.label;
+                const localizedSub = isBurmese
+                  ? (chan.id === 'cash' ? 'အံဆွဲငွေ' :
+                     chan.id === 'split' ? 'ငွေသား + ဒစ်ဂျစ်တယ်' :
+                     chan.id === 'credit' ? 'အကြွေး / နောက်မှပေး' :
+                     chan.id === 'kpay' ? 'စကင်ဖတ်ငွေလွှဲ' : chan.sub)
+                  : chan.sub;
 
                 return (
                   <button
@@ -389,9 +406,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                     }`}
                   >
                     <Icon className={`w-5 h-5 mb-1 ${isSelected ? 'text-white' : chan.color}`} />
-                    <span className="truncate w-full text-center">{chan.label}</span>
+                    <span className="truncate w-full text-center">{localizedLabel}</span>
                     <span className={`text-[10px] font-normal ${isSelected ? 'text-slate-300' : 'text-slate-400'}`}>
-                      {chan.sub}
+                      {localizedSub}
                     </span>
                   </button>
                 );
@@ -403,7 +420,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           {method === 'cash' && (
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Cash Received Tendered ({settings.currencySymbol})</label>
+                <label className="block font-bold text-slate-700 mb-1">{t('payment.cash_received', 'Cash Received Tendered')} ({settings.currencySymbol})</label>
                 <input
                   type="number"
                   placeholder="0"
@@ -434,7 +451,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 <div className="flex items-center gap-1.5">
                   <Calculator className="w-4 h-4 text-emerald-700" />
                   <span className="font-bold text-emerald-950">
-                    {cashShortage > 0 ? 'Amount Short (Due):' : 'Change Due to Customer:'}
+                    {cashShortage > 0 ? (isBurmese ? 'ပေးရန်ကျန်ငွေ / လိုငွေ:' : 'Amount Short (Due):') : (isBurmese ? 'ပြန်အမ်းငွေ:' : 'Change Due to Customer:')}
                   </span>
                 </div>
                 <span className={`text-base font-black font-mono ${cashShortage > 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
@@ -746,7 +763,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             onClick={onClose}
             className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
           >
-            Cancel
+            {t('common.cancel', 'Cancel')}
           </button>
 
           <button
@@ -763,10 +780,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               <Check className="w-4 h-4" />
             )}
             {isProcessing 
-              ? 'Verifying & Finalizing Sale...' 
+              ? (isBurmese ? 'အရောင်းအတည်ပြုနေဆဲ...' : 'Verifying & Finalizing Sale...') 
               : method === 'credit' 
-                ? 'Confirm Credit Sale & Create Promissory Note' 
-                : 'Confirm Payment & Print Receipt'}
+                ? (isBurmese ? 'အကြွေးအရောင်းအတည်ပြုမည်' : 'Confirm Credit Sale & Create Promissory Note') 
+                : (isBurmese ? 'အရောင်းအတည်ပြု၍ ဘောက်ချာထုတ်မည်' : 'Confirm Payment & Print Receipt')}
           </button>
         </div>
 

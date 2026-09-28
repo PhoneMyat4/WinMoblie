@@ -30,9 +30,11 @@ import {
   UserX,
   Layers,
   ArrowRight,
-  Clock
+  Clock,
+  Building2,
+  Store
 } from 'lucide-react';
-import { StaffUser, StaffRole, RolePermissions, ShopSettings } from '../../types';
+import { StaffUser, StaffRole, RolePermissions, ShopSettings, StoreLocation } from '../../types';
 import { getRoleBadgeClass } from '../../utils/formatters';
 import { 
   DEFAULT_ROLE_PERMISSIONS, 
@@ -46,6 +48,7 @@ import { StorageService, isMockStaffUser } from '../../utils/storage';
 
 interface UserRolesManagerProps {
   staffUsers: StaffUser[];
+  locations?: StoreLocation[];
   settings: ShopSettings;
   rolePermissions: Record<StaffRole, RolePermissions>;
   onSaveStaffUser: (user: StaffUser) => void;
@@ -60,6 +63,7 @@ type SubTab = 'matrix' | 'staff' | 'user_overrides' | 'simulator';
 
 export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
   staffUsers,
+  locations,
   settings,
   rolePermissions,
   onSaveStaffUser,
@@ -69,6 +73,10 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
   onSaveRolePermissions,
   onResetRolePermissions,
 }) => {
+  const availableLocations = useMemo(() => {
+    return locations && locations.length > 0 ? locations : StorageService.getLocations();
+  }, [locations]);
+
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('matrix');
   const [selectedRoleTab, setSelectedRoleTab] = useState<StaffRole>('Cashier');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
@@ -99,6 +107,8 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
   const [email, setEmail] = useState('');
   const [pin, setPin] = useState('');
   const [active, setActive] = useState(true);
+  const [branchId, setBranchId] = useState('');
+  const [allowedLocationIds, setAllowedLocationIds] = useState<string[]>([]);
   const [restrictWorkingHours, setRestrictWorkingHours] = useState(false);
   const [workStartTime, setWorkStartTime] = useState('07:30');
   const [workEndTime, setWorkEndTime] = useState('19:00');
@@ -221,6 +231,8 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
     setEmail('');
     setPin('');
     setActive(true);
+    setBranchId('');
+    setAllowedLocationIds([]);
     setRestrictWorkingHours(false);
     setWorkStartTime('07:30');
     setWorkEndTime('19:00');
@@ -237,6 +249,8 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
     setEmail(user.email || '');
     setPin(user.password || user.pin || '');
     setActive(user.active);
+    setBranchId(user.branchId || '');
+    setAllowedLocationIds(user.allowedLocationIds || (user.branchId ? [user.branchId] : []));
     setRestrictWorkingHours(user.role === 'Owner' ? false : Boolean(user.restrictWorkingHours));
     setWorkStartTime(user.workStartTime || '07:30');
     setWorkEndTime(user.workEndTime || '19:00');
@@ -255,6 +269,7 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
       `user${Date.now().toString().slice(-4)}`;
 
     const isOwner = role === 'Owner';
+    const selectedLoc = availableLocations.find(l => l.id === branchId);
     const newUser: StaffUser = {
       id: editingStaff ? editingStaff.id : `staff-${Date.now()}`,
       username: cleanUsername,
@@ -265,6 +280,9 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
       pin,
       password: pin,
       active,
+      branchId: branchId || undefined,
+      branchName: selectedLoc ? selectedLoc.name : undefined,
+      allowedLocationIds: allowedLocationIds.length > 0 ? allowedLocationIds : undefined,
       avatarColor: editingStaff?.avatarColor || (
         role === 'Owner' ? 'bg-purple-600' :
         role === 'Manager' ? 'bg-blue-600' :
@@ -937,6 +955,18 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
                       )}
                     </div>
 
+                    {user.branchName ? (
+                      <div className="flex items-center gap-1.5 mt-2 py-1 px-2 rounded-lg bg-indigo-50/80 border border-indigo-200 text-indigo-900 text-[11px] font-bold">
+                        <Store className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        <span className="truncate">{user.branchName}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 mt-2 py-1 px-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-500 text-[11px]">
+                        <Store className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">All Branches (Floating)</span>
+                      </div>
+                    )}
+
                     <div className="mt-3 space-y-1.5 text-[11px] text-slate-500 font-mono">
                       <p className="flex items-center gap-1.5 text-slate-700 font-semibold truncate">
                         <span className="text-slate-400 font-normal">@</span>
@@ -1459,6 +1489,75 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
                 />
+              </div>
+
+              {/* BRANCH / LOCATION ASSIGNMENT */}
+              <div className="p-3.5 bg-indigo-50/60 border border-indigo-200 rounded-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <Store className="w-4 h-4 text-indigo-700 shrink-0" />
+                  <span className="font-bold text-indigo-950 text-xs">Branch Assignment</span>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Primary Assigned Branch</label>
+                  <select
+                    value={branchId}
+                    onChange={(e) => {
+                      const newBranchId = e.target.value;
+                      setBranchId(newBranchId);
+                      if (newBranchId && !allowedLocationIds.includes(newBranchId)) {
+                        setAllowedLocationIds(prev => [...prev, newBranchId]);
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl font-semibold text-xs"
+                  >
+                    <option value="">All Branches (Floating / Central Staff)</option>
+                    {availableLocations.map(loc => (
+                      <option key={loc.id} value={loc.id}>
+                        {loc.name} ({loc.code}) - {loc.type === 'warehouse' ? 'Warehouse' : 'Branch'}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Assign this staff user directly to a specific branch store or warehouse.
+                  </p>
+                </div>
+
+                {availableLocations.length > 1 && (
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Authorized Branches to Operate In</label>
+                    <div className="space-y-1.5 bg-white p-2.5 rounded-xl border border-slate-200 max-h-32 overflow-y-auto">
+                      {availableLocations.map(loc => {
+                        const isPrimary = branchId === loc.id;
+                        const isChecked = allowedLocationIds.includes(loc.id) || isPrimary;
+                        return (
+                          <label key={loc.id} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-slate-50 p-1 rounded">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              disabled={isPrimary}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setAllowedLocationIds(prev => [...prev, loc.id]);
+                                } else {
+                                  setAllowedLocationIds(prev => prev.filter(id => id !== loc.id));
+                                }
+                              }}
+                              className="rounded text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span className="font-medium text-slate-800">{loc.name}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">({loc.code})</span>
+                            {isPrimary && (
+                              <span className="text-[9px] font-bold bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded ml-auto">
+                                Primary
+                              </span>
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* WORKING HOURS RESTRICTION (Owner role is always exempt) */}

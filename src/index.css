@@ -8,6 +8,7 @@ html, body, #root {
   overflow-x: clip;
   max-width: 100vw;
   width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Pyidaungsu", "Myanmar Text", "Padauk", "Noto Sans Myanmar", sans-serif;
 }
 
 /* Ensure inputs, textareas, and selects always display crisp, high-contrast dark text and light background */

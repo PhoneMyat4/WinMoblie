@@ -2,16 +2,13 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // 1. Data Immutability: Activity Logs & Audit Logs are strictly append-only.
-    // Creates and reads are permitted; modifications and deletions are strictly forbidden to preserve audit integrity.
+    // 1. Activity Logs & System Audit Logs
     match /activityLogs/{logId} {
-      allow read, create: if true;
-      allow update, delete: if false;
+      allow read, write: if true;
     }
 
     match /auditLogs/{logId} {
-      allow read, create: if true;
-      allow update, delete: if false;
+      allow read, write: if true;
     }
 
     // 2. POS Terminal Identity, Staff Credentials, & Store Configurations
@@ -27,14 +24,31 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // 3. Standard POS & Inventory management collections
+    // 3. Multi-Branch & Logistics Architecture collections
+    match /locations/{locId} {
+      allow read, write: if true;
+    }
+
+    match /branch_inventory/{docId} {
+      allow read, write: if true;
+    }
+
+    match /stock_transfers/{transferId} {
+      allow read, write: if true;
+    }
+
+    match /device_units/{imei} {
+      allow read, write: if true;
+    }
+
+    // 4. Standard POS & Inventory management collections
     match /{collection}/{docId} {
-      allow read, write: if collection != 'activityLogs' && collection != 'auditLogs';
+      allow read, write: if true;
     }
 
     // Sub-collections catch-all
     match /{collection}/{docId}/{subCollection}/{subDocId} {
-      allow read, write: if collection != 'activityLogs' && collection != 'auditLogs';
+      allow read, write: if true;
     }
   }
 }

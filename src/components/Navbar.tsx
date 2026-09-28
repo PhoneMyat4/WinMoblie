@@ -21,11 +21,15 @@ import {
   ArrowLeft,
   ArrowRight
 } from 'lucide-react';
-import { ShopSettings, CashDrawerRecord, StaffRole, StaffUser, RolePermissions } from '../types';
+import { ShopSettings, CashDrawerRecord, StaffRole, StaffUser, RolePermissions, StoreLocation } from '../types';
 import { formatCurrency } from '../utils/formatters';
 import { getEffectiveUserPermissions } from '../utils/permissionUtils';
 import { AppLink } from './common/AppLink';
 import { SyncStateInfo } from '../utils/syncService';
+import { useLanguage } from '../context/LanguageContext';
+import { LanguageSwitcher } from './common/LanguageSwitcher';
+import { BranchSwitcher } from './branches/BranchSwitcher';
+import { StorageService } from '../utils/storage';
 
 interface NavbarProps {
   settings: ShopSettings;
@@ -34,6 +38,10 @@ interface NavbarProps {
   currentStaffUser?: StaffUser;
   rolePermissions?: Record<StaffRole, RolePermissions>;
   syncInfo?: SyncStateInfo & { triggerManualSync: () => void };
+  locations?: StoreLocation[];
+  activeLocationId?: string;
+  onLocationChange?: (locationId: string) => void;
+  onOpenBranchesTab?: () => void;
   canGoBack?: boolean;
   canGoForward?: boolean;
   onOpenNewSale: () => void;
@@ -56,6 +64,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentStaffUser,
   rolePermissions,
   syncInfo,
+  locations = StorageService.getLocations(),
+  activeLocationId = StorageService.getActiveLocationId(),
+  onLocationChange,
+  onOpenBranchesTab,
   canGoBack = false,
   canGoForward = false,
   onOpenNewSale,
@@ -74,6 +86,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [timeStr, setTimeStr] = useState('');
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
+  const { t, isBurmese } = useLanguage();
   const effectivePerms = getEffectiveUserPermissions(currentStaffUser, rolePermissions);
 
   useEffect(() => {
@@ -178,7 +191,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search Item, Barcode, Serialized IMEI, or Invoice #..."
+                placeholder={t('navbar.search_placeholder', 'Search Item, Barcode, Serialized IMEI, or Invoice #...')}
                 autoComplete="off"
                 spellCheck={false}
                 style={{ color: '#0f172a', backgroundColor: '#f8fafc' }}
@@ -188,19 +201,31 @@ export const Navbar: React.FC<NavbarProps> = ({
                 type="submit"
                 className="absolute right-1.5 top-1.5 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-semibold rounded-lg transition-colors cursor-pointer"
               >
-                Search
+                {t('common.search', 'Search')}
               </button>
             </div>
           </form>
 
           {/* Right Action Widgets */}
-          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
             
+            {/* Active Branch / Warehouse Context Switcher */}
+            <BranchSwitcher
+              locations={locations}
+              activeLocationId={activeLocationId}
+              currentStaffUser={currentStaffUser}
+              rolePermissions={rolePermissions}
+              onLocationChange={(newLocId) => {
+                if (onLocationChange) onLocationChange(newLocId);
+              }}
+              onOpenBranchManager={onOpenBranchesTab}
+            />
+
             {/* Live Cash Float Widget */}
             <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl">
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
               <div>
-                <p className="text-[10px] text-slate-400 font-bold uppercase leading-none">Register Cash</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase leading-none">{t('navbar.drawer_balance', 'Register Cash')}</p>
                 <p className="text-xs font-black text-slate-900 leading-tight">
                   {formatCurrency(cashDrawer.expectedInDrawer, settings.currencySymbol)}
                 </p>
@@ -210,7 +235,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <div className="flex items-center gap-0.5 ml-1 border-l border-slate-200 pl-1">
                   <button
                     type="button"
-                    title="Record Cash In"
+                    title={t('navbar.cash_in', 'Record Cash In')}
                     onClick={() => onOpenCashInOut('in')}
                     className="p-1 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer"
                   >
@@ -218,7 +243,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </button>
                   <button
                     type="button"
-                    title="Record Cash Out"
+                    title={t('navbar.cash_out', 'Record Cash Out')}
                     onClick={() => onOpenCashInOut('out')}
                     className="p-1 text-rose-600 hover:bg-rose-50 rounded cursor-pointer"
                   >
@@ -252,7 +277,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title="Stock Purchase (Right click to open in new tab/window)"
                 >
                   <Truck className="w-3.5 h-3.5" />
-                  + Stock In
+                  <span>+ {t('navbar.stock_in', 'Stock In')}</span>
                 </AppLink>
               )}
 
@@ -265,7 +290,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title="Record Shop Expense (Right click to open in new tab/window)"
                 >
                   <DollarSign className="w-3.5 h-3.5" />
-                  + Expense
+                  <span>+ {t('navbar.cash_out', 'Expense')}</span>
                 </AppLink>
               )}
 
@@ -279,8 +304,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     title="Open POS Terminal (Right click to open in new tab/window)"
                   >
                     <Plus className="w-3.5 h-3.5 shrink-0" />
-                    <span className="hidden xs:inline">New Sale</span>
-                    <span className="xs:hidden">Sale</span>
+                    <span className="hidden xs:inline">{t('navbar.new_sale', 'New Sale')}</span>
+                    <span className="xs:hidden">{t('common.actions', 'Sale')}</span>
                   </AppLink>
 
                   {/* Pop-out in New Tab using semantic anchor */}
@@ -297,6 +322,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </>
               )}
             </div>
+
+            {/* Global Language Switcher */}
+            <LanguageSwitcher className="shrink-0" />
 
             {/* Multi-Tab & Server Sync Status Badge */}
             {syncInfo && (
@@ -391,7 +419,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       className="w-full text-left px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer flex items-center gap-2"
                     >
                       <Lock className="w-3.5 h-3.5 text-slate-600" />
-                      Lock Register Terminal
+                      {t('navbar.lock_terminal', 'Lock Register Terminal')}
                     </button>
 
                     {effectivePerms.canManageStaff && (
@@ -404,7 +432,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         className="w-full text-left px-2.5 py-1.5 text-xs font-bold text-purple-700 hover:text-purple-900 hover:bg-purple-50 rounded-xl transition-colors cursor-pointer flex items-center gap-2"
                       >
                         <ShieldCheck className="w-3.5 h-3.5 text-purple-600" />
-                        Roles & Security PINs
+                        {t('tab.roles', 'Roles & Security PINs')}
                       </button>
                     )}
 
@@ -418,7 +446,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         className="w-full text-left px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer flex items-center gap-2"
                       >
                         <LogOut className="w-3.5 h-3.5 text-rose-500" />
-                        Log Out & Exit
+                        {t('navbar.logout', 'Log Out & Exit')}
                       </button>
                     )}
                   </div>
@@ -431,7 +459,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 id="header-quick-lock-btn"
-                title="Lock Terminal (Requires PIN to unlock)"
+                title={t('navbar.lock_terminal', 'Lock Terminal (Requires PIN to unlock)')}
                 onClick={onLockTerminal}
                 className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl cursor-pointer transition-colors"
               >

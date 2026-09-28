@@ -42,6 +42,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canManagePayroll: true,
     canManageKpiSettings: true,
     canViewPayroll: true,
+    canSwitchBranch: true,
+    canManageBranches: true,
+    canTransferStock: true,
+    canApproveTransfer: true,
   },
   Manager: {
     canAccessDashboard: true,
@@ -75,6 +79,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canManagePayroll: true,
     canManageKpiSettings: true,
     canViewPayroll: true,
+    canSwitchBranch: true,
+    canManageBranches: true,
+    canTransferStock: true,
+    canApproveTransfer: true,
   },
   Cashier: {
     canAccessDashboard: true,
@@ -108,6 +116,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canManagePayroll: false,
     canManageKpiSettings: false,
     canViewPayroll: false,
+    canSwitchBranch: false,
+    canManageBranches: false,
+    canTransferStock: false,
+    canApproveTransfer: false,
   },
   Inventory_Staff: {
     canAccessDashboard: false,
@@ -141,6 +153,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canManagePayroll: false,
     canManageKpiSettings: false,
     canViewPayroll: false,
+    canSwitchBranch: false,
+    canManageBranches: false,
+    canTransferStock: true,
+    canApproveTransfer: false,
   },
 };
 
@@ -535,6 +551,14 @@ export function isTabAccessibleForUser(
         perms.canManageStaff ||
         user.role === 'Owner' ||
         user.role === 'Manager'
+      );
+    case 'branches':
+      return Boolean(
+        user.role === 'Owner' ||
+        user.role === 'Manager' ||
+        perms.canManageBranches ||
+        perms.canTransferStock ||
+        perms.canSwitchBranch
       );
     default:
       return true;
