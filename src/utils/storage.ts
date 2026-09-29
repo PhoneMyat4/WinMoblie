@@ -123,6 +123,8 @@ export const STORAGE_KEYS = {
   ACTIVE_LOCATION_ID: 'mobileshop_active_location_id_v2',
   BRANCH_INVENTORY: 'mobileshop_branch_inventory_v2',
   STOCK_TRANSFERS: 'mobileshop_stock_transfers_v2',
+  DELETED_LOCATION_IDS: 'mobileshop_deleted_location_ids_v2',
+  DELETED_PRODUCT_IDS: 'mobileshop_deleted_product_ids_v2',
 };
 
 // Cross-tab broadcast channel for instantaneous reactive tab synchronization
@@ -251,6 +253,7 @@ export interface StorageChangeHandler {
   onExpenseUpsert?: (expense: ExpenseRecord) => void;
   onExpenseDelete?: (id: string) => void;
   onProductUpsert?: (product: Product) => void;
+  onProductsBatch?: (products: Product[]) => void;
   onProductDelete?: (id: string) => void;
   onSettingsUpsert?: (settings: ShopSettings) => void;
   onSupplierUpsert?: (supplier: Supplier) => void;
@@ -258,7 +261,9 @@ export interface StorageChangeHandler {
   onStaffUsersBatch?: (users: StaffUser[]) => void;
   onStaffUserDelete?: (id: string) => void;
   onLocationsBatch?: (locations: StoreLocation[]) => void;
+  onLocationDelete?: (id: string) => void;
   onBranchInventoryBatch?: (inventory: BranchInventory[]) => void;
+  onBranchInventoryUpsert?: (entry: BranchInventory) => void;
   onStockTransfersBatch?: (transfers: StockTransfer[]) => void;
 }
 
@@ -380,6 +385,40 @@ export const StorageService = {
     activeStorageSyncHandler = handler;
   },
   getSyncHandler: () => activeStorageSyncHandler,
+
+  // Deletion Tombstones to prevent race conditions or ghost entity resurrects
+  getDeletedLocationIds: (): string[] => {
+    return getItem<string[]>(STORAGE_KEYS.DELETED_LOCATION_IDS, []);
+  },
+  recordDeletedLocationId: (id: string): void => {
+    if (!id) return;
+    const current = StorageService.getDeletedLocationIds();
+    if (!current.includes(id)) {
+      setItem(STORAGE_KEYS.DELETED_LOCATION_IDS, [...current, id], false);
+    }
+  },
+  unrecordDeletedLocationId: (id: string): void => {
+    const current = StorageService.getDeletedLocationIds();
+    if (current.includes(id)) {
+      setItem(STORAGE_KEYS.DELETED_LOCATION_IDS, current.filter(x => x !== id), false);
+    }
+  },
+  getDeletedProductIds: (): string[] => {
+    return getItem<string[]>(STORAGE_KEYS.DELETED_PRODUCT_IDS, []);
+  },
+  recordDeletedProductId: (id: string): void => {
+    if (!id) return;
+    const current = StorageService.getDeletedProductIds();
+    if (!current.includes(id)) {
+      setItem(STORAGE_KEYS.DELETED_PRODUCT_IDS, [...current, id], false);
+    }
+  },
+  unrecordDeletedProductId: (id: string): void => {
+    const current = StorageService.getDeletedProductIds();
+    if (current.includes(id)) {
+      setItem(STORAGE_KEYS.DELETED_PRODUCT_IDS, current.filter(x => x !== id), false);
+    }
+  },
 
   // Settings
   getSettings: (): ShopSettings => {
@@ -615,7 +654,7 @@ export const StorageService = {
       list = deduplicated;
     }
 
-    return list.filter(Boolean).map(p => ({
+    let finalProducts = list.filter(Boolean).map(p => ({
       ...p,
       stock: typeof p.stock === 'number' && !isNaN(p.stock) ? p.stock : 0,
       costPrice: typeof p.costPrice === 'number' && !isNaN(p.costPrice) ? p.costPrice : 0,
@@ -626,20 +665,40 @@ export const StorageService = {
       imeiList: Array.isArray(p.imeiList) ? p.imeiList : [],
       imeiPairs: Array.isArray(p.imeiPairs) ? p.imeiPairs : [],
     }));
+
+    // Filter out any locally deleted product tombstones so remote snapshots or stale cache never resurrect them
+    const deletedProductIds = new Set(StorageService.getDeletedProductIds());
+    if (deletedProductIds.size > 0) {
+      finalProducts = finalProducts.filter(p => !deletedProductIds.has(p.id));
+    }
+
+    return finalProducts;
   },
-  saveProducts: (products: Product[], triggerSync = true) => setItem(STORAGE_KEYS.PRODUCTS, products, triggerSync),
+  saveProducts: (products: Product[], triggerSync = true) => {
+    const deletedProductIds = new Set(StorageService.getDeletedProductIds());
+    const filtered = (products || []).filter(p => p && p.id && !deletedProductIds.has(p.id));
+    setItem(STORAGE_KEYS.PRODUCTS, filtered, triggerSync);
+    if (triggerSync && activeStorageSyncHandler?.onProductsBatch) {
+      activeStorageSyncHandler.onProductsBatch(filtered);
+    }
+  },
   saveProduct: (product: Product, changedByStaff?: string, triggerSync = true) => {
+    StorageService.unrecordDeletedProductId(product.id);
+    const stampedProduct: Product = {
+      ...product,
+      updatedAt: product.updatedAt || new Date().toISOString(),
+    };
     const products = StorageService.getProducts();
-    const index = products.findIndex(p => p.id === product.id);
+    const index = products.findIndex(p => p.id === stampedProduct.id);
     if (index >= 0) {
       const existing = products[index];
 
       // Automatically capture price revisions if sellingPrice or costPrice changed
-      if (existing.sellingPrice !== product.sellingPrice || (product.costPrice !== undefined && existing.costPrice !== product.costPrice)) {
+      if (existing.sellingPrice !== stampedProduct.sellingPrice || (stampedProduct.costPrice !== undefined && existing.costPrice !== stampedProduct.costPrice)) {
         const oldSelling = existing.sellingPrice;
-        const newSelling = product.sellingPrice;
+        const newSelling = stampedProduct.sellingPrice;
         const oldCost = existing.costPrice || 0;
-        const newCost = product.costPrice !== undefined ? product.costPrice : oldCost;
+        const newCost = stampedProduct.costPrice !== undefined ? stampedProduct.costPrice : oldCost;
         const priceDelta = newSelling - oldSelling;
         const pctChange = oldSelling > 0 ? Number(((priceDelta / oldSelling) * 100).toFixed(1)) : 0;
         const oldMargin = oldSelling > 0 ? Number((((oldSelling - oldCost) / oldSelling) * 100).toFixed(1)) : 0;
@@ -647,8 +706,8 @@ export const StorageService = {
 
         const priceRecord: PriceChangeRecord = {
           id: `pc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          productId: product.id,
-          productName: product.name,
+          productId: stampedProduct.id,
+          productName: stampedProduct.name,
           timestamp: new Date().toISOString(),
           oldSellingPrice: oldSelling,
           newSellingPrice: newSelling,
@@ -667,16 +726,16 @@ export const StorageService = {
       }
 
       // Automatically capture stock adjustments if stock was modified directly
-      if (existing.stock !== product.stock) {
-        const diff = product.stock - existing.stock;
+      if (existing.stock !== stampedProduct.stock) {
+        const diff = stampedProduct.stock - existing.stock;
         const adjRecord: StockAdjustment = {
           id: `adj-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          productId: product.id,
-          productName: product.name,
+          productId: stampedProduct.id,
+          productName: stampedProduct.name,
           type: diff > 0 ? 'add' : 'reduce',
           quantityChange: diff,
           previousStock: existing.stock,
-          newStock: product.stock,
+          newStock: stampedProduct.stock,
           reason: 'correction',
           reasonNotes: `Direct inventory level adjustment via product editor (${diff > 0 ? '+' : ''}${diff} units)`,
           timestamp: new Date().toISOString(),
@@ -685,17 +744,17 @@ export const StorageService = {
         StorageService.recordStockAdjustment(adjRecord);
       }
 
-      products[index] = product;
+      products[index] = stampedProduct;
     } else {
-      products.unshift(product);
+      products.unshift(stampedProduct);
     }
     StorageService.saveProducts(products, false);
 
     if (triggerSync && activeStorageSyncHandler?.onProductUpsert) {
-      activeStorageSyncHandler.onProductUpsert(product);
+      activeStorageSyncHandler.onProductUpsert(stampedProduct);
     }
   },
-  bulkSaveProducts: (newProducts: Product[], mergeDuplicates: boolean = true, triggerSync: boolean = false) => {
+  bulkSaveProducts: (newProducts: Product[], mergeDuplicates: boolean = true, triggerSync: boolean = true) => {
     if (!newProducts || !Array.isArray(newProducts) || newProducts.length === 0) return;
     const existing = StorageService.getProducts();
     const currentList = [...existing];
@@ -747,20 +806,37 @@ export const StorageService = {
     });
 
     StorageService.saveProducts(currentList, false);
-    if (triggerSync && activeStorageSyncHandler?.onProductUpsert) {
-      newProducts.forEach(np => activeStorageSyncHandler?.onProductUpsert?.(np));
+    if (triggerSync) {
+      if (activeStorageSyncHandler?.onProductsBatch) {
+        activeStorageSyncHandler.onProductsBatch(currentList);
+      } else if (activeStorageSyncHandler?.onProductUpsert) {
+        newProducts.forEach(np => activeStorageSyncHandler?.onProductUpsert?.(np));
+      }
+
+      // Also ensure branch inventory is created/updated for imported products at the active branch
+      const activeLocId = StorageService.getActiveLocationId();
+      newProducts.forEach(np => {
+        const prodInList = currentList.find(p => p.id === np.id) || np;
+        StorageService.updateBranchStock(prodInList.id, activeLocId, 0, 0, false);
+      });
+      StorageService.saveBranchInventoryList(StorageService.getBranchInventoryList(), true);
     }
   },
   deleteProduct: (id: string, triggerSync = true) => {
+    StorageService.recordDeletedProductId(id);
     const products = StorageService.getProducts().filter(p => p.id !== id);
-    StorageService.saveProducts(products);
+    StorageService.saveProducts(products, false);
     if (triggerSync && activeStorageSyncHandler?.onProductDelete) {
       activeStorageSyncHandler.onProductDelete(id);
     }
+    // Also clean up any localized branch_inventory entries for the deleted product
+    const branchInv = StorageService.getBranchInventoryList().filter(b => b.productId !== id);
+    StorageService.saveBranchInventoryList(branchInv, triggerSync);
   },
   clearAllProducts: (triggerSync = true) => {
     const existing = StorageService.getProducts();
-    StorageService.saveProducts([]);
+    existing.forEach(p => StorageService.recordDeletedProductId(p.id));
+    StorageService.saveProducts([], false);
     if (triggerSync && activeStorageSyncHandler?.onProductDelete) {
       existing.forEach(p => activeStorageSyncHandler?.onProductDelete?.(p.id));
     }
@@ -849,6 +925,7 @@ export const StorageService = {
     const products = StorageService.getProducts();
     const prod = products.find(p => p.id === adjustment.productId);
     if (prod) {
+      const prevStock = prod.stock || 0;
       prod.stock = Math.max(0, adjustment.newStock);
 
       // Maintain serialized device IMEIs if specific IMEIs are affected
@@ -869,7 +946,15 @@ export const StorageService = {
         }
       }
 
-      StorageService.saveProducts(products);
+      StorageService.saveProducts(products, false);
+      if (activeStorageSyncHandler?.onProductUpsert) {
+        activeStorageSyncHandler.onProductUpsert(prod);
+      }
+
+      // Update localized branch inventory for this product at the active branch
+      const activeLocId = StorageService.getActiveLocationId();
+      const deltaStock = adjustment.newStock - prevStock;
+      StorageService.updateBranchStock(prod.id, activeLocId, deltaStock);
     }
   },
 
@@ -964,11 +1049,15 @@ export const StorageService = {
     const adjustments = StorageService.getStockAdjustments();
     const now = new Date().toISOString();
 
+    const changedProducts: Product[] = [];
+    const activeLocId = StorageService.getActiveLocationId();
+
     audit.items.forEach(item => {
       const prod = products.find(p => p.id === item.productId);
       if (!prod) return;
 
       if (item.variance !== 0) {
+        const prevStock = prod.stock || 0;
         // Record adjustment
         const adj: StockAdjustment = {
           id: `adj-aud-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -986,11 +1075,16 @@ export const StorageService = {
         };
         adjustments.unshift(adj);
         prod.stock = item.countedStock;
+        changedProducts.push(prod);
+
+        // Update branch inventory
+        StorageService.updateBranchStock(prod.id, activeLocId, item.countedStock - prevStock);
       }
 
       // Sync IMEI list if scanned
       if (item.scannedImeis && item.scannedImeis.length > 0) {
         prod.imeiList = [...item.scannedImeis];
+        if (!changedProducts.includes(prod)) changedProducts.push(prod);
       }
     });
 
@@ -1002,9 +1096,14 @@ export const StorageService = {
 
     audits[auditIndex] = audit;
 
-    StorageService.saveProducts(products);
+    StorageService.saveProducts(products, false);
     StorageService.saveStockAdjustments(adjustments);
     StorageService.saveStockAudits(audits);
+
+    // Sync all changed products to Firestore
+    if (activeStorageSyncHandler?.onProductUpsert) {
+      changedProducts.forEach(p => activeStorageSyncHandler?.onProductUpsert?.(p));
+    }
   },
 
   // Sales
@@ -1160,11 +1259,12 @@ export const StorageService = {
         stock: Math.max(0, prod.stock - totalQtySold),
         imeiList: updatedImeiList,
         imeiPairs: updatedImeiPairs,
+        updatedAt: new Date().toISOString(),
       };
 
       // 4. Also atomically decrement localized branch_inventory ledger for targetLocId
       try {
-        StorageService.updateBranchStock(prod.id, targetLocId, -totalQtySold, 0, false);
+        StorageService.updateBranchStock(prod.id, targetLocId, -totalQtySold, 0, true);
       } catch (branchStockErr) {
         console.warn('Failed to update local branch stock:', branchStockErr);
       }
@@ -1538,6 +1638,7 @@ export const StorageService = {
       const totalUnits = purchase.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
       const deliveryPerUnit = totalUnits > 0 ? Math.round(totalDeliveryFee / totalUnits) : 0;
 
+      const affectedProducts: Product[] = [];
       purchase.items.forEach(item => {
         // Retain the supplier unit cost and selling price input at Stage 1
         item.landedUnitCost = item.unitCost;
@@ -1634,6 +1735,7 @@ export const StorageService = {
               effectiveDate: new Date().toISOString().split('T')[0],
             });
           }
+          affectedProducts.push(targetProduct);
         } else {
           // Create new distinct variant in inventory with exact supplier unit cost and selling price
           const newProduct: Product = {
@@ -1668,9 +1770,19 @@ export const StorageService = {
           };
           item.productId = newProduct.id;
           products.unshift(newProduct);
+          affectedProducts.push(newProduct);
         }
       });
-      StorageService.saveProducts(products);
+      StorageService.saveProducts(products, false);
+      if (activeStorageSyncHandler?.onProductUpsert) {
+        affectedProducts.forEach(p => activeStorageSyncHandler?.onProductUpsert?.(p));
+      }
+      const receivingLocId = (purchase as any).locationId || StorageService.getActiveLocationId();
+      purchase.items.forEach(item => {
+        if (item.productId && item.quantity > 0) {
+          StorageService.updateBranchStock(item.productId, receivingLocId, item.quantity);
+        }
+      });
 
       // Auto-bind allocated Pre-Orders to arriving inventory (Late-Linking Stage 2)
       const preOrders = StorageService.getPreOrders();
@@ -3145,6 +3257,12 @@ export const StorageService = {
       chatMessages: StorageService.getChatMessages(),
       damageLogs: StorageService.getDamageLogs(),
       auditLogs: StorageService.getAuditLogs(),
+      locations: StorageService.getLocations(),
+      activeLocationId: StorageService.getActiveLocationId(),
+      branchInventory: StorageService.getBranchInventoryList(),
+      stockTransfers: StorageService.getStockTransfers(),
+      deletedLocationIds: StorageService.getDeletedLocationIds(),
+      deletedProductIds: StorageService.getDeletedProductIds(),
       lastUpdated: StorageService.getLastUpdatedTimestamp() || Date.now(),
     };
   },
@@ -3153,6 +3271,13 @@ export const StorageService = {
     if (!data || typeof data !== 'object') return;
     try {
       const isFresh = isFreshDatabase();
+
+      if (data.deletedLocationIds && Array.isArray(data.deletedLocationIds)) {
+        data.deletedLocationIds.forEach((id: string) => StorageService.recordDeletedLocationId(id));
+      }
+      if (data.deletedProductIds && Array.isArray(data.deletedProductIds)) {
+        data.deletedProductIds.forEach((id: string) => StorageService.recordDeletedProductId(id));
+      }
 
       if (data.settings) {
         // If local is currently fresh but incoming settings does not have it, preserve fresh flag
@@ -3163,9 +3288,11 @@ export const StorageService = {
       if (data.rolePermissions) localStorage.setItem(STORAGE_KEYS.ROLE_PERMISSIONS, JSON.stringify(data.rolePermissions));
 
       // If user initialized fresh database and remote data has mock/demo data, do not overwrite empty collections with mock data
-      if (data.products) {
-        if (!isFresh || (Array.isArray(data.products) && (data.products.length === 0 || !data.products[0]?.id?.startsWith('prod-')))) {
-          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(data.products));
+      if (data.products && Array.isArray(data.products)) {
+        const deletedProdIds = new Set(StorageService.getDeletedProductIds());
+        const filteredProds = data.products.filter((p: any) => p && p.id && !deletedProdIds.has(p.id) && !isMockProduct(p));
+        if (!isFresh || (filteredProds.length === 0 || !filteredProds[0]?.id?.startsWith('prod-'))) {
+          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(filteredProds));
         }
       }
       if (data.sales) {
@@ -3201,6 +3328,26 @@ export const StorageService = {
       if (data.chatMessages) localStorage.setItem(STORAGE_KEYS.CHAT_MESSAGES, JSON.stringify(data.chatMessages));
       if (data.damageLogs) localStorage.setItem(STORAGE_KEYS.DAMAGE_LOGS, JSON.stringify(data.damageLogs));
       if (data.auditLogs) localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(data.auditLogs));
+      
+      if (data.locations && Array.isArray(data.locations)) {
+        const deletedLocIds = new Set(StorageService.getDeletedLocationIds());
+        const filteredLocs = data.locations.filter((l: any) => l && l.id && !deletedLocIds.has(l.id));
+        if (filteredLocs.length > 0) {
+          localStorage.setItem(STORAGE_KEYS.LOCATIONS, JSON.stringify(filteredLocs));
+        }
+      }
+      if (data.branchInventory && Array.isArray(data.branchInventory)) {
+        localStorage.setItem(STORAGE_KEYS.BRANCH_INVENTORY, JSON.stringify(data.branchInventory));
+      }
+      if (data.stockTransfers && Array.isArray(data.stockTransfers)) {
+        localStorage.setItem(STORAGE_KEYS.STOCK_TRANSFERS, JSON.stringify(data.stockTransfers));
+      }
+      if (data.activeLocationId && typeof data.activeLocationId === 'string') {
+        const deletedLocIds = new Set(StorageService.getDeletedLocationIds());
+        if (!deletedLocIds.has(data.activeLocationId)) {
+          localStorage.setItem(STORAGE_KEYS.ACTIVE_LOCATION_ID, data.activeLocationId);
+        }
+      }
       
       const ts = remoteTimestamp || data.lastUpdated || Date.now();
       localStorage.setItem(STORAGE_KEYS.LAST_UPDATED, String(ts));
@@ -3705,35 +3852,53 @@ export const StorageService = {
 
   getLocations: (): StoreLocation[] => {
     let locs = getItem<StoreLocation[]>(STORAGE_KEYS.LOCATIONS, []);
+    const deletedIds = new Set(StorageService.getDeletedLocationIds());
     if (!locs || locs.length === 0) {
-      locs = [...DEFAULT_LOCATIONS];
+      locs = DEFAULT_LOCATIONS.filter(l => !deletedIds.has(l.id));
       setItem(STORAGE_KEYS.LOCATIONS, locs, false);
+    } else if (deletedIds.size > 0) {
+      const filtered = locs.filter(l => !deletedIds.has(l.id));
+      if (filtered.length !== locs.length) {
+        locs = filtered;
+        setItem(STORAGE_KEYS.LOCATIONS, locs, false);
+      }
     }
     return locs;
   },
 
   saveLocations: (locations: StoreLocation[], triggerSync = true) => {
-    setItem(STORAGE_KEYS.LOCATIONS, locations, triggerSync);
+    const deletedIds = new Set(StorageService.getDeletedLocationIds());
+    const cleanLocs = (locations || []).filter(l => l && l.id && !deletedIds.has(l.id));
+    setItem(STORAGE_KEYS.LOCATIONS, cleanLocs, triggerSync);
     if (triggerSync && activeStorageSyncHandler?.onLocationsBatch) {
-      activeStorageSyncHandler.onLocationsBatch(locations);
+      activeStorageSyncHandler.onLocationsBatch(cleanLocs);
     }
   },
 
   saveLocation: (location: StoreLocation, triggerSync = true): StoreLocation[] => {
+    StorageService.unrecordDeletedLocationId(location.id);
     const locs = StorageService.getLocations();
     const idx = locs.findIndex(l => l.id === location.id);
     if (idx >= 0) {
       locs[idx] = { ...locs[idx], ...location, updatedAt: new Date().toISOString() };
     } else {
-      locs.push({ ...location, createdAt: location.createdAt || new Date().toISOString() });
+      locs.push({ ...location, createdAt: location.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() });
     }
     StorageService.saveLocations(locs, triggerSync);
     return locs;
   },
 
   deleteLocation: (id: string, triggerSync = true): StoreLocation[] => {
+    StorageService.recordDeletedLocationId(id);
     const locs = StorageService.getLocations().filter(l => l.id !== id);
     StorageService.saveLocations(locs, triggerSync);
+    if (triggerSync && activeStorageSyncHandler?.onLocationDelete) {
+      activeStorageSyncHandler.onLocationDelete(id);
+    }
+    // Also remove any localized branch_inventory entries for the deleted location
+    const branchInv = StorageService.getBranchInventoryList().filter(b => b.locationId !== id);
+    StorageService.saveBranchInventoryList(branchInv, triggerSync);
+
     // If active location was deleted, fallback to default
     if (StorageService.getActiveLocationId() === id) {
       const defaultLoc = locs.find(l => l.isDefault) || locs[0];

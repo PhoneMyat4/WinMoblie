@@ -150,7 +150,7 @@ class SyncManager {
         this.setStatus('synced');
 
         // If server had newer data from another tab, apply it
-        if (result.hasNewerServerData && result.data) {
+        if (result.hasNewerServerData && result.data && result.lastUpdatingTabId && result.lastUpdatingTabId !== this.tabId) {
           StorageService.applyAllData(result.data, result.serverTimestamp);
         }
         return true;

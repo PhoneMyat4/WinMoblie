@@ -175,8 +175,8 @@ async function startServer() {
       }
 
       if (data && typeof data === 'object') {
-        // If server has no state yet or client timestamp is newer or equal
-        if (!serverStateSnapshot || incomingTimestamp >= lastServerStateTimestamp) {
+        // If server has no state yet, or client timestamp is within reasonable clock drift (3s), or same tab is updating
+        if (!serverStateSnapshot || incomingTimestamp >= (lastServerStateTimestamp - 3000) || (clientTabId && clientTabId === lastUpdatingTabId)) {
           serverStateSnapshot = { ...serverStateSnapshot, ...data };
           lastServerStateTimestamp = Math.max(incomingTimestamp, Date.now());
           lastUpdatingTabId = clientTabId || 'unknown';

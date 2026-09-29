@@ -428,6 +428,8 @@ export interface Product {
   imageUrl?: string;
   lastRestockedAt?: string;
   createdAt?: string;
+  updatedAt?: string;
+  syncedAt?: string;
 }
 
 export interface CartItem {

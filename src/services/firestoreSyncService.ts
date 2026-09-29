@@ -9,6 +9,7 @@ import {
   runTransaction,
   onSnapshot, 
   query, 
+  where,
   limit, 
   Unsubscribe 
 } from 'firebase/firestore';
@@ -76,6 +77,7 @@ export class FirestoreSyncService {
   private preAuthUnsubscribers: Unsubscribe[] = [];
   private isProcessingRemoteSnapshot: boolean = false;
   private isSyncPaused: boolean = false;
+  private productsSyncTimeout: any = null;
   private locationsSyncTimeout: any = null;
   private branchInventorySyncTimeout: any = null;
   private stockTransfersSyncTimeout: any = null;
@@ -199,6 +201,14 @@ export class FirestoreSyncService {
           this.syncProduct(product);
         }
       },
+      onProductsBatch: (products) => {
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          if (this.productsSyncTimeout) clearTimeout(this.productsSyncTimeout);
+          this.productsSyncTimeout = setTimeout(() => {
+            this.syncProducts(products);
+          }, 1200);
+        }
+      },
       onProductDelete: (id) => {
         if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
           this.deleteProduct(id);
@@ -238,6 +248,11 @@ export class FirestoreSyncService {
           this.locationsSyncTimeout = setTimeout(() => {
             this.syncLocations(locations);
           }, 1500);
+        }
+      },
+      onLocationDelete: (id) => {
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.deleteLocation(id);
         }
       },
       onBranchInventoryBatch: (inventory) => {
@@ -436,10 +451,11 @@ export class FirestoreSyncService {
       }, (err) => console.warn('[FirestoreSync] Settings listener:', err.message));
       this.unsubscribers.push(unsubSettings);
 
-      // 2. Products Listener - strictly replaces local state and handles 'removed' changes
+      // 2. Products Listener - handles 'removed' changes, expunges locally deleted tombstones, and preserves recent local sales
       const unsubProducts = onSnapshot(collection(db, 'products'), (snap) => {
         this.isProcessingRemoteSnapshot = true;
         try {
+          const deletedProductIds = new Set(StorageService.getDeletedProductIds());
           const removedIds = new Set<string>();
           snap.docChanges().forEach(change => {
             if (change.type === 'removed') {
@@ -458,18 +474,44 @@ export class FirestoreSyncService {
           const remoteProducts: Product[] = [];
           snap.forEach(d => {
             const data = d.data() as Product;
+            const prodId = data?.id || d.id;
             if (data && isMockProduct(data)) {
+              deleteDoc(doc(db, 'products', d.id)).catch(() => {});
+            } else if (deletedProductIds.has(prodId) || deletedProductIds.has(d.id)) {
+              // Permanently expunge ghost product from Firestore if it was locally deleted
               deleteDoc(doc(db, 'products', d.id)).catch(() => {});
             } else if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
               remoteProducts.push({
                 ...data,
-                id: data.id || d.id,
+                id: prodId,
               });
             }
           });
 
-          // Strictly replace the local state with authoritative Firestore products list
-          StorageService.saveProducts(remoteProducts, false);
+          // Smart reconciliation: don't overwrite fresher local stock updates if local has newer timestamp
+          const currentLocal = StorageService.getProducts();
+          const localMap = new Map<string, Product>();
+          currentLocal.forEach(p => localMap.set(p.id, p));
+
+          const mergedProducts: Product[] = remoteProducts.map(remoteProd => {
+            const localProd = localMap.get(remoteProd.id);
+            if (!localProd) return remoteProd;
+
+            // If local was updated more recently (e.g. within seconds after sale), keep local stock and push to Firestore
+            const localTime = localProd.updatedAt ? new Date(localProd.updatedAt).getTime() : 0;
+            const remoteTime = (remoteProd as any).updatedAt || (remoteProd as any).syncedAt
+              ? new Date((remoteProd as any).updatedAt || (remoteProd as any).syncedAt).getTime()
+              : 0;
+
+            if (localTime > 0 && localTime > remoteTime + 1000) {
+              // Local is fresher; queue a sync to persist newer local stock to Firestore
+              this.syncProduct(localProd).catch(() => {});
+              return localProd;
+            }
+            return remoteProd;
+          });
+
+          StorageService.saveProducts(mergedProducts, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Products listener error:', err?.message || err);
@@ -1096,13 +1138,29 @@ export class FirestoreSyncService {
       const unsubLocations = onSnapshot(collection(db, 'locations'), (snap) => {
         this.isProcessingRemoteSnapshot = true;
         try {
+          const deletedLocIds = new Set(StorageService.getDeletedLocationIds());
+          const removedIds = new Set<string>();
+          snap.docChanges().forEach(change => {
+            if (change.type === 'removed') {
+              removedIds.add(change.doc.id);
+            }
+          });
+
           if (!snap.empty) {
             const remoteLocs: StoreLocation[] = [];
             snap.forEach(d => {
               const data = d.data() as StoreLocation;
-              if (data) remoteLocs.push({ ...data, id: data.id || d.id });
+              const locId = data?.id || d.id;
+              if (deletedLocIds.has(locId) || deletedLocIds.has(d.id)) {
+                // Expunge ghost location from Firestore if it was deleted locally
+                deleteDoc(doc(db, 'locations', d.id)).catch(() => {});
+              } else if (data && !removedIds.has(d.id) && !removedIds.has(locId)) {
+                remoteLocs.push({ ...data, id: locId });
+              }
             });
-            StorageService.saveLocations(remoteLocs, false);
+            if (remoteLocs.length > 0) {
+              StorageService.saveLocations(remoteLocs, false);
+            }
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
           }
         } catch (err: any) {
@@ -1635,7 +1693,29 @@ export class FirestoreSyncService {
 
   // Multi-Branch Collection Pushes
   public async syncLocations(locations: StoreLocation[]): Promise<void> {
-    await this.batchWriteCollection('locations', locations, l => l.id);
+    const deletedIds = new Set(StorageService.getDeletedLocationIds());
+    const valid = (locations || []).filter(l => l && l.id && !deletedIds.has(l.id));
+    await this.batchWriteCollection('locations', valid, l => l.id);
+
+    // Also sweep Firestore to purge any lingering deleted locations
+    try {
+      if (deletedIds.size > 0 && FirebaseAuthService.isAuthenticated()) {
+        const snap = await getDocs(collection(db, 'locations'));
+        const toDelete: any[] = [];
+        snap.forEach(d => {
+          if (deletedIds.has(d.id)) {
+            toDelete.push(d.ref);
+          }
+        });
+        if (toDelete.length > 0) {
+          const batch = writeBatch(db);
+          toDelete.forEach(ref => batch.delete(ref));
+          await batch.commit();
+        }
+      }
+    } catch (e) {
+      console.warn('[FirestoreSync] Failed to purge deleted locations from Firestore:', e);
+    }
   }
 
   public async syncLocation(location: StoreLocation): Promise<void> {
@@ -1648,6 +1728,30 @@ export class FirestoreSyncService {
       }), { merge: true });
     } catch (err: any) {
       console.warn('[FirestoreSync] Error syncing location:', err?.message || err);
+    }
+  }
+
+  public async deleteLocation(id: string): Promise<void> {
+    if (!id) return;
+    try {
+      const docRef = doc(db, 'locations', id);
+      await deleteDoc(docRef);
+
+      // Also clean up any localized branch_inventory in Firestore for this location
+      try {
+        const invSnap = await getDocs(query(collection(db, 'branch_inventory'), where('locationId', '==', id)));
+        if (!invSnap.empty) {
+          const batch = writeBatch(db);
+          invSnap.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch (invErr) {
+        console.warn('[FirestoreSync] Clean branch_inventory on location delete:', invErr);
+      }
+
+      this.updateStatus({ lastSyncedAt: new Date(), error: null });
+    } catch (err: any) {
+      console.warn('[FirestoreSync] Error deleting location from Firestore:', err?.message || err);
     }
   }
 
@@ -1826,7 +1930,29 @@ export class FirestoreSyncService {
   }
 
   public async syncProducts(products: Product[]): Promise<void> {
-    await this.batchWriteCollection('products', products, p => p.id);
+    const deletedIds = new Set(StorageService.getDeletedProductIds());
+    const clean = (products || []).filter(p => p && p.id && !isMockProduct(p) && !deletedIds.has(p.id));
+    await this.batchWriteCollection('products', clean, p => p.id);
+
+    // Also sweep Firestore to purge any lingering deleted products
+    try {
+      if (deletedIds.size > 0 && FirebaseAuthService.isAuthenticated()) {
+        const snap = await getDocs(collection(db, 'products'));
+        const toDelete: any[] = [];
+        snap.forEach(d => {
+          if (deletedIds.has(d.id)) {
+            toDelete.push(d.ref);
+          }
+        });
+        if (toDelete.length > 0) {
+          const batch = writeBatch(db);
+          toDelete.forEach(ref => batch.delete(ref));
+          await batch.commit();
+        }
+      }
+    } catch (e) {
+      console.warn('[FirestoreSync] Failed to purge deleted products from Firestore:', e);
+    }
   }
 
   public async deleteProduct(id: string): Promise<void> {
@@ -2443,6 +2569,13 @@ export class FirestoreSyncService {
       const auditLogs = StorageService.getAuditLogs();
       await this.batchWriteCollection('auditLogs', auditLogs, al => al.id);
 
+      const locations = StorageService.getLocations();
+      await this.syncLocations(locations);
+      const branchInventory = StorageService.getBranchInventoryList();
+      await this.syncBranchInventoryList(branchInventory);
+      const stockTransfers = StorageService.getStockTransfers();
+      await this.syncStockTransfers(stockTransfers);
+
       const totalCount = products.length + sales.length + creditSales.length + purchases.length +
         customers.length + expenses.length + suppliers.length + staffUsers.length + preOrders.length +
         stockAdjustments.length + priceChanges.length + stockAudits.length + damageLogs.length +
@@ -2738,6 +2871,16 @@ export class FirestoreSyncService {
       await pullCollection<PersonalDebtIOU>('personalDebts', items => StorageService.savePersonalDebts(items, false));
       await pullCollection<FacebookAdPostRecord>('facebookPosts', items => StorageService.saveFacebookPosts(items, false));
       await pullCollection<AuditLogEntry>('auditLogs', items => StorageService.saveAuditLogs(items, false));
+
+      await pullCollection<StoreLocation>('locations', items => {
+        const deletedIds = new Set(StorageService.getDeletedLocationIds());
+        const valid = (items || []).filter(l => l && l.id && !deletedIds.has(l.id));
+        if (valid.length > 0) {
+          StorageService.saveLocations(valid, false);
+        }
+      });
+      await pullCollection<BranchInventory>('branch_inventory', items => StorageService.saveBranchInventoryList(items, false));
+      await pullCollection<StockTransfer>('stock_transfers', items => StorageService.saveStockTransfers(items, false));
 
       this.isProcessingRemoteSnapshot = false;
 
