@@ -1140,16 +1140,18 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
           />
 
           {/* Category, Subcategory & Condition */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Category *
-              </label>
+              <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                <label className="block text-xs font-bold text-slate-700 truncate">
+                  Category *
+                </label>
+              </div>
               <select
                 id="new-product-category-select"
                 value={category}
                 onChange={(e) => handleCategoryChange(e.target.value as ProductCategory)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                className="h-9 w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500 cursor-pointer"
               >
                 {CANONICAL_CATEGORIES.map((cat) => (
                   <option key={cat.id} value={cat.id}>
@@ -1160,12 +1162,12 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs font-bold text-slate-700">
+              <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                <label className="block text-xs font-bold text-slate-700 truncate min-w-0">
                   Subcategory
                 </label>
                 {availableSubCategories.length > 0 && (
-                  <span className="text-[10px] text-slate-400 font-medium">({availableSubCategories.length} suggestions)</span>
+                  <span className="text-[10px] text-slate-400 font-medium shrink-0">({availableSubCategories.length} suggestions)</span>
                 )}
               </div>
               <div className="relative">
@@ -1177,7 +1179,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                   placeholder="Type or select subcategory..."
                   value={subCategory}
                   onChange={(e) => handleSubCategoryChange(e.target.value)}
-                  className="w-full pl-3 pr-8 py-2 border border-slate-300 rounded-lg text-xs text-slate-900 font-medium bg-white focus:ring-2 focus:ring-indigo-500"
+                  className="h-9 w-full pl-3 pr-8 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 font-medium bg-white focus:ring-2 focus:ring-indigo-500"
                 />
                 {subCategory && (
                   <button
@@ -1199,12 +1201,14 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
             {isPhone ? (
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Condition Grade</label>
+                <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                  <label className="block text-xs font-bold text-slate-700 truncate">Condition Grade</label>
+                </div>
                 <select
                   id="new-product-condition-select"
                   value={condition}
                   onChange={(e) => setCondition(e.target.value as DeviceCondition)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 bg-white cursor-pointer"
+                  className="h-9 w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 bg-white cursor-pointer"
                 >
                   <option value="brand_new">Brand New (Box Pack)</option>
                   <option value="used_grade_a_plus">Used - Grade A+ (Like New)</option>
@@ -1215,12 +1219,15 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
               </div>
             ) : (
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-bold text-slate-700">
-                    {subCategory ? `${subCategory} Variant (Child Category)` : 'Variant / Child Category'}
+                <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                  <label 
+                    className="block text-xs font-bold text-slate-700 truncate min-w-0 flex-1"
+                    title={subCategory ? `${subCategory} Variant (Child Category)` : 'Variant / Child Category'}
+                  >
+                    {subCategory ? `${subCategory} Variant` : 'Variant / Child Category'}
                   </label>
                   {availableChildCategories.length > 0 && (
-                    <span className="text-[10px] text-slate-400 font-medium">({availableChildCategories.length} in inventory)</span>
+                    <span className="text-[10px] text-slate-400 font-medium shrink-0">({availableChildCategories.length} in inventory)</span>
                   )}
                 </div>
                 <div className="relative">
@@ -1229,10 +1236,10 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                     type="text"
                     autoComplete="off"
                     list="new-product-child-category-datalist"
-                    placeholder={subCategory ? `Type ${subCategory} variant (e.g. 65W GaN / 2m Braided / 3L)...` : 'Type variant (e.g. 65W GaN / 2m Braided / Matte Privacy)...'}
+                    placeholder={subCategory ? `Type ${subCategory} variant...` : 'Type variant (e.g. 65W GaN / 2m Braided / Matte Privacy)...'}
                     value={childCategory}
                     onChange={(e) => setChildCategory(e.target.value)}
-                    className="w-full pl-3 pr-8 py-2 border border-slate-300 rounded-lg text-xs text-slate-900 font-medium bg-white focus:ring-2 focus:ring-indigo-500"
+                    className="h-9 w-full pl-3 pr-8 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 font-medium bg-white focus:ring-2 focus:ring-indigo-500"
                   />
                   {childCategory && (
                     <button

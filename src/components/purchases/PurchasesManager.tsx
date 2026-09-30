@@ -2087,13 +2087,15 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                 </div>
 
                 {/* Category, Subcategory & Condition Grade */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start">
                   <div>
-                    <label className="block font-bold text-slate-800 mb-1">Category *</label>
+                    <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                      <label className="block font-bold text-slate-800 text-xs truncate">Category *</label>
+                    </div>
                     <select
                       value={itemCategory}
                       onChange={(e) => handleCategoryChange(e.target.value as ProductCategory)}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                      className="h-9 w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                     >
                       {CANONICAL_CATEGORIES.map((cat) => (
                         <option key={cat.id} value={cat.id}>
@@ -2104,10 +2106,10 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                   </div>
 
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block font-bold text-slate-800">Subcategory</label>
+                    <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                      <label className="block font-bold text-slate-800 text-xs truncate min-w-0">Subcategory</label>
                       {availableSubCategories.length > 0 && (
-                        <span className="text-[10px] text-slate-400 font-medium">({availableSubCategories.length} suggestions)</span>
+                        <span className="text-[10px] text-slate-400 font-medium shrink-0">({availableSubCategories.length})</span>
                       )}
                     </div>
                     <div className="relative">
@@ -2118,7 +2120,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                         placeholder="Type or select subcategory..."
                         value={itemSubCategory}
                         onChange={(e) => handleSubCategoryChange(e.target.value)}
-                        className="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500"
+                        className="h-9 w-full pl-3 pr-8 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500"
                       />
                       {itemSubCategory && (
                         <button
@@ -2140,11 +2142,13 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
                   {isPhone ? (
                     <div>
-                      <label className="block font-bold text-slate-800 mb-1">Condition Grade</label>
+                      <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                        <label className="block font-bold text-slate-800 text-xs truncate">Condition Grade</label>
+                      </div>
                       <select
                         value={itemCondition}
                         onChange={(e) => setItemCondition(e.target.value as DeviceCondition)}
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 cursor-pointer"
+                        className="h-9 w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 cursor-pointer"
                       >
                         {CONDITIONS.map(c => (
                           <option key={c.value} value={c.value}>{c.label} ({c.desc})</option>
@@ -2153,12 +2157,15 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                     </div>
                   ) : (
                     <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="block font-bold text-slate-800">
-                          {itemSubCategory ? `${itemSubCategory} Variant (Child Category)` : 'Variant / Child Category'}
+                      <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                        <label 
+                          className="block font-bold text-slate-800 text-xs truncate min-w-0 flex-1"
+                          title={itemSubCategory ? `${itemSubCategory} Variant (Child Category)` : 'Variant / Child Category'}
+                        >
+                          {itemSubCategory ? `${itemSubCategory} Variant` : 'Variant / Child Category'}
                         </label>
                         {availableChildCategories.length > 0 && (
-                          <span className="text-[10px] text-slate-400 font-medium">({availableChildCategories.length} in catalog)</span>
+                          <span className="text-[10px] text-slate-400 font-medium shrink-0">({availableChildCategories.length})</span>
                         )}
                       </div>
                       <div className="relative">
@@ -2166,10 +2173,10 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                           type="text"
                           autoComplete="off"
                           list="po-childcategory-list"
-                          placeholder={itemSubCategory ? `Type ${itemSubCategory} variant (e.g. 65W GaN / 2m / 3L)...` : 'Type variant / child category...'}
+                          placeholder={itemSubCategory ? `Type ${itemSubCategory} variant...` : 'Type variant / child category...'}
                           value={itemChildCategory}
                           onChange={(e) => setItemChildCategory(e.target.value)}
-                          className="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500"
+                          className="h-9 w-full pl-3 pr-8 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500"
                         />
                         {itemChildCategory && (
                           <button
