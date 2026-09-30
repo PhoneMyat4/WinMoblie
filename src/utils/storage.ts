@@ -1727,6 +1727,10 @@ export const StorageService = {
           }
           targetProduct.lastRestockedAt = purchase.date;
           if (item.subCategory) targetProduct.subCategory = item.subCategory;
+          if (item.childCategory || item.variant) {
+            targetProduct.childCategory = item.childCategory || item.variant;
+            targetProduct.variant = item.variant || item.childCategory;
+          }
           if (item.condition) targetProduct.condition = item.condition;
           if (item.ram && (!targetProduct.ram || targetProduct.ram === '-')) targetProduct.ram = item.ram;
           if (item.rom && !targetProduct.rom) targetProduct.rom = item.rom;
@@ -1788,6 +1792,8 @@ export const StorageService = {
             model: item.name,
             category: item.category,
             subCategory: item.subCategory,
+            childCategory: item.childCategory || item.variant,
+            variant: item.variant || item.childCategory,
             condition: item.condition || 'brand_new',
             sku: item.sku || `SKU-${Date.now().toString().slice(-6)}`,
             barcode: item.barcode || `${Math.floor(100000000000 + Math.random() * 900000000000)}`,

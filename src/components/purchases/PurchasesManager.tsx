@@ -204,6 +204,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   const [itemModel, setItemModel] = useState<string>('');
   const [itemCategory, setItemCategory] = useState<ProductCategory>('brand_new_phones');
   const [itemSubCategory, setItemSubCategory] = useState<string>('');
+  const [itemChildCategory, setItemChildCategory] = useState<string>('');
   const [itemCondition, setItemCondition] = useState<DeviceCondition>('brand_new');
   const [itemRam, setItemRam] = useState<string>('-');
   const [itemRom, setItemRom] = useState<string>('128GB');
@@ -300,6 +301,22 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
     return Array.from(subSet).sort((a, b) => a.localeCompare(b));
   }, [itemCategory, products]);
+
+  // Available Child Categories / Variants strictly for non-phone items
+  const availableChildCategories = useMemo(() => {
+    const childSet = new Set<string>();
+    products.forEach((p) => {
+      if (canonicalCategory(p.category) === canonicalCategory(itemCategory)) {
+        if (!itemSubCategory || !p.subCategory || p.subCategory.trim().toLowerCase() === itemSubCategory.trim().toLowerCase()) {
+          const val = p.childCategory || p.variant;
+          if (val && val.trim()) {
+            childSet.add(val.trim());
+          }
+        }
+      }
+    });
+    return Array.from(childSet).sort((a, b) => a.localeCompare(b));
+  }, [itemCategory, itemSubCategory, products]);
 
   // Available Brands strictly isolated to current category and subcategory from registered products
   const availableBrands = useMemo(() => {
@@ -427,6 +444,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   const handleCategoryChange = (newCat: ProductCategory) => {
     setItemCategory(newCat);
     setItemSubCategory('');
+    setItemChildCategory('');
     setItemBrand('');
     setItemModel('');
     setItemName('');
@@ -501,11 +519,13 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     brand: itemBrand,
     category: itemCategory,
     subCategory: itemSubCategory,
-    condition: itemCondition,
+    childCategory: !isPhone && itemChildCategory.trim() ? itemChildCategory.trim() : undefined,
+    variant: !isPhone && itemChildCategory.trim() ? itemChildCategory.trim() : undefined,
+    condition: isPhone ? itemCondition : 'brand_new',
     ram: isPhone ? itemRam : undefined,
     rom: isPhone ? itemRom : undefined,
     color: isPhone ? itemColor : undefined,
-  }), [itemName, itemBrand, itemCategory, itemSubCategory, itemCondition, itemRam, itemRom, itemColor, isPhone]);
+  }), [itemName, itemBrand, itemCategory, itemSubCategory, itemChildCategory, itemCondition, itemRam, itemRom, itemColor, isPhone]);
 
   const matchedExactVariant = useMemo(() => {
     if (selectedExistingProdId) {
@@ -676,6 +696,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       if (!itemBrand && exactMatch.brand) setItemBrand(exactMatch.brand);
       setItemCategory(canonicalCategory(exactMatch.category));
       if (exactMatch.subCategory) setItemSubCategory(exactMatch.subCategory);
+      if (exactMatch.childCategory || exactMatch.variant) setItemChildCategory(exactMatch.childCategory || exactMatch.variant || '');
       if (exactMatch.condition) setItemCondition(exactMatch.condition);
       if (exactMatch.ram) setItemRam(exactMatch.ram);
       if (exactMatch.rom || exactMatch.storage) setItemRom(exactMatch.rom || exactMatch.storage || '128GB');
@@ -698,6 +719,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     setItemBrand(v.brand || '');
     setItemCategory(canonicalCategory(v.category));
     setItemSubCategory(v.subCategory || '');
+    setItemChildCategory(v.childCategory || v.variant || '');
     setItemCondition(v.condition || 'brand_new');
     if (v.ram) setItemRam(v.ram);
     if (v.rom || v.storage) setItemRom(v.rom || v.storage || '128GB');
@@ -722,6 +744,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       setItemBrand(prod.brand);
       setItemCategory(canonicalCategory(prod.category));
       setItemSubCategory(prod.subCategory || '');
+      setItemChildCategory(prod.childCategory || prod.variant || '');
       setItemCondition(prod.condition || 'brand_new');
       setItemRam(prod.ram || '-');
       setItemRom(prod.rom || prod.storage || '128GB');
@@ -787,6 +810,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     setItemModel('');
     setItemCategory('brand_new_phones');
     setItemSubCategory('');
+    setItemChildCategory('');
     setItemCondition('brand_new');
     setItemRam('-');
     setItemRom('128GB');
@@ -841,7 +865,9 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       brand: itemBrand.trim() || 'General',
       category: itemCategory,
       subCategory: itemSubCategory || existingMatch?.subCategory || undefined,
-      condition: itemCondition || existingMatch?.condition || 'brand_new',
+      childCategory: !isPhone && itemChildCategory.trim() ? itemChildCategory.trim() : (existingMatch?.childCategory || undefined),
+      variant: !isPhone && itemChildCategory.trim() ? itemChildCategory.trim() : (existingMatch?.variant || undefined),
+      condition: isPhone ? (itemCondition || existingMatch?.condition || 'brand_new') : 'brand_new',
       ram: isPhone && itemRam !== '-' ? itemRam : (existingMatch?.ram || undefined),
       rom: isPhone ? itemRom : (existingMatch?.rom || existingMatch?.storage || undefined),
       storage: isPhone ? itemRom : (existingMatch?.storage || existingMatch?.rom || undefined),
@@ -2112,18 +2138,57 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block font-bold text-slate-800 mb-1">Condition Grade</label>
-                    <select
-                      value={itemCondition}
-                      onChange={(e) => setItemCondition(e.target.value as DeviceCondition)}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 cursor-pointer"
-                    >
-                      {CONDITIONS.map(c => (
-                        <option key={c.value} value={c.value}>{c.label} ({c.desc})</option>
-                      ))}
-                    </select>
-                  </div>
+                  {isPhone ? (
+                    <div>
+                      <label className="block font-bold text-slate-800 mb-1">Condition Grade</label>
+                      <select
+                        value={itemCondition}
+                        onChange={(e) => setItemCondition(e.target.value as DeviceCondition)}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 cursor-pointer"
+                      >
+                        {CONDITIONS.map(c => (
+                          <option key={c.value} value={c.value}>{c.label} ({c.desc})</option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block font-bold text-slate-800">
+                          {itemSubCategory ? `${itemSubCategory} Variant (Child Category)` : 'Variant / Child Category'}
+                        </label>
+                        {availableChildCategories.length > 0 && (
+                          <span className="text-[10px] text-slate-400 font-medium">({availableChildCategories.length} in catalog)</span>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          autoComplete="off"
+                          list="po-childcategory-list"
+                          placeholder={itemSubCategory ? `Type ${itemSubCategory} variant (e.g. 65W GaN / 2m / 3L)...` : 'Type variant / child category...'}
+                          value={itemChildCategory}
+                          onChange={(e) => setItemChildCategory(e.target.value)}
+                          className="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500"
+                        />
+                        {itemChildCategory && (
+                          <button
+                            type="button"
+                            onClick={() => setItemChildCategory('')}
+                            title="Clear Variant"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <datalist id="po-childcategory-list">
+                          {availableChildCategories.map((c, idx) => (
+                            <option key={idx} value={c} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Brand & Product Name Inputs */}
@@ -2826,6 +2891,15 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                                 </div>
                                 <div className="text-[10px] text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
                                   <span>Brand: <strong>{item.brand}</strong></span>
+                                  {(item.childCategory || item.variant) && (
+                                    <span className="font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1 py-0.2 rounded text-[10px]">
+                                      Variant: {item.childCategory || item.variant}
+                                    </span>
+                                  )}
+                                  {item.subCategory && <span>• Sub: {item.subCategory}</span>}
+                                  {isPhoneCategory(item.category) && item.condition && item.condition !== 'brand_new' && (
+                                    <span className="capitalize text-amber-700 font-medium">• {item.condition.replace(/_/g, ' ')}</span>
+                                  )}
                                   {item.rom && <span>• {item.ram && item.ram !== '-' ? `${item.ram}/` : ''}{item.rom}</span>}
                                   {item.color && <span>• {item.color}</span>}
                                   {item.imeiPairs && item.imeiPairs.length > 0 && (

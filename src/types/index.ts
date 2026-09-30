@@ -424,6 +424,8 @@ export interface Product {
   model: string;
   category: ProductCategory;
   subCategory?: string;
+  childCategory?: string;
+  variant?: string;
   condition: DeviceCondition;
   sku: string;
   barcode: string;
@@ -649,6 +651,8 @@ export interface PurchaseItem {
   model?: string;
   category: ProductCategory;
   subCategory?: string;
+  childCategory?: string;
+  variant?: string;
   condition?: DeviceCondition;
   quantity: number;
   unitCost: number;

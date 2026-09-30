@@ -7,6 +7,8 @@ export interface VariantSpecifications {
   brand?: string;
   category?: ProductCategory;
   subCategory?: string;
+  childCategory?: string;
+  variant?: string;
   condition?: DeviceCondition;
   ram?: string;
   rom?: string;
@@ -87,8 +89,9 @@ export const getProductVariantKey = (item: VariantSpecifications): string => {
   }
 
   const subCat = normalizeVariantText(item.subCategory);
+  const childCat = normalizeVariantText(item.childCategory || item.variant);
   const color = extractNormalizedColor(item.color);
-  return `item|brand:${brand}|name:${name}|cat:${category}|sub:${subCat}|cond:${condition}|color:${color}`;
+  return `item|brand:${brand}|name:${name}|cat:${category}|sub:${subCat}|child:${childCat}|cond:${condition}|color:${color}`;
 };
 
 /**

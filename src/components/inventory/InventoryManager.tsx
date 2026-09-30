@@ -1764,9 +1764,15 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                       {visibleColumns.category_condition !== false && (
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-1 flex-wrap">
-                            <span className={`inline-block px-2 py-0.5 text-[10px] font-bold rounded border ${cond.badgeClass}`}>
-                              {cond.label}
-                            </span>
+                            {isPhone ? (
+                              <span className={`inline-block px-2 py-0.5 text-[10px] font-bold rounded border ${cond.badgeClass}`}>
+                                {cond.label}
+                              </span>
+                            ) : (product.childCategory || product.variant) ? (
+                              <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded border bg-indigo-50 text-indigo-700 border-indigo-200">
+                                Variant: {product.childCategory || product.variant}
+                              </span>
+                            ) : null}
                             {product.color && product.color.trim() && (
                               <button
                                 type="button"

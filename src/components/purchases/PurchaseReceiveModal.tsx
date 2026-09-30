@@ -191,6 +191,8 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
         model: targetItem.model || existing.model || targetItem.name,
         category: canonicalCategory(targetItem.category || existing.category),
         subCategory: targetItem.subCategory !== undefined ? targetItem.subCategory : existing.subCategory,
+        childCategory: targetItem.childCategory || targetItem.variant || existing.childCategory || existing.variant,
+        variant: targetItem.variant || targetItem.childCategory || existing.variant || existing.childCategory,
         condition: targetItem.condition || existing.condition || 'brand_new',
         ram: targetItem.ram !== undefined ? targetItem.ram : existing.ram,
         rom: targetItem.rom !== undefined ? targetItem.rom : existing.rom,
@@ -220,6 +222,8 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
       model: targetItem.model || targetItem.name,
       category: canonicalCategory(targetItem.category || 'brand_new_phones'),
       subCategory: targetItem.subCategory || '',
+      childCategory: targetItem.childCategory || targetItem.variant || undefined,
+      variant: targetItem.variant || targetItem.childCategory || undefined,
       condition: targetItem.condition || 'brand_new',
       sku: targetItem.sku || '',
       barcode: targetItem.barcode || '',
@@ -739,7 +743,12 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                                 {item.warrantyMonths}M Warranty
                               </span>
                             )}
-                            {item.condition && item.condition !== 'brand_new' && (
+                            {(item.childCategory || item.variant) && (
+                              <span className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded text-[10px] font-semibold">
+                                Variant: {item.childCategory || item.variant}
+                              </span>
+                            )}
+                            {isPhoneCategory(item.category) && item.condition && item.condition !== 'brand_new' && (
                               <span className="px-1.5 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 rounded text-[10px] font-semibold capitalize">
                                 {item.condition.replace(/_/g, ' ')}
                               </span>
@@ -872,9 +881,9 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                             <Package className="w-4 h-4 text-emerald-600 shrink-0" />
                             <span>
                               Catalog Specifications: <strong className="text-slate-900">{item.name}</strong> ({item.brand})
+                              {(item.childCategory || item.variant) ? ` • Variant: ${item.childCategory || item.variant}` : (item.condition && isPhoneCategory(item.category) ? ` • ${item.condition.replace(/_/g, ' ')}` : '')}
                               {item.warrantyMonths !== undefined ? ` • ${item.warrantyMonths}M Warranty` : ''}
                               {item.barcode ? ` • Barcode: ${item.barcode}` : ''}
-                              {item.condition ? ` • ${item.condition.replace(/_/g, ' ')}` : ''}
                             </span>
                           </div>
                           <button
