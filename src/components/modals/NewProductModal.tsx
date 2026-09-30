@@ -125,6 +125,23 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   const [isFormulaCalculatorOpen, setIsFormulaCalculatorOpen] = useState<boolean>(false);
   const [autoCalcNotice, setAutoCalcNotice] = useState<string | null>(null);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState<boolean>(false);
+  const [includeGlobalCatalog, setIncludeGlobalCatalog] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('winmobile_include_global_catalog') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleGlobalCatalog = (checked: boolean) => {
+    setIncludeGlobalCatalog(checked);
+    try {
+      localStorage.setItem('winmobile_include_global_catalog', checked ? 'true' : 'false');
+    } catch {
+      // ignore
+    }
+  };
+
   const modelInputRef = useRef<HTMLInputElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -294,27 +311,26 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   // Available Subcategories strictly for the selected category (Level 2)
   const availableSubCategories = useMemo(() => {
     const subSet = new Set<string>();
-    const taxSubs = getSubCategoriesForCategory(category);
-    taxSubs.forEach(s => subSet.add(s));
 
+    // Registered products first
     products.forEach(p => {
       if (canonicalCategory(p.category) === category && p.subCategory && p.subCategory.trim()) {
         subSet.add(p.subCategory.trim());
       }
     });
 
-    return Array.from(subSet).sort((a, b) => a.localeCompare(b));
-  }, [category, products]);
+    // Provide standard taxonomy options if user explicitly enabled global catalog OR if no custom subcategories exist yet
+    if (includeGlobalCatalog || subSet.size === 0) {
+      const taxSubs = getSubCategoriesForCategory(category);
+      taxSubs.forEach(s => subSet.add(s));
+    }
 
-  // Available Brands strictly isolated to current category and subcategory
+    return Array.from(subSet).sort((a, b) => a.localeCompare(b));
+  }, [category, products, includeGlobalCatalog]);
+
+  // Available Brands strictly isolated to current category and subcategory from registered products
   const availableBrands = useMemo(() => {
     const brandSet = new Set<string>();
-    // From taxonomy (guarantees zero data leakage)
-    const taxBrands = getBrandsForCategory(category, subCategory);
-    taxBrands.forEach(b => brandSet.add(b));
-    if (brandSet.size === 0) {
-      getBrandsForCategory(category).forEach(b => brandSet.add(b));
-    }
 
     // From products matching this category and optional subcategory
     products.forEach((p) => {
@@ -325,24 +341,30 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       }
     });
 
+    // If no brands found for this specific subcategory, check across parent category in registered products
+    if (brandSet.size === 0 && !includeGlobalCatalog) {
+      products.forEach((p) => {
+        if (canonicalCategory(p.category) === category && p.brand && p.brand.trim()) {
+          brandSet.add(p.brand.trim());
+        }
+      });
+    }
+
+    // Only include pre-seeded taxonomy brands if user explicitly turned on global catalog
+    if (includeGlobalCatalog) {
+      const taxBrands = getBrandsForCategory(category, subCategory);
+      taxBrands.forEach(b => brandSet.add(b));
+      if (brandSet.size === 0) {
+        getBrandsForCategory(category).forEach(b => brandSet.add(b));
+      }
+    }
+
     return Array.from(brandSet).sort((a, b) => a.localeCompare(b));
-  }, [category, subCategory, products]);
+  }, [category, subCategory, products, includeGlobalCatalog]);
 
   // Available Models strictly isolated to current category, subcategory, and brand
   const availableModels = useMemo(() => {
     const modelSet = new Set<string>();
-    // From taxonomy
-    const taxModels = getModelsForBrand(category, brand, subCategory);
-    taxModels.forEach(m => {
-      const clean = extractCleanModelName(m.name, brand);
-      if (clean) modelSet.add(clean);
-    });
-    if (modelSet.size === 0 && brand) {
-      getModelsForBrand(category, brand).forEach(m => {
-        const clean = extractCleanModelName(m.name, brand);
-        if (clean) modelSet.add(clean);
-      });
-    }
 
     // From registered products matching this category and brand
     products.forEach((p) => {
@@ -357,8 +379,23 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       }
     });
 
+    // Only include pre-seeded taxonomy models if user explicitly turned on global catalog
+    if (includeGlobalCatalog) {
+      const taxModels = getModelsForBrand(category, brand, subCategory);
+      taxModels.forEach(m => {
+        const clean = extractCleanModelName(m.name, brand);
+        if (clean) modelSet.add(clean);
+      });
+      if (modelSet.size === 0 && brand) {
+        getModelsForBrand(category, brand).forEach(m => {
+          const clean = extractCleanModelName(m.name, brand);
+          if (clean) modelSet.add(clean);
+        });
+      }
+    }
+
     return Array.from(modelSet).sort((a, b) => a.localeCompare(b));
-  }, [category, brand, subCategory, products]);
+  }, [category, brand, subCategory, products, includeGlobalCatalog]);
 
   // Filtered model suggestions for the current search query
   const filteredModelSuggestions = useMemo(() => {
@@ -377,11 +414,8 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   // Available Colors strictly isolated to current category, brand, and model
   const availableColors = useMemo(() => {
     const colorSet = new Set<string>();
-    // From taxonomy
-    const taxColors = getColorsForModel(category, brand, model || name);
-    taxColors.forEach(c => colorSet.add(c));
 
-    // From products
+    // From registered products
     products.forEach((p) => {
       if (canonicalCategory(p.category) === category) {
         if (brand && p.brand && p.brand.toLowerCase() === brand.toLowerCase()) {
@@ -394,8 +428,14 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       }
     });
 
+    // Only include pre-seeded taxonomy colors if user explicitly turned on global catalog
+    if (includeGlobalCatalog) {
+      const taxColors = getColorsForModel(category, brand, model || name);
+      taxColors.forEach(c => colorSet.add(c));
+    }
+
     return Array.from(colorSet).sort((a, b) => a.localeCompare(b));
-  }, [category, brand, model, name, products]);
+  }, [category, brand, model, name, products, includeGlobalCatalog]);
 
   // Registered product names filtered strictly by category
   const registeredProductNames = useMemo(() => {
@@ -1148,15 +1188,32 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
           </div>
 
           {/* Brand & Product Title / Model */}
+          <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+            <span className="text-xs font-bold text-slate-800">Product Identity & Specifications</span>
+            <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-800 cursor-pointer select-none transition-colors">
+              <input
+                type="checkbox"
+                checked={includeGlobalCatalog}
+                onChange={(e) => toggleGlobalCatalog(e.target.checked)}
+                className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+              />
+              <span>Include Global Catalog suggestions (1,000+ presets)</span>
+            </label>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-bold text-slate-700">
                   Brand *
                 </label>
-                {availableBrands.length > 0 && (
-                  <span className="text-[10px] text-slate-400 font-medium">({availableBrands.length} suggestions)</span>
-                )}
+                <span className="text-[10px] text-slate-400 font-medium">
+                  {availableBrands.length > 0 
+                    ? includeGlobalCatalog 
+                      ? `(${availableBrands.length} suggestions)` 
+                      : `(${availableBrands.length} in inventory)`
+                    : 'New brand'}
+                </span>
               </div>
               <div className="relative">
                 <input
@@ -1194,7 +1251,11 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                   Product Title / Model *
                 </label>
                 <span className="text-[10px] text-slate-400 font-medium">
-                  {availableModels.length > 0 ? `${availableModels.length} models available` : 'Type or search model'}
+                  {availableModels.length > 0 
+                    ? includeGlobalCatalog 
+                      ? `${availableModels.length} models available`
+                      : `${availableModels.length} models in inventory`
+                    : 'Type or search model'}
                 </span>
               </div>
               <div className="relative">
@@ -1235,7 +1296,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                     className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl max-h-56 overflow-y-auto z-50 p-1 divide-y divide-slate-100"
                   >
                     <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50/80 rounded-md flex items-center justify-between mb-1">
-                      <span>{brand ? `${brand} Models` : 'Suggested Models'} ({filteredModelSuggestions.length})</span>
+                      <span>{brand ? `${brand} Models in Inventory` : 'Registered Models in Inventory'} ({filteredModelSuggestions.length})</span>
                       <span className="text-[9px] text-slate-400 font-normal">Click to select</span>
                     </div>
                     {filteredModelSuggestions.map((m) => (

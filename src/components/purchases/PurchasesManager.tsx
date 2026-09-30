@@ -301,21 +301,11 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     return Array.from(subSet).sort((a, b) => a.localeCompare(b));
   }, [itemCategory, products]);
 
-  // Available Brands strictly isolated to current category and subcategory
-  // Data Hierarchy: Category (Parent above all) -> Subcategory (Child of Category, Sub-Parent of Brand) -> Brand
+  // Available Brands strictly isolated to current category and subcategory from registered products
   const availableBrands = useMemo(() => {
     const brandSet = new Set<string>();
 
-    // 1. Taxonomy brands strictly for this Category and optional Subcategory (guarantees zero category leakage)
-    const taxBrands = getBrandsForCategory(itemCategory, itemSubCategory);
-    taxBrands.forEach(b => brandSet.add(b));
-    if (brandSet.size === 0) {
-      getBrandsForCategory(itemCategory).forEach(b => brandSet.add(b));
-    }
-
-    // 2. Catalog products: STRICTLY filter by parent Category!
-    // Cookware, accessories, sim cards, etc. can NEVER leak into phone categories or vice-versa.
-    // Even if a product didn't have a subcategory chosen when registered, it strictly belongs to its parent Category.
+    // 1. Catalog products: STRICTLY from registered products in inventory matching this category & subcategory
     products.forEach((p) => {
       if (canonicalCategory(p.category) === canonicalCategory(itemCategory)) {
         if (!itemSubCategory || !p.subCategory || p.subCategory.trim().toLowerCase() === itemSubCategory.trim().toLowerCase()) {
@@ -325,6 +315,17 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
         }
       }
     });
+
+    // 2. If no brands found for this specific subcategory, populate from registered products across parent category
+    if (brandSet.size === 0) {
+      products.forEach((p) => {
+        if (canonicalCategory(p.category) === canonicalCategory(itemCategory)) {
+          if (p.brand && p.brand.trim()) {
+            brandSet.add(p.brand.trim());
+          }
+        }
+      });
+    }
 
     return Array.from(brandSet).sort((a, b) => a.localeCompare(b));
   }, [itemCategory, itemSubCategory, products]);
