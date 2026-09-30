@@ -19,14 +19,17 @@ import {
   List,
   Archive,
   Trash2,
-  CheckSquare
+  CheckSquare,
+  Gift
 } from 'lucide-react';
-import { Sale, PaymentMethod, ShopSettings, StaffUser } from '../../types';
+import { Sale, PaymentMethod, ShopSettings, StaffUser, Product } from '../../types';
 import { formatCurrency, formatDate, formatDateTime, getPaymentMethodInfo, formatSalePaymentBreakdown } from '../../utils/formatters';
 import { RefundModal } from '../modals/RefundModal';
 import { StorageService } from '../../utils/storage';
 import { DailySaleReport } from '../reports/DailySaleReport';
 import { DataArchiveCleanup } from '../admin/DataArchiveCleanup';
+import { FocGiftsLedger } from './FocGiftsLedger';
+import { FocDistributionModal } from '../modals/FocDistributionModal';
 
 interface SaleHistoryManagerProps {
   sales: Sale[];
@@ -71,7 +74,10 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
   onDeleteSale,
   onDeleteSales,
 }) => {
-  const [viewMode, setViewMode] = useState<'history' | 'daily_report'>('history');
+  const [viewMode, setViewMode] = useState<'history' | 'daily_report' | 'foc_ledger'>('history');
+  const [focFilter, setFocFilter] = useState<'all' | 'with_foc' | 'no_foc'>('all');
+  const [isFocDistributionModalOpen, setIsFocDistributionModalOpen] = useState(false);
+  const [products, setProducts] = useState<Product[]>(() => StorageService.getProducts());
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
   const [selectedCustomDate, setSelectedCustomDate] = useState<string>(() => {
     return new Date().toISOString().slice(0, 10);
@@ -216,6 +222,11 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
 
     const matchesPayment = paymentFilter === 'all' || sale.paymentMethod === paymentFilter;
     const matchesStatus = statusFilter === 'all' || sale.status === statusFilter;
+    const matchesFoc = focFilter === 'all' 
+      ? true 
+      : focFilter === 'with_foc' 
+        ? sale.items.some(i => i.isFoc) 
+        : !sale.items.some(i => i.isFoc);
 
     let matchesDate = true;
     if (dateFilter === 'today') {
@@ -233,7 +244,7 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
       matchesDate = saleDate.getMonth() === now.getMonth() && saleDate.getFullYear() === now.getFullYear();
     }
 
-    return matchesSearch && matchesPayment && matchesStatus && matchesDate;
+    return matchesSearch && matchesPayment && matchesStatus && matchesDate && matchesFoc;
   });
 
   const totalFilteredRevenue = filteredSales
@@ -315,6 +326,19 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
               <BarChart3 className="w-4 h-4" />
               <span>Daily Sale Report</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setViewMode('foc_ledger')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'foc_ledger'
+                  ? 'bg-purple-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Gift className="w-4 h-4 text-purple-400" />
+              <span>🎁 FOC &amp; Gifts Ledger</span>
+            </button>
           </div>
 
           <button
@@ -330,8 +354,15 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
         </div>
       </div>
 
-      {/* Conditionally render Daily Sale Report or Full Invoices Ledger */}
-      {viewMode === 'daily_report' ? (
+      {/* Conditionally render FOC Ledger, Daily Sale Report or Full Invoices Ledger */}
+      {viewMode === 'foc_ledger' ? (
+        <FocGiftsLedger
+          sales={sales}
+          settings={settings}
+          onViewInvoice={onViewInvoice}
+          onOpenIssueGiftModal={() => setIsFocDistributionModalOpen(true)}
+        />
+      ) : viewMode === 'daily_report' ? (
         <DailySaleReport
           sales={sales}
           settings={settings}
@@ -424,6 +455,16 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
                 <option value="all">All Statuses</option>
                 <option value="completed">Completed</option>
                 <option value="refunded">Refunded</option>
+              </select>
+
+              <select
+                value={focFilter}
+                onChange={(e) => setFocFilter(e.target.value as any)}
+                className="px-3 py-2 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-900 font-bold focus:outline-hidden"
+              >
+                <option value="all">All Invoices</option>
+                <option value="with_foc">🎁 With FOC Gifts Only</option>
+                <option value="no_foc">No FOC Items</option>
               </select>
 
               <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
@@ -626,7 +667,20 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
                         <div className="space-y-0.5 max-w-xs">
                           {sale.items.map((item, idx) => (
                             <div key={idx} className="text-slate-800">
-                              <span className="font-semibold">{item.name}</span> (x{item.quantity})
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-semibold">{item.name}</span> (x{item.quantity})
+                                {item.isFoc && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[9px] font-black border border-purple-200">
+                                    <Gift className="w-2.5 h-2.5 text-purple-600" />
+                                    FOC / လက်ဆောင်
+                                  </span>
+                                )}
+                              </div>
+                              {item.isFoc && item.focReason && (
+                                <span className="block text-[10px] text-purple-700 italic">
+                                  Reason: {item.focReason}
+                                </span>
+                              )}
                               {item.imei && (
                                 <span className="block text-[10px] text-blue-700 font-mono">
                                   IMEI: {item.imei}
@@ -982,6 +1036,20 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
             />
           </div>
         </div>
+      )}
+
+      {/* Standalone FOC Gift Distribution Modal */}
+      {isFocDistributionModalOpen && (
+        <FocDistributionModal
+          products={products}
+          settings={settings}
+          currentStaffUser={currentUser || null}
+          onClose={() => setIsFocDistributionModalOpen(false)}
+          onSuccess={(updatedProduct) => {
+            setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+            showToast(`FOC Gift issued successfully! Stock updated.`, 'success');
+          }}
+        />
       )}
 
     </div>

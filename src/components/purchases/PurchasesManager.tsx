@@ -47,7 +47,8 @@ import {
   Upload,
   Image as ImageIcon,
   Paperclip,
-  ExternalLink
+  ExternalLink,
+  Gift
 } from 'lucide-react';
 import { 
   Product, 
@@ -216,6 +217,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   const [itemQty, setItemQty] = useState<number>(1);
   const [itemUnitCost, setItemUnitCost] = useState<number>(0);
   const [itemSellingPrice, setItemSellingPrice] = useState<number>(0);
+  const [itemIsFoc, setItemIsFoc] = useState<boolean>(false);
+  const [itemFocType, setItemFocType] = useState<'supplier_bonus' | 'shop_funded_asset' | 'shop_funded_expensed'>('supplier_bonus');
 
   // Phone IMEI pairs & dual SIM state
   const isPhone = isPhoneCategory(itemCategory);
@@ -791,6 +794,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     setItemUnitCost(0);
     setItemSellingPrice(0);
     setItemQty(1);
+    setItemIsFoc(false);
+    setItemFocType('supplier_bonus');
     setItemImeiPairs([]);
     setNewImei1Input('');
     setNewImei2Input('');
@@ -804,7 +809,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       alert('Please enter or select a product item name.');
       return;
     }
-    if (itemUnitCost <= 0) {
+    if (!itemIsFoc && itemUnitCost <= 0) {
       alert('Please enter a valid purchase unit cost.');
       return;
     }
@@ -825,6 +830,10 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
     const flatImeiList = itemImeiPairs.map(p => p.imei1);
 
+    const finalUnitCost = itemIsFoc
+      ? (itemFocType === 'shop_funded_asset' ? Number(itemUnitCost) : 0)
+      : Number(itemUnitCost);
+
     const newItem: PurchaseItem = {
       productId: finalProductId,
       name: itemName.trim(),
@@ -843,15 +852,17 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       minStockAlert: itemMinStockAlert !== undefined ? itemMinStockAlert : existingMatch?.minStockAlert,
       description: itemDescription || existingMatch?.description,
       quantity: Number(itemQty),
-      unitCost: Number(itemUnitCost),
-      sellingPrice: Number(itemSellingPrice) || (existingMatch ? existingMatch.sellingPrice : Number(itemUnitCost) * 1.2),
-      totalCost: Number(itemQty) * Number(itemUnitCost),
+      unitCost: finalUnitCost,
+      sellingPrice: Number(itemSellingPrice) || (existingMatch ? existingMatch.sellingPrice : (finalUnitCost > 0 ? Number(finalUnitCost) * 1.2 : 0)),
+      totalCost: Number(itemQty) * finalUnitCost,
       imeiPairs: itemImeiPairs.length > 0 ? itemImeiPairs : undefined,
       dualImei: itemDualImei,
       imeiList: flatImeiList.length > 0 ? flatImeiList : undefined,
       allocatedPreOrderId: activeImportedPreOrder?.id,
       allocatedPreOrderNumber: activeImportedPreOrder?.preOrderNumber,
       allocatedCustomerName: activeImportedPreOrder?.customerName,
+      isFoc: itemIsFoc,
+      focType: itemIsFoc ? itemFocType : undefined,
     };
 
     setPurchaseItems(prev => [...prev, newItem]);
@@ -2606,9 +2617,28 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                        Supplier Unit Cost ({settings.currencySymbol}) *
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-bold text-slate-300">
+                          Supplier Unit Cost ({settings.currencySymbol}) *
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = !itemIsFoc;
+                            setItemIsFoc(next);
+                            if (next && itemFocType === 'supplier_bonus') setItemUnitCost(0);
+                          }}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors ${
+                            itemIsFoc 
+                              ? 'bg-purple-500 text-white shadow-xs' 
+                              : 'bg-purple-950/60 text-purple-300 border border-purple-500/40 hover:bg-purple-900/60'
+                          }`}
+                        >
+                          <Gift className="w-3 h-3" />
+                          <span>{itemIsFoc ? 'FOC Active' : 'Mark as FOC'}</span>
+                        </button>
+                      </div>
+
                       <input
                         id="po-item-unit-cost-input"
                         type="number"
@@ -2616,7 +2646,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                         min="0"
                         step="any"
                         placeholder="0"
-                        value={itemUnitCost === 0 ? '' : itemUnitCost}
+                        disabled={itemIsFoc && (itemFocType === 'supplier_bonus' || itemFocType === 'shop_funded_expensed')}
+                        value={itemIsFoc && (itemFocType === 'supplier_bonus' || itemFocType === 'shop_funded_expensed') ? 0 : (itemUnitCost === 0 ? '' : itemUnitCost)}
                         onFocus={(e) => e.target.select()}
                         onClick={(e) => e.currentTarget.select()}
                         onKeyDown={(e) => {
@@ -2628,16 +2659,90 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                           const val = e.target.value;
                           setItemUnitCost(val === '' ? 0 : Math.max(0, parseFloat(val) || 0));
                         }}
-                        className="w-full px-3 py-2 bg-white text-slate-900 rounded-lg font-mono font-bold text-xs focus:ring-2 focus:ring-indigo-500 outline-hidden"
+                        className={`w-full px-3 py-2 rounded-lg font-mono font-bold text-xs focus:ring-2 focus:ring-indigo-500 outline-hidden ${
+                          itemIsFoc && (itemFocType === 'supplier_bonus' || itemFocType === 'shop_funded_expensed')
+                            ? 'bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed'
+                            : 'bg-white text-slate-900'
+                        }`}
                       />
                     </div>
                   </div>
+
+                  {/* FOC Accounting Options Box when itemIsFoc is true */}
+                  {itemIsFoc && (
+                    <div className="p-3 bg-purple-950/70 border border-purple-500/40 rounded-xl space-y-2 mt-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wide flex items-center gap-1.5">
+                          <Gift className="w-3.5 h-3.5 text-amber-400" />
+                          FOC အမျိုးအစား & စာရင်းကိုင် သတ်မှတ်ချက် (Accounting Treatment)
+                        </span>
+                        <span className="text-[9px] bg-purple-800 text-purple-200 px-1.5 py-0.5 rounded">
+                          Double-Deduction Guard
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setItemFocType('supplier_bonus');
+                            setItemUnitCost(0);
+                          }}
+                          className={`p-2 rounded-lg text-left border text-xs transition-all cursor-pointer ${
+                            itemFocType === 'supplier_bonus'
+                              ? 'bg-purple-600 text-white border-purple-300 font-bold shadow-xs'
+                              : 'bg-black/30 text-purple-200 border-purple-500/30 hover:bg-purple-900/40'
+                          }`}
+                        >
+                          <div className="font-bold flex items-center gap-1">
+                            <span>1. ဒိုင်လက်ဆောင် (Supplier Bonus)</span>
+                          </div>
+                          <div className="text-[9px] opacity-80 mt-0.5">အခမဲ့ရသည် (Cost = 0 Ks, Payable = 0 Ks)</div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setItemFocType('shop_funded_asset');
+                          }}
+                          className={`p-2 rounded-lg text-left border text-xs transition-all cursor-pointer ${
+                            itemFocType === 'shop_funded_asset'
+                              ? 'bg-purple-600 text-white border-purple-300 font-bold shadow-xs'
+                              : 'bg-black/30 text-purple-200 border-purple-500/30 hover:bg-purple-900/40'
+                          }`}
+                        >
+                          <div className="font-bold flex items-center gap-1">
+                            <span>2. ဆိုင်စရိတ် လက်ဆောင် (Inventory Asset)</span>
+                          </div>
+                          <div className="text-[9px] opacity-80 mt-0.5">ဝယ်ယူပြီး POS တွင် လက်ဆောင်ပေးချိန်မှ Expense သွင်းမည် (1 time)</div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setItemFocType('shop_funded_expensed');
+                            setItemUnitCost(0);
+                          }}
+                          className={`p-2 rounded-lg text-left border text-xs transition-all cursor-pointer ${
+                            itemFocType === 'shop_funded_expensed'
+                              ? 'bg-purple-600 text-white border-purple-300 font-bold shadow-xs'
+                              : 'bg-black/30 text-purple-200 border-purple-500/30 hover:bg-purple-900/40'
+                          }`}
+                        >
+                          <div className="font-bold flex items-center gap-1">
+                            <span>3. ကြိုတင်အသုံးစရိတ်သွင်းပြီး (Already Expensed)</span>
+                          </div>
+                          <div className="text-[9px] opacity-80 mt-0.5">Expense သွင်းပြီးဖြစ်၍ ၂ ခါမနုတ်ရန် Stock Cost = 0 Ks</div>
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Stage 1 Helper & Actions */}
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                     <div className="text-[11px] space-y-0.5">
                       <div className="text-slate-300 flex items-center space-x-2">
-                        <span>Line Total: <strong className="font-mono text-white text-xs">{formatCurrency((itemQty || 1) * itemUnitCost, settings.currencySymbol)}</strong></span>
+                        <span>Line Total: <strong className="font-mono text-white text-xs">{formatCurrency((itemQty || 1) * (itemIsFoc && (itemFocType === 'supplier_bonus' || itemFocType === 'shop_funded_expensed') ? 0 : itemUnitCost), settings.currencySymbol)}</strong></span>
                         {matchedExactVariant && itemUnitCost > 0 && itemUnitCost !== matchedExactVariant.costPrice && (
                           <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30 text-[10px] font-semibold">
                             Cost revised from {formatCurrency(matchedExactVariant.costPrice, settings.currencySymbol)}
@@ -2707,9 +2812,17 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                             : 0;
 
                           return (
-                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="p-2.5">
-                                <span className="font-bold text-slate-900">{item.name}</span>
+                            <tr key={idx} className="hover:bg-slate-50 transition-colors align-top">
+                              <td className="p-2.5 align-top">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-bold text-slate-900">{item.name}</span>
+                                  {item.isFoc && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[9px] font-black border border-purple-200">
+                                      <Gift className="w-2.5 h-2.5 text-purple-600" />
+                                      {item.focType === 'supplier_bonus' ? 'Supplier Bonus' : item.focType === 'shop_funded_asset' ? 'Shop Gift (Asset)' : 'Shop Gift (Expensed)'}
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="text-[10px] text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
                                   <span>Brand: <strong>{item.brand}</strong></span>
                                   {item.rom && <span>• {item.ram && item.ram !== '-' ? `${item.ram}/` : ''}{item.rom}</span>}
@@ -2723,66 +2836,70 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                               </td>
 
                               {/* Adjustable Qty with - / + and numeric input */}
-                              <td className="p-2.5 text-center">
-                                <div className="inline-flex items-center justify-center space-x-1 bg-slate-50 p-1 rounded-lg border border-slate-200 shadow-2xs">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateItemQuantity(idx, item.quantity - 1)}
-                                    disabled={item.quantity <= 1}
-                                    className="w-6 h-6 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-xs font-bold transition-colors shadow-2xs border border-slate-200 cursor-pointer"
-                                    title="Decrease quantity (-1)"
-                                  >
-                                    -
-                                  </button>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    value={item.quantity === 0 ? '' : item.quantity}
-                                    onChange={(e) => {
-                                      const raw = e.target.value;
-                                      if (raw === '') {
-                                        handleUpdateItemQuantity(idx, 1);
-                                      } else {
-                                        const val = parseInt(raw, 10);
-                                        if (!isNaN(val)) handleUpdateItemQuantity(idx, Math.max(1, val));
-                                      }
-                                    }}
-                                    className="w-12 px-1 py-0.5 text-center font-mono font-bold text-xs bg-white border border-slate-200 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden transition-all text-slate-900"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateItemQuantity(idx, item.quantity + 1)}
-                                    className="w-6 h-6 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors shadow-2xs border border-slate-200 cursor-pointer"
-                                    title="Increase quantity (+1)"
-                                  >
-                                    +
-                                  </button>
+                              <td className="p-2.5 text-center align-top">
+                                <div className="flex flex-col items-center gap-1">
+                                  <div className="inline-flex items-center justify-center space-x-1 bg-slate-50 p-1 rounded-lg border border-slate-200 shadow-2xs">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateItemQuantity(idx, item.quantity - 1)}
+                                      disabled={item.quantity <= 1}
+                                      className="w-6 h-6 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-xs font-bold transition-colors shadow-2xs border border-slate-200 cursor-pointer"
+                                      title="Decrease quantity (-1)"
+                                    >
+                                      -
+                                    </button>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      value={item.quantity === 0 ? '' : item.quantity}
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        if (raw === '') {
+                                          handleUpdateItemQuantity(idx, 1);
+                                        } else {
+                                          const val = parseInt(raw, 10);
+                                          if (!isNaN(val)) handleUpdateItemQuantity(idx, Math.max(1, val));
+                                        }
+                                      }}
+                                      className="w-12 px-1 py-0.5 text-center font-mono font-bold text-xs bg-white border border-slate-200 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden transition-all text-slate-900"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateItemQuantity(idx, item.quantity + 1)}
+                                      className="w-6 h-6 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors shadow-2xs border border-slate-200 cursor-pointer"
+                                      title="Increase quantity (+1)"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
                                 </div>
                               </td>
 
                               {/* Adjustable Unit Cost */}
-                              <td className="p-2.5 text-right">
-                                <div className="inline-flex items-center justify-end space-x-1 bg-slate-50 p-1 rounded-lg border border-slate-200 shadow-2xs">
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="1000"
-                                    value={item.unitCost === 0 ? '' : item.unitCost}
-                                    placeholder="0"
-                                    onChange={(e) => {
-                                      const raw = e.target.value;
-                                      const val = raw === '' ? 0 : parseFloat(raw);
-                                      handleUpdateItemCost(idx, isNaN(val) ? 0 : val);
-                                    }}
-                                    className="w-24 sm:w-28 px-2 py-0.5 text-right font-mono font-bold text-xs bg-white border border-slate-200 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden transition-all text-slate-900"
-                                    title="Edit Buy / Cost Price per unit"
-                                  />
-                                  <span className="text-[10px] text-slate-500 font-bold pr-1 shrink-0">{settings.currencySymbol}</span>
+                              <td className="p-2.5 text-right align-top">
+                                <div className="flex flex-col items-end gap-1">
+                                  <div className="inline-flex items-center justify-end space-x-1 bg-slate-50 p-1 rounded-lg border border-slate-200 shadow-2xs">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1000"
+                                      value={item.unitCost === 0 ? '' : item.unitCost}
+                                      placeholder="0"
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        const val = raw === '' ? 0 : parseFloat(raw);
+                                        handleUpdateItemCost(idx, isNaN(val) ? 0 : val);
+                                      }}
+                                      className="w-24 sm:w-28 px-2 py-0.5 text-right font-mono font-bold text-xs bg-white border border-slate-200 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden transition-all text-slate-900"
+                                      title="Edit Buy / Cost Price per unit"
+                                    />
+                                    <span className="text-[10px] text-slate-500 font-bold pr-1 shrink-0">{settings.currencySymbol}</span>
+                                  </div>
                                 </div>
                               </td>
 
                               {/* Adjustable Retail Selling Price & Profit Margin */}
-                              <td className="p-2.5 text-right">
+                              <td className="p-2.5 text-right align-top">
                                 <div className="flex flex-col items-end gap-1">
                                   <div className="inline-flex items-center justify-end space-x-1 bg-slate-50 p-1 rounded-lg border border-slate-200 shadow-2xs">
                                     <input
@@ -2816,12 +2933,14 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                               </td>
 
                               {/* Line Total */}
-                              <td className="p-2.5 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
-                                {formatCurrency(item.totalCost, settings.currencySymbol)}
+                              <td className="p-2.5 text-right font-mono font-bold text-slate-900 whitespace-nowrap align-top">
+                                <div className="pt-1.5">
+                                  {formatCurrency(item.totalCost, settings.currencySymbol)}
+                                </div>
                               </td>
 
                               {/* Action: Remove */}
-                              <td className="p-2.5 text-center">
+                              <td className="p-2.5 text-center align-top">
                                 <button
                                   type="button"
                                   onClick={() => handleRemovePurchaseItem(idx)}

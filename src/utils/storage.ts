@@ -48,7 +48,8 @@ import {
   BranchInventory,
   StockTransfer,
   StockTransferItem,
-  TransferStatus
+  TransferStatus,
+  FocDistributionRecord
 } from '../types';
 import { 
   initialSettings, 
@@ -125,6 +126,7 @@ export const STORAGE_KEYS = {
   STOCK_TRANSFERS: 'mobileshop_stock_transfers_v2',
   DELETED_LOCATION_IDS: 'mobileshop_deleted_location_ids_v2',
   DELETED_PRODUCT_IDS: 'mobileshop_deleted_product_ids_v2',
+  FOC_DISTRIBUTIONS: 'mobileshop_foc_distributions_v2',
 };
 
 // Cross-tab broadcast channel for instantaneous reactive tab synchronization
@@ -791,6 +793,8 @@ export const StorageService = {
             imeiPairs: isPhone && mergedPairs.length > 0 ? mergedPairs : match.imeiPairs,
             imeiList: isPhone && mergedFlatList.size > 0 ? Array.from(mergedFlatList) : match.imeiList,
             lastRestockedAt: newProd.lastRestockedAt || match.lastRestockedAt || new Date().toISOString(),
+            isGiftItem: newProd.isGiftItem !== undefined ? newProd.isGiftItem : match.isGiftItem,
+            focType: newProd.focType || match.focType,
           };
           return;
         }
@@ -1556,6 +1560,36 @@ export const StorageService = {
     }
   },
 
+  // Standalone FOC Gifts / Promotions Distribution
+  getFocDistributions: (): FocDistributionRecord[] => getItem(STORAGE_KEYS.FOC_DISTRIBUTIONS, []),
+  saveFocDistribution: (record: FocDistributionRecord, triggerSync = true) => {
+    const list = StorageService.getFocDistributions();
+    const existingIndex = list.findIndex(r => r.id === record.id);
+    let updated: FocDistributionRecord[];
+    if (existingIndex >= 0) {
+      updated = [...list];
+      updated[existingIndex] = record;
+    } else {
+      updated = [record, ...list];
+    }
+    setItem(STORAGE_KEYS.FOC_DISTRIBUTIONS, updated, triggerSync);
+  },
+  deleteFocDistribution: (id: string, triggerSync = true) => {
+    const list = StorageService.getFocDistributions().filter(r => r.id !== id);
+    setItem(STORAGE_KEYS.FOC_DISTRIBUTIONS, list, triggerSync);
+  },
+  generateNextGiftVoucherNumber: (prefix = 'GIFT'): string => {
+    const records = StorageService.getFocDistributions();
+    const existingNums = new Set(records.map(r => (r.voucherNumber || '').toUpperCase()));
+    let nextNum = records.length + 1;
+    let candidate = `${prefix}-${String(nextNum).padStart(4, '0')}`;
+    while (existingNums.has(candidate)) {
+      nextNum++;
+      candidate = `${prefix}-${String(nextNum).padStart(4, '0')}`;
+    }
+    return candidate;
+  },
+
   deleteSales: (saleIds: string[], options?: { restockItems?: boolean; staffName?: string }, triggerSync = true) => {
     if (!saleIds || saleIds.length === 0) return;
     const idSet = new Set(saleIds);
@@ -1677,8 +1711,15 @@ export const StorageService = {
           const oldSelling = targetProduct.sellingPrice || 0;
 
           // Restock existing variant with exact supplier unit cost and target retail price
+          const previousStock = targetProduct.stock;
           targetProduct.stock += item.quantity;
-          if (item.unitCost > 0) {
+          if (item.isFoc && (item.focType === 'supplier_bonus' || item.unitCost === 0)) {
+            // Weighted Average Cost (WAC) recalculation for FOC bonus stock
+            if (previousStock > 0 && oldCost > 0) {
+              const newAvgCost = Math.round((previousStock * oldCost + item.quantity * 0) / (previousStock + item.quantity));
+              targetProduct.costPrice = newAvgCost;
+            }
+          } else if (item.unitCost > 0) {
             targetProduct.costPrice = item.unitCost;
           }
           if (item.sellingPrice > 0) {
@@ -1767,6 +1808,8 @@ export const StorageService = {
             supplierId: purchase.supplierId,
             supplierName: purchase.supplierName,
             lastRestockedAt: purchase.date,
+            isGiftItem: item.isGiftItem || item.isFoc,
+            focType: item.focType,
           };
           item.productId = newProduct.id;
           products.unshift(newProduct);
@@ -3261,6 +3304,7 @@ export const StorageService = {
       activeLocationId: StorageService.getActiveLocationId(),
       branchInventory: StorageService.getBranchInventoryList(),
       stockTransfers: StorageService.getStockTransfers(),
+      focDistributions: StorageService.getFocDistributions(),
       deletedLocationIds: StorageService.getDeletedLocationIds(),
       deletedProductIds: StorageService.getDeletedProductIds(),
       lastUpdated: StorageService.getLastUpdatedTimestamp() || Date.now(),
@@ -3341,6 +3385,9 @@ export const StorageService = {
       }
       if (data.stockTransfers && Array.isArray(data.stockTransfers)) {
         localStorage.setItem(STORAGE_KEYS.STOCK_TRANSFERS, JSON.stringify(data.stockTransfers));
+      }
+      if (data.focDistributions && Array.isArray(data.focDistributions)) {
+        localStorage.setItem(STORAGE_KEYS.FOC_DISTRIBUTIONS, JSON.stringify(data.focDistributions));
       }
       if (data.activeLocationId && typeof data.activeLocationId === 'string') {
         const deletedLocIds = new Set(StorageService.getDeletedLocationIds());

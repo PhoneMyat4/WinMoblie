@@ -30,7 +30,8 @@ import {
   X,
   ExternalLink,
   Info,
-  BarChart3
+  BarChart3,
+  Gift
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -230,10 +231,17 @@ export const DailyGrossProfitManager: React.FC<DailyGrossProfitManagerProps> = (
       let saleUnits = 0;
 
       const itemRows = sale.items.map((item) => {
-        const unitCost = item.costPrice > 0 ? item.costPrice : (productCostMap.get(item.productId) || 0);
-        const lineRevenue = item.finalPrice !== undefined 
-          ? item.finalPrice 
-          : (item.unitPrice * item.quantity - (item.discount || 0));
+        let unitCost = item.costPrice > 0 ? item.costPrice : (productCostMap.get(item.productId) || 0);
+        // Double-deduction prevention check for FOC:
+        // If an item is FOC and was already expensed upon purchase (shop_funded_expensed), do not count in COGS again!
+        if (item.isFoc && (item as any).focType === 'shop_funded_expensed') {
+          unitCost = 0;
+        }
+        const lineRevenue = item.isFoc 
+          ? 0 
+          : (item.finalPrice !== undefined 
+            ? item.finalPrice 
+            : (item.unitPrice * item.quantity - (item.discount || 0)));
         const lineCogs = unitCost * item.quantity;
         const lineProfit = lineRevenue - lineCogs;
         const lineMargin = lineRevenue > 0 ? (lineProfit / lineRevenue) * 100 : 0;
@@ -1515,7 +1523,20 @@ export const DailyGrossProfitManager: React.FC<DailyGrossProfitManagerProps> = (
                               {itemRows.map((item, idx) => (
                                 <tr key={idx} className="hover:bg-slate-50/70">
                                   <td className="py-2 px-3 font-medium text-slate-900">
-                                    {item.name}
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span>{item.name}</span>
+                                      {item.isFoc && (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 text-[10px] font-bold border border-purple-200">
+                                          <Gift className="w-2.5 h-2.5 text-purple-600" />
+                                          FOC Gift
+                                        </span>
+                                      )}
+                                    </div>
+                                    {item.isFoc && item.focReason && (
+                                      <span className="block text-[10px] text-purple-700 italic mt-0.5">
+                                        Reason: {item.focReason}
+                                      </span>
+                                    )}
                                     {item.imei && (
                                       <span className="block text-[10px] font-mono text-indigo-600">
                                         IMEI/SN: {item.imei}

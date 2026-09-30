@@ -186,6 +186,29 @@ export class AuditLogger {
     });
   }
 
+  public static logFocGift(
+    invoiceNumber: string,
+    itemName: string,
+    originalPrice: number,
+    reason: string,
+    cashier: StaffUser | null
+  ) {
+    return this.log({
+      actionType: 'SALE_CREATED',
+      category: 'sales',
+      severity: 'warning',
+      summary: `[FOC_GIFT] Marked "${itemName}" as FOC on Invoice #${invoiceNumber} (Gift Value: ${originalPrice.toLocaleString()} Ks | Reason: ${reason})`,
+      details: {
+        invoiceNumber,
+        targetName: itemName,
+        amount: 0,
+        reason,
+        notes: `Customer received promotional/bundle gift (Normal Value: ${originalPrice.toLocaleString()} Ks, FOC Reason: ${reason})`,
+      },
+      staffUser: cashier,
+    });
+  }
+
   public static logInventory(
     actionType: 'PRODUCT_CREATED' | 'PRODUCT_UPDATED' | 'PRODUCT_DELETED' | 'STOCK_ADJUSTED' | 'PRICE_CHANGED' | 'BULK_IMPORT',
     summary: string,

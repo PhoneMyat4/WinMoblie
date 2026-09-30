@@ -19,7 +19,8 @@ import {
   ArrowRight,
   RefreshCw,
   Eye,
-  FileText
+  FileText,
+  Gift
 } from 'lucide-react';
 import { Product, ShopSettings } from '../../types';
 import { formatCurrency, formatImei, getCategoryLabel, getConditionLabel } from '../../utils/formatters';
@@ -570,7 +571,20 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                             </td>
 
                             <td className="py-2.5 px-3">
-                              <div className="font-bold text-slate-900">{product.name}</div>
+                              <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                                <span>{product.name}</span>
+                                {product.isGiftItem && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[9px] font-black border border-purple-200">
+                                    <Gift className="w-2.5 h-2.5 text-purple-600" />
+                                    <span>FOC Gift</span>
+                                    {product.focType && (
+                                      <span className="text-[8px] font-semibold text-purple-700 opacity-90 hidden sm:inline">
+                                        • {product.focType === 'supplier_bonus' ? 'Bonus' : product.focType === 'shop_funded_asset' ? 'Asset' : 'Pre-expensed'}
+                                      </span>
+                                    )}
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
                                 <span className="font-semibold text-slate-700">{product.brand}</span>
                                 <span>•</span>
@@ -615,11 +629,32 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                             </td>
 
                             <td className="py-2.5 px-3 text-right font-mono text-slate-700">
-                              {formatCurrency(product.costPrice, settings.currencySymbol)}
+                              {product.isGiftItem && product.costPrice === 0 ? (
+                                <div>
+                                  <span className="text-slate-500 font-bold">0 Ks</span>
+                                  <span className="block text-[8px] text-purple-600 font-semibold">
+                                    {product.focType === 'shop_funded_expensed' ? 'Expensed' : 'Bonus'}
+                                  </span>
+                                </div>
+                              ) : (
+                                formatCurrency(product.costPrice, settings.currencySymbol)
+                              )}
                             </td>
 
                             <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
-                              {formatCurrency(product.sellingPrice, settings.currencySymbol)}
+                              {product.isGiftItem && product.sellingPrice === 0 ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-800 text-[10px] font-black">
+                                  <Gift className="w-2.5 h-2.5 text-purple-600" />
+                                  0 Ks (Free)
+                                </span>
+                              ) : product.isGiftItem && product.sellingPrice > 0 ? (
+                                <div>
+                                  <span>{formatCurrency(product.sellingPrice, settings.currencySymbol)}</span>
+                                  <span className="block text-[8px] text-purple-600 font-semibold">Ref Val</span>
+                                </div>
+                              ) : (
+                                formatCurrency(product.sellingPrice, settings.currencySymbol)
+                              )}
                             </td>
 
                             <td className="py-2.5 px-3 text-center">
@@ -805,6 +840,27 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                         Multiple units separated by <code className="bg-slate-100 px-1 rounded">;</code> and dual IMEIs separated by <code className="bg-slate-100 px-1 rounded">/</code>. Leave as <code className="bg-slate-100 px-1 rounded">-</code> for accessories.
                       </td>
                     </tr>
+                    <tr>
+                      <td className="py-2 px-3 font-mono font-bold text-purple-900 flex items-center gap-1">
+                        <Gift className="w-3.5 h-3.5 text-purple-600" />
+                        <span>Is_FOC_Gift</span>
+                      </td>
+                      <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 font-bold rounded">Optional</span></td>
+                      <td className="py-2 px-3 font-mono text-slate-500">Is_FOC_Gift, is_foc, foc, isgift, gift, free, လက်ဆောင်</td>
+                      <td className="py-2 px-3 font-semibold text-purple-900">Yes, true, 1, foc, gift</td>
+                      <td className="py-2 px-3 text-slate-600">
+                        Flags item as Free of Charge / Promotional Gift (အခမဲ့ / ပရိုမိုးရှင်းလက်ဆောင်). Allows 0 Ks selling price and 0 Ks cost.
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 px-3 font-mono font-bold text-purple-900">FOC_Type</td>
+                      <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 font-bold rounded">Optional</span></td>
+                      <td className="py-2 px-3 font-mono text-slate-500">FOC_Type, foc_type, gift_type, foc_source</td>
+                      <td className="py-2 px-3 font-mono text-purple-900">supplier_bonus, shop_funded_asset, shop_funded_expensed</td>
+                      <td className="py-2 px-3 text-slate-600">
+                        Accounting source: <code>supplier_bonus</code> (default, 0 Ks cost), <code>shop_funded_asset</code> (asset with cost), or <code>shop_funded_expensed</code> (pre-expensed).
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -821,10 +877,19 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                   type="button"
                   onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES[0])}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-lg border border-slate-200 transition-all cursor-pointer shadow-2xs text-[11px]"
-                  title="Download Inventory Stock List Format (Export-compatible)"
+                  title="Download Inventory Stock List Format (Export-compatible with FOC columns)"
                 >
                   <Download className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                   <span>Stock List (Export Format)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadCsv(SAMPLE_CSV_TEMPLATES.find(t => t.id === 'foc_promotional_gifts') || SAMPLE_CSV_TEMPLATES[5])}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-900 font-bold rounded-lg border border-purple-200 transition-all cursor-pointer shadow-2xs text-[11px]"
+                  title="Download FOC & Promotional Gifts CSV Template (Bonus stock and promotional giveaways)"
+                >
+                  <Gift className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                  <span>🎁 FOC Gifts Template</span>
                 </button>
                 <button
                   type="button"

@@ -32,7 +32,8 @@ import {
   Eye,
   ExternalLink,
   Lock,
-  Package
+  Package,
+  Gift
 } from 'lucide-react';
 import { PurchaseRecord, PurchaseItem, Product, ShopSettings, StaffRole, ImeiPair, PreOrder } from '../../types';
 import { formatCurrency, formatDate, formatImei } from '../../utils/formatters';
@@ -714,6 +715,12 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                         <div>
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="font-bold text-slate-900 text-xs">{item.name}</span>
+                            {item.isFoc && (
+                              <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded-full text-[10px] font-black border border-purple-200 flex items-center gap-1">
+                                <Gift className="w-2.5 h-2.5 text-purple-600" />
+                                {item.focType === 'supplier_bonus' ? 'Supplier Bonus (Cost 0 Ks)' : item.focType === 'shop_funded_asset' ? 'Shop Gift (Asset)' : 'Shop Gift (Pre-Expensed)'}
+                              </span>
+                            )}
                             <span className="px-1.5 py-0.5 bg-slate-200 text-slate-700 rounded text-[10px] font-bold">
                               {item.brand}
                             </span>

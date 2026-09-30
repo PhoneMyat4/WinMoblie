@@ -94,6 +94,7 @@ export interface RolePermissions {
   canManageBranches?: boolean;
   canTransferStock?: boolean;
   canApproveTransfer?: boolean;
+  canApplyFoc?: boolean; // Controls whether staff can mark line items as FOC (Free of Charge)
 }
 
 export interface StaffUser {
@@ -124,12 +125,37 @@ export interface StockAdjustment {
   quantityChange: number; // positive or negative
   previousStock: number;
   newStock: number;
-  reason: 'physical_audit' | 'damaged' | 'return_supplier' | 'sample' | 'restock' | 'correction' | 'other';
+  reason: 'physical_audit' | 'damaged' | 'return_supplier' | 'sample' | 'restock' | 'correction' | 'foc_gift' | 'other';
   reasonNotes?: string;
   timestamp: string;
   adjustedBy: string;
   auditSessionId?: string;
   imeiList?: string[];
+}
+
+export interface FocDistributionRecord {
+  id: string;
+  voucherNumber: string; // e.g. "GIFT-2026-001"
+  date: string;
+  productId: string;
+  productName: string;
+  brand: string;
+  category: ProductCategory;
+  quantity: number;
+  unitCost: number;
+  originalPrice: number;
+  totalCost: number;
+  totalRetailValue: number;
+  recipientName: string;
+  recipientPhone?: string;
+  reason: string;
+  issuedBy: string;
+  locationId?: string;
+  locationName?: string;
+  imei?: string;
+  imei2?: string;
+  notes?: string;
+  expensedInAccounting?: boolean;
 }
 
 export interface StockAuditItem {
@@ -427,6 +453,8 @@ export interface Product {
   description?: string;
   imageUrl?: string;
   lastRestockedAt?: string;
+  isGiftItem?: boolean;
+  focType?: 'supplier_bonus' | 'shop_funded_asset' | 'shop_funded_expensed';
   createdAt?: string;
   updatedAt?: string;
   syncedAt?: string;
@@ -440,6 +468,9 @@ export interface CartItem {
   customPrice?: number;
   discount: number;
   warrantyPeriod: string;
+  isFoc?: boolean;
+  focReason?: string;
+  originalPrice?: number;
 }
 
 export interface SaleItem {
@@ -461,6 +492,9 @@ export interface SaleItem {
   warrantyPeriod: string;
   refundedQuantity?: number;
   refundedImeis?: string[];
+  isFoc?: boolean;
+  focReason?: string;
+  originalPrice?: number;
 }
 
 export interface RefundItem {
@@ -624,6 +658,9 @@ export interface PurchaseItem {
   barcode?: string;
   sku?: string;
   warrantyMonths?: number;
+  isFoc?: boolean; // When true, item is free bonus stock from distributor/supplier
+  focType?: 'supplier_bonus' | 'shop_funded_asset' | 'shop_funded_expensed';
+  isGiftItem?: boolean;
   description?: string;
   ram?: string;
   rom?: string;

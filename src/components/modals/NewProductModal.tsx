@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Package, X, Plus, Trash2, Check, Barcode, Smartphone, Layers, Sparkles, RefreshCw, Camera, ChevronRight, Calculator, TrendingUp, Globe, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Package, X, Plus, Trash2, Check, Barcode, Smartphone, Layers, Sparkles, RefreshCw, Camera, ChevronRight, Calculator, TrendingUp, Globe, ExternalLink, AlertTriangle, Gift } from 'lucide-react';
 import { Product, ProductCategory, DeviceCondition, ShopSettings, ImeiPair } from '../../types';
 import { formatImei } from '../../utils/formatters';
 import { 
@@ -91,6 +91,10 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   const [description, setDescription] = useState<string>(editingProduct?.description || '');
   const [dualImei, setDualImei] = useState<boolean>(editingProduct?.dualImei ?? true);
   const [imageUrl, setImageUrl] = useState<string | undefined>(editingProduct?.imageUrl);
+  const [isGiftItem, setIsGiftItem] = useState<boolean>(editingProduct?.isGiftItem || false);
+  const [focType, setFocType] = useState<'supplier_bonus' | 'shop_funded_asset' | 'shop_funded_expensed'>(
+    editingProduct?.focType || 'supplier_bonus'
+  );
 
   // Initialize IMEI pairs
   const initialImeiPairs = useMemo<ImeiPair[]>(() => {
@@ -644,7 +648,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || sellingPrice <= 0) {
+    if (!name || (!isGiftItem && sellingPrice <= 0)) {
       alert('Please provide a valid product name and selling price.');
       return;
     }
@@ -697,6 +701,8 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
         warrantyMonths,
         description,
         imageUrl,
+        isGiftItem: isGiftItem || undefined,
+        focType: isGiftItem ? focType : undefined,
       };
       onSave(updatedProduct);
       return;
@@ -725,6 +731,8 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
         imeiPairs: isPhone ? mergedPairs : undefined,
         imeiList: isPhone ? Array.from(mergedFlatSet) : undefined,
         imageUrl: imageUrl || matchedExactVariant.imageUrl,
+        isGiftItem: isGiftItem || matchedExactVariant.isGiftItem,
+        focType: isGiftItem ? focType : matchedExactVariant.focType,
         lastRestockedAt: new Date().toISOString(),
       };
       onSave(updatedVariant);
@@ -757,6 +765,8 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       warrantyMonths,
       description,
       imageUrl,
+      isGiftItem: isGiftItem || undefined,
+      focType: isGiftItem ? focType : undefined,
       lastRestockedAt: new Date().toISOString(),
     };
 
@@ -1635,20 +1645,98 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
               </div>
             )}
 
-            {/* Inputs Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Cost Price ({settings.currencySymbol})
+            {/* FOC / Promotional Gift Item Toggle & Accounting Options */}
+            <div className={`p-3 rounded-xl border transition-all ${
+              isGiftItem 
+                ? 'bg-purple-50/80 border-purple-300 shadow-2xs' 
+                : 'bg-white border-slate-200'
+            }`}>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    id="new-product-is-foc-checkbox"
+                    checked={isGiftItem}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsGiftItem(checked);
+                      if (checked) {
+                        if (focType === 'supplier_bonus' || focType === 'shop_funded_expensed') {
+                          setCostPrice(0);
+                        }
+                        if (sellingPrice === 0) {
+                          setSellingPrice(0);
+                        }
+                      }
+                    }}
+                    className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                  />
+                  <div className="flex items-center gap-1.5 font-bold text-xs text-purple-950">
+                    <Gift className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Register as FOC / Promotional Gift (အခမဲ့ / ပရိုမိုးရှင်းလက်ဆောင် ပစ္စည်းအဖြစ် သတ်မှတ်မည်)</span>
+                  </div>
                 </label>
+                {isGiftItem && (
+                  <span className="px-2 py-0.5 bg-purple-200 text-purple-900 rounded-full text-[10px] font-black tracking-wide uppercase border border-purple-300">
+                    🎁 FOC GIFT ITEM
+                  </span>
+                )}
+              </div>
+
+              {isGiftItem && (
+                <div className="mt-2.5 pt-2.5 border-t border-purple-200/80 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block text-[11px] font-bold text-purple-950 mb-1">
+                      FOC Type / Accounting Source:
+                    </label>
+                    <select
+                      value={focType}
+                      onChange={(e) => {
+                        const val = e.target.value as any;
+                        setFocType(val);
+                        if (val === 'supplier_bonus' || val === 'shop_funded_expensed') {
+                          setCostPrice(0);
+                        }
+                      }}
+                      className="w-full px-2.5 py-1.5 bg-white border border-purple-300 rounded-lg text-xs font-semibold text-purple-900 focus:ring-2 focus:ring-purple-500 focus:outline-hidden cursor-pointer"
+                    >
+                      <option value="supplier_bonus">Supplier Bonus (Free Stock / Cost 0 Ks)</option>
+                      <option value="shop_funded_asset">Shop-Funded Inventory Gift (Asset with Cost)</option>
+                      <option value="shop_funded_expensed">Pre-Expensed Promo Giveaway (Already Expensed / Cost 0 Ks)</option>
+                    </select>
+                  </div>
+
+                  <div className="text-[11px] text-purple-800 bg-white/80 p-2 rounded-lg border border-purple-200 flex items-center leading-relaxed">
+                    {focType === 'supplier_bonus' && (
+                      <span>💡 Supplier ထံမှ အလကားရသော Stock ဖြစ်သဖြင့် Cost = 0 Ks ဖြစ်ပြီး အရင်းငွေမကျခံရပါ။</span>
+                    )}
+                    {focType === 'shop_funded_asset' && (
+                      <span>💡 ဆိုင်မှ ငွေဖြင့်ဝယ်ယူထားသော Stock ဖြစ်ပြီး လက်ဆောင်ပေးချိန်တွင် Marketing စရိတ်သို့ လွှဲပြောင်းပါမည်။</span>
+                    )}
+                    {focType === 'shop_funded_expensed' && (
+                      <span>💡 ဝယ်ယူကတည်းက စရိတ်ပြထားပြီးဖြစ်သဖြင့် ပေးချိန်တွင် ငွေစာရင်း ထပ်မံမနုတ်ပါ (Double-deduction ကာကွယ်ထားသည်)။</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Inputs Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-start">
+              <div>
+                <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                  <label className="text-xs font-bold text-slate-700 truncate min-w-0 flex-1" title={`Cost Price (${settings.currencySymbol})`}>
+                    Cost Price ({settings.currencySymbol}) {isGiftItem && (focType === 'supplier_bonus' || focType === 'shop_funded_expensed') && <span className="text-purple-600 font-semibold">(0 Ks)</span>}
+                  </label>
+                </div>
                 <input
                   type="number"
                   inputMode="decimal"
                   min="0"
                   step="any"
-                  required
+                  required={!isGiftItem}
                   placeholder="0"
-                  value={costPrice === 0 ? '' : costPrice}
+                  value={costPrice === 0 ? (isGiftItem ? 0 : '') : costPrice}
                   onFocus={(e) => e.target.select()}
                   onClick={(e) => e.currentTarget.select()}
                   onKeyDown={(e) => {
@@ -1660,34 +1748,49 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                     const val = e.target.value;
                     setCostPrice(val === '' ? 0 : Math.max(0, parseFloat(val) || 0));
                   }}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500"
+                  className="h-9 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500"
                 />
-                <span className="text-[10px] text-slate-400 mt-0.5 block">Base purchase cost</span>
+                <span className="text-[10px] text-slate-400 mt-1 block truncate">
+                  {isGiftItem ? 'Stock cost asset valuation' : 'Base purchase cost'}
+                </span>
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-bold text-slate-700">
-                    Selling Price ({settings.currencySymbol}) *
+                <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                  <label className="text-xs font-bold text-slate-700 truncate min-w-0 flex-1" title={`Selling Price / Retail Price (${settings.currencySymbol})`}>
+                    Selling Price ({settings.currencySymbol}) {isGiftItem ? <span className="text-purple-700 font-bold">(Free)</span> : '*'}
                   </label>
-                  <button
-                    type="button"
-                    onClick={handleQuickCalculateFormula}
-                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline inline-flex items-center gap-0.5 cursor-pointer"
-                    title="Auto-calculate with 3-step formula"
-                  >
-                    <Calculator className="w-2.5 h-2.5 text-indigo-600" />
-                    <span>Auto</span>
-                  </button>
+                  {!isGiftItem ? (
+                    <button
+                      type="button"
+                      onClick={handleQuickCalculateFormula}
+                      className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline inline-flex items-center gap-0.5 cursor-pointer shrink-0"
+                      title="Auto-calculate with 3-step formula"
+                    >
+                      <Calculator className="w-2.5 h-2.5 text-indigo-600" />
+                      <span>Auto</span>
+                    </button>
+                  ) : (
+                    sellingPrice > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSellingPrice(0)}
+                        className="text-[10px] font-bold text-purple-700 hover:text-purple-900 hover:underline cursor-pointer shrink-0"
+                        title="Set selling price to 0 Ks for free promotional item"
+                      >
+                        Set 0
+                      </button>
+                    )
+                  )}
                 </div>
                 <input
                   type="number"
                   inputMode="decimal"
                   min="0"
                   step="any"
-                  required
-                  placeholder="0"
-                  value={sellingPrice === 0 ? '' : sellingPrice}
+                  required={!isGiftItem}
+                  placeholder={isGiftItem ? "0 (Free Gift)" : "0"}
+                  value={sellingPrice === 0 ? (isGiftItem ? 0 : '') : sellingPrice}
                   onFocus={(e) => e.target.select()}
                   onClick={(e) => e.currentTarget.select()}
                   onKeyDown={(e) => {
@@ -1699,15 +1802,21 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                     const val = e.target.value;
                     setSellingPrice(val === '' ? 0 : Math.max(0, parseFloat(val) || 0));
                   }}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-black text-emerald-700 bg-white focus:ring-2 focus:ring-emerald-500"
+                  className={`h-9 w-full px-3 py-2 border rounded-lg text-xs font-black bg-white focus:ring-2 ${
+                    isGiftItem 
+                      ? 'border-purple-300 text-purple-900 focus:ring-purple-500' 
+                      : 'border-slate-300 text-emerald-700 focus:ring-emerald-500'
+                  }`}
                 />
-                <span className="text-[10px] text-slate-400 mt-0.5 block">
-                  Manual or formula-generated
+                <span className="text-[10px] text-slate-400 mt-1 block truncate">
+                  {isGiftItem ? '0 Ks for free gift (or ref price)' : 'Manual or formula-generated'}
                 </span>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Quantity in Stock</label>
+                <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                  <label className="text-xs font-bold text-slate-700 truncate min-w-0 flex-1">Quantity in Stock</label>
+                </div>
                 <input
                   type="number"
                   min="0"
@@ -1717,15 +1826,17 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                   onFocus={(e) => e.target.select()}
                   onClick={(e) => e.currentTarget.select()}
                   onChange={(e) => setStock(e.target.value === '' ? 0 : parseInt(e.target.value) || 0)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white disabled:bg-slate-100"
+                  className="h-9 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white disabled:bg-slate-100"
                 />
-                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                <span className="text-[10px] text-slate-400 mt-1 block truncate">
                   {isPhone && imeiPairs.length > 0 ? 'Locked to IMEI count' : 'Available units'}
                 </span>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Low Stock Alert</label>
+                <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                  <label className="text-xs font-bold text-slate-700 truncate min-w-0 flex-1">Low Stock Alert</label>
+                </div>
                 <input
                   type="number"
                   min="0"
@@ -1747,9 +1858,11 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                       setMinStockAlert(0);
                     }
                   }}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500"
+                  className="h-9 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500"
                 />
-                <span className="text-[10px] text-slate-400 mt-0.5 block">0 = alert only when out of stock</span>
+                <span className="text-[10px] text-slate-400 mt-1 block truncate">
+                  {typeof minStockAlert === 'number' && minStockAlert === 0 ? '0 = alert only when out of stock' : 'Min alert threshold'}
+                </span>
               </div>
             </div>
           </div>

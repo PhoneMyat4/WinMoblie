@@ -33,7 +33,8 @@ import {
   Globe,
   Sparkles,
   RefreshCw,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Gift
 } from 'lucide-react';
 import { Product, ShopSettings } from '../../types';
 import { formatCurrency, formatDate, formatDateTime, formatImei, getCategoryLabel, getConditionLabel } from '../../utils/formatters';
@@ -198,6 +199,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 <span className={`px-2.5 py-0.5 rounded-md text-xs font-bold border ${cond.badgeClass}`}>
                   {cond.label}
                 </span>
+                {product.isGiftItem && (
+                  <span className="px-2.5 py-0.5 rounded-md bg-purple-100 text-purple-900 border border-purple-300 text-xs font-black tracking-wide flex items-center gap-1 shadow-2xs">
+                    <Gift className="w-3.5 h-3.5 text-purple-600" />
+                    <span>🎁 FOC PROMOTIONAL GIFT</span>
+                  </span>
+                )}
                 {product.subCategory && (
                   <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">
                     {product.subCategory}
@@ -369,29 +376,45 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             
             {/* Selling Price */}
-            <div className="p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-2xl">
+            <div className={`p-3.5 rounded-2xl border ${
+              product.isGiftItem ? 'bg-purple-50/70 border-purple-200' : 'bg-indigo-50/60 border-indigo-100'
+            }`}>
               <div className="flex items-center justify-between text-slate-500 text-[11px] font-bold mb-1">
-                <span>Retail Selling Price</span>
-                <DollarSign className="w-3.5 h-3.5 text-indigo-600" />
+                <span>{product.isGiftItem ? 'FOC Value' : 'Retail Selling Price'}</span>
+                {product.isGiftItem ? <Gift className="w-3.5 h-3.5 text-purple-600" /> : <DollarSign className="w-3.5 h-3.5 text-indigo-600" />}
               </div>
-              <p className="text-lg sm:text-xl font-black text-indigo-950">
-                {formatCurrency(product.sellingPrice, settings.currencySymbol)}
+              <p className={`text-lg sm:text-xl font-black ${product.isGiftItem ? 'text-purple-950' : 'text-indigo-950'}`}>
+                {product.isGiftItem && product.sellingPrice === 0 
+                  ? '0 Ks (Free Gift)' 
+                  : formatCurrency(product.sellingPrice, settings.currencySymbol)}
               </p>
-              <p className="text-[10px] text-emerald-700 font-bold mt-0.5">
-                +{formatCurrency(marginAmt, settings.currencySymbol)} profit ({marginPct}%)
+              <p className={`text-[10px] font-bold mt-0.5 ${product.isGiftItem ? 'text-purple-700' : 'text-emerald-700'}`}>
+                {product.isGiftItem 
+                  ? (product.sellingPrice > 0 ? 'Customer gift with retail ref value' : 'Free customer promotional giveaway')
+                  : `+${formatCurrency(marginAmt, settings.currencySymbol)} profit (${marginPct}%)`}
               </p>
             </div>
 
             {/* Cost Price */}
-            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+            <div className={`p-3.5 rounded-2xl border ${
+              product.isGiftItem ? 'bg-purple-50/40 border-purple-100' : 'bg-slate-50 border border-slate-200'
+            }`}>
               <div className="flex items-center justify-between text-slate-500 text-[11px] font-bold mb-1">
-                <span>Unit Cost Price</span>
+                <span>{product.isGiftItem ? 'Accounting Cost' : 'Unit Cost Price'}</span>
                 <Tag className="w-3.5 h-3.5 text-slate-500" />
               </div>
               <p className="text-lg sm:text-xl font-black text-slate-800">
                 {formatCurrency(product.costPrice, settings.currencySymbol)}
               </p>
-              <p className="text-[10px] text-slate-400 mt-0.5">Acquisition cost</p>
+              <p className="text-[10px] text-slate-500 mt-0.5">
+                {product.isGiftItem 
+                  ? (product.focType === 'shop_funded_asset' 
+                      ? 'Shop-funded asset inventory' 
+                      : product.focType === 'shop_funded_expensed' 
+                        ? 'Pre-expensed (No double deduction)' 
+                        : 'Supplier bonus (0 Ks cost)')
+                  : 'Acquisition cost'}
+              </p>
             </div>
 
             {/* In-Stock Quantity */}

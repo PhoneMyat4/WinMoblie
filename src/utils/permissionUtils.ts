@@ -46,6 +46,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canManageBranches: true,
     canTransferStock: true,
     canApproveTransfer: true,
+    canApplyFoc: true,
   },
   Manager: {
     canAccessDashboard: true,
@@ -83,6 +84,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canManageBranches: true,
     canTransferStock: true,
     canApproveTransfer: true,
+    canApplyFoc: true,
   },
   Cashier: {
     canAccessDashboard: true,
@@ -120,6 +122,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canManageBranches: false,
     canTransferStock: false,
     canApproveTransfer: false,
+    canApplyFoc: true,
   },
   Inventory_Staff: {
     canAccessDashboard: false,
@@ -157,6 +160,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<StaffRole, RolePermissions> = {
     canManageBranches: false,
     canTransferStock: true,
     canApproveTransfer: false,
+    canApplyFoc: false,
   },
 };
 
@@ -210,6 +214,14 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
     category: 'pos',
     categoryLabel: 'POS & Sales Register',
     desc: 'Perform manual Cash In / Cash Out drawer adjustments and end-of-shift reconciliations.',
+    riskLevel: 'moderate',
+  },
+  {
+    key: 'canApplyFoc',
+    label: 'Apply FOC / Gifts',
+    category: 'pos',
+    categoryLabel: 'POS & Sales Register',
+    desc: 'Mark line items as FOC (Free of Charge / 0 Ks) during checkout for promotions and customer gifts.',
     riskLevel: 'moderate',
   },
 

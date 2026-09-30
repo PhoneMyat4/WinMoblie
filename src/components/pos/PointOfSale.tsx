@@ -40,8 +40,9 @@ import {
   Utensils,
   ShieldAlert,
   Info,
-  Building2,
-  ArrowRightLeft
+  Building2, 
+  ArrowRightLeft,
+  Gift
 } from 'lucide-react';
 import { 
   Product, 
@@ -53,7 +54,8 @@ import {
   PaymentMethod, 
   ImeiPair,
   PreOrder,
-  CreditSaleRecord
+  CreditSaleRecord,
+  StaffUser
 } from '../../types';
 import { canonicalCategory, isPhoneCategory } from '../../data/categoryTaxonomy';
 import { formatCurrency, formatImei, formatDualImei, getCategoryLabel, getConditionLabel } from '../../utils/formatters';
@@ -66,7 +68,10 @@ import { PosProductHoverPreview, PosProductMobileDetailModal } from './PosProduc
 import { PreOrderSearchModal } from '../modals/PreOrderSearchModal';
 import { PreOrderFormModal } from '../modals/PreOrderFormModal';
 import { CrossBranchStockModal } from '../branches/CrossBranchStockModal';
+import { FocDistributionModal } from '../modals/FocDistributionModal';
 import { StorageService } from '../../utils/storage';
+import { checkUserPermission } from '../../utils/permissionUtils';
+import { AuditLogger } from '../../utils/auditLogger';
 import { firestoreSync } from '../../services/firestoreSyncService';
 import { AppLink } from '../common/AppLink';
 import { 
@@ -89,6 +94,9 @@ interface PointOfSaleProps {
   onClearActivePreOrder?: () => void;
   onCompleteSale: (sale: Sale, updatedProducts: Product[], updatedCustomer?: Customer) => void;
   onAddNewCustomer: (customer: Customer) => void;
+  currentStaffUser?: StaffUser | null;
+  rolePermissions?: Record<string, any>;
+  onProductUpdated?: (updatedProduct: Product) => void;
 }
 
 export const PointOfSale: React.FC<PointOfSaleProps> = ({
@@ -99,6 +107,9 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
   onClearActivePreOrder,
   onCompleteSale,
   onAddNewCustomer,
+  currentStaffUser,
+  rolePermissions,
+  onProductUpdated,
 }) => {
   const { t, isBurmese } = useLanguage();
 
@@ -146,6 +157,44 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
   const [orderDiscount, setOrderDiscount] = useState<number>(0);
   const [discountType, setDiscountType] = useState<'flat' | 'percent'>('flat');
   const [taxEnabled, setTaxEnabled] = useState<boolean>(true);
+
+  // FOC & Gift System State
+  const [focTargetIndex, setFocTargetIndex] = useState<number | null>(null);
+  const [focCustomReason, setFocCustomReason] = useState<string>('');
+  const [focSelectedPreset, setFocSelectedPreset] = useState<string>('promo');
+  const [isFocDistributionModalOpen, setIsFocDistributionModalOpen] = useState<boolean>(false);
+
+  const canApplyFoc = useMemo(() => {
+    if (!currentStaffUser) return true;
+    return checkUserPermission(currentStaffUser, 'canApplyFoc');
+  }, [currentStaffUser]);
+
+  const applyFocToItem = (index: number, reason: string) => {
+    setCart(prev => prev.map((item, idx) => {
+      if (idx !== index) return item;
+      const normalPrice = item.customPrice ?? item.product.sellingPrice;
+      return {
+        ...item,
+        isFoc: true,
+        focReason: reason,
+        originalPrice: normalPrice,
+        discount: 0,
+      };
+    }));
+    setFocTargetIndex(null);
+    setFocCustomReason('');
+  };
+
+  const removeFocFromItem = (index: number) => {
+    setCart(prev => prev.map((item, idx) => {
+      if (idx !== index) return item;
+      return {
+        ...item,
+        isFoc: false,
+        focReason: undefined,
+      };
+    }));
+  };
 
   // Modals
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
@@ -888,15 +937,22 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
 
   // Calculations
   const subtotal = cart.reduce((sum, item) => {
+    if (item.isFoc) return sum;
     const price = item.customPrice ?? item.product.sellingPrice;
     return sum + (price * item.quantity);
   }, 0);
 
-  const itemDiscounts = cart.reduce((sum, item) => sum + item.discount, 0);
+  const itemDiscounts = cart.reduce((sum, item) => sum + (item.isFoc ? 0 : item.discount), 0);
   const globalDiscountAmount = discountType === 'percent' 
     ? (subtotal * (orderDiscount / 100)) 
     : orderDiscount;
   const totalDiscount = Number((itemDiscounts + globalDiscountAmount).toFixed(2));
+
+  const totalGiftsValue = cart.reduce((sum, item) => {
+    if (!item.isFoc) return sum;
+    const orig = item.originalPrice ?? (item.customPrice ?? item.product.sellingPrice);
+    return sum + (orig * item.quantity);
+  }, 0);
 
   const taxableSubtotal = Math.max(0, subtotal - totalDiscount);
   const taxRate = taxEnabled ? settings.taxRatePercent : 0;
@@ -952,11 +1008,14 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
       imei: item.selectedImei,
       imei2: item.selectedImei2,
       quantity: item.quantity,
-      unitPrice: item.customPrice ?? item.product.sellingPrice,
+      unitPrice: item.isFoc ? 0 : (item.customPrice ?? item.product.sellingPrice),
       costPrice: item.product.costPrice,
-      discount: item.discount,
-      finalPrice: Number(((item.customPrice ?? item.product.sellingPrice) * item.quantity - item.discount).toFixed(2)),
+      discount: item.isFoc ? 0 : item.discount,
+      finalPrice: item.isFoc ? 0 : Number(((item.customPrice ?? item.product.sellingPrice) * item.quantity - item.discount).toFixed(2)),
       warrantyPeriod: item.warrantyPeriod,
+      isFoc: item.isFoc,
+      focReason: item.focReason,
+      originalPrice: item.originalPrice ?? (item.customPrice ?? item.product.sellingPrice),
     }));
 
     const newSale: Sale = {
@@ -979,7 +1038,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
       paymentDetails: paymentInfo.paymentDetails,
       pointsEarned: paymentInfo.pointsEarned,
       pointsRedeemed: paymentInfo.pointsRedeemed,
-      soldBy: settings.currentStaffName,
+      soldBy: currentStaffUser?.name || settings.currentStaffName,
       locationId: StorageService.getActiveLocationId(),
       locationName: StorageService.getActiveLocation().name,
       status: 'completed',
@@ -987,6 +1046,20 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
       preOrderNumber: activePreOrderFulfillment?.preOrderNumber,
       depositDeducted: activePreOrderFulfillment?.depositAmount,
     };
+
+    // Automatically log audit trail for any FOC Gift items given
+    cart.forEach(item => {
+      if (item.isFoc) {
+        const giftVal = (item.originalPrice ?? (item.customPrice ?? item.product.sellingPrice)) * item.quantity;
+        AuditLogger.logFocGift(
+          invoiceNumber,
+          item.product.name,
+          giftVal,
+          item.focReason || 'Customer Gift / Promotion',
+          currentStaffUser || null
+        );
+      }
+    });
 
     // If Credit Sale (Accounts Receivable), generate and store CreditSaleRecord
     let creditRecord: CreditSaleRecord | undefined;
@@ -1293,6 +1366,18 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                       {pendingPreOrdersCount}
                     </span>
                   )}
+                </button>
+
+                {/* Standalone FOC Gift Issue Button */}
+                <button
+                  type="button"
+                  id="pos-foc-issue-btn"
+                  onClick={() => setIsFocDistributionModalOpen(true)}
+                  title="Issue Standalone FOC Gift from Inventory (သီးသန့် ပရိုမိုးရှင်းလက်ဆောင် ထုတ်ပေးမည်)"
+                  className="flex-1 sm:flex-none justify-center px-2.5 sm:px-3 py-2 sm:py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs rounded-xl border border-purple-200 shadow-xs transition-all shrink-0 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Gift className="w-4 h-4 text-purple-600 shrink-0" />
+                  <span className="text-xs">Gift Issue</span>
                 </button>
 
                 {/* Sound Feedback Toggle */}
@@ -2424,16 +2509,31 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
             ) : (
               cart.map((item, index) => {
                 const isPhone = isPhoneCategory(item.product.category);
-                const unitPrice = item.customPrice ?? item.product.sellingPrice;
-                const itemTotal = unitPrice * item.quantity - item.discount;
+                const normalPrice = item.customPrice ?? item.product.sellingPrice;
+                const unitPrice = item.isFoc ? 0 : normalPrice;
+                const itemTotal = item.isFoc ? 0 : Math.max(0, unitPrice * item.quantity - item.discount);
 
                 return (
                   <div key={index} className="pt-2 pb-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
-                        <h4 className="text-xs font-bold text-slate-900 line-clamp-1">{item.product.name}</h4>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="text-xs font-bold text-slate-900 line-clamp-1">{item.product.name}</h4>
+                          {item.isFoc && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[9px] font-black border border-purple-200">
+                              <Gift className="w-2.5 h-2.5 text-purple-600" />
+                              FOC GIFT
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                          <span>{formatCurrency(unitPrice, settings.currencySymbol)} each</span>
+                          {item.isFoc ? (
+                            <span className="text-purple-700 font-bold">
+                              🎁 Free Gift ({item.focReason || 'Promotion'})
+                            </span>
+                          ) : (
+                            <span>{formatCurrency(unitPrice, settings.currencySymbol)} each</span>
+                          )}
                           {item.product.color && item.product.color.trim() && (
                             <span className="inline-flex items-center gap-1 bg-amber-50/80 text-amber-900 font-semibold px-1.5 py-0.2 rounded border border-amber-200/80">
                               <span
@@ -2453,16 +2553,25 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                               {item.product.rom}
                             </span>
                           )}
-                          {item.discount > 0 && (
+                          {!item.isFoc && item.discount > 0 && (
                             <span className="text-rose-600 font-medium">(-{formatCurrency(item.discount, settings.currencySymbol)} discount)</span>
                           )}
                         </div>
                       </div>
 
                       <div className="text-right">
-                        <span className="text-xs font-black text-slate-900">
-                          {formatCurrency(itemTotal, settings.currencySymbol)}
-                        </span>
+                        {item.isFoc ? (
+                          <div>
+                            <span className="text-xs font-black text-emerald-700 font-mono">0 Ks</span>
+                            <span className="block text-[9px] text-slate-400 line-through">
+                              {formatCurrency(normalPrice * item.quantity, settings.currencySymbol)}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs font-black text-slate-900">
+                            {formatCurrency(itemTotal, settings.currencySymbol)}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -2597,20 +2706,49 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                       )}
 
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-slate-500">Disc:</span>
-                        <input
-                          type="number"
-                          placeholder="0"
-                          value={item.discount === 0 ? '' : item.discount}
-                          onFocus={(e) => e.target.select()}
-                          onClick={(e) => e.currentTarget.select()}
-                          onChange={(e) => updateItemDiscount(index, e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
-                          className="w-16 px-1.5 py-0.5 text-xs border border-slate-300 rounded text-right font-bold"
-                        />
+                        {item.isFoc ? (
+                          <button
+                            type="button"
+                            onClick={() => removeFocFromItem(index)}
+                            className="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded text-[10px] font-bold cursor-pointer transition-colors"
+                            title="Cancel FOC and restore normal price"
+                          >
+                            Cancel FOC
+                          </button>
+                        ) : canApplyFoc ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFocTargetIndex(index);
+                              setFocSelectedPreset('promo');
+                              setFocCustomReason('');
+                            }}
+                            className="px-2 py-0.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                            title="Mark item as FOC Free Gift"
+                          >
+                            <Gift className="w-3 h-3 text-purple-600" />
+                            <span>FOC</span>
+                          </button>
+                        ) : null}
+
+                        {!item.isFoc && (
+                          <>
+                            <span className="text-[10px] text-slate-500">Disc:</span>
+                            <input
+                              type="number"
+                              placeholder="0"
+                              value={item.discount === 0 ? '' : item.discount}
+                              onFocus={(e) => e.target.select()}
+                              onClick={(e) => e.currentTarget.select()}
+                              onChange={(e) => updateItemDiscount(index, e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
+                              className="w-16 px-1.5 py-0.5 text-xs border border-slate-300 rounded text-right font-bold"
+                            />
+                          </>
+                        )}
                         <button
                           type="button"
                           onClick={() => removeFromCart(index)}
-                          className="p-1 text-slate-400 hover:text-rose-600"
+                          className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -2687,6 +2825,15 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                 <div className="flex justify-between text-emerald-700 font-bold bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">
                   <span>{isBurmese ? 'ကြိုတင်ပေးစရံငွေ နုတ်ပယ်မှု:' : 'Pre-Paid Deposit Deduction:'}</span>
                   <span>-{formatCurrency(activePreOrderFulfillment.depositAmount, settings.currencySymbol)}</span>
+                </div>
+              )}
+              {totalGiftsValue > 0 && (
+                <div className="flex justify-between text-purple-800 font-bold bg-purple-50 px-2 py-1 rounded-md border border-purple-200">
+                  <span className="flex items-center gap-1">
+                    <Gift className="w-3.5 h-3.5 text-purple-600" />
+                    <span>{isBurmese ? 'အခမဲ့လက်ဆောင် စုစုပေါင်း:' : 'Free Gifts Value:'}</span>
+                  </span>
+                  <span className="font-mono">+{formatCurrency(totalGiftsValue, settings.currencySymbol)} (Free)</span>
                 </div>
               )}
               <div className="flex justify-between text-base font-black text-slate-900 pt-1.5 border-t border-slate-200">
@@ -2845,6 +2992,104 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
           product={crossBranchProduct}
           currencySymbol={settings.currencySymbol}
           onClose={() => setCrossBranchProduct(null)}
+        />
+      )}
+
+      {/* Quick FOC / Gift Reason Selection Modal */}
+      {focTargetIndex !== null && cart[focTargetIndex] && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-modal-backdrop">
+          <div className="bg-white rounded-3xl p-5 shadow-2xl border border-slate-200 w-full max-w-md space-y-4 animate-modal-content">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                  <Gift className="w-5 h-5 text-purple-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Apply FOC Gift (အခမဲ့လက်ဆောင်)</h3>
+                  <p className="text-xs text-slate-500 font-medium truncate max-w-[260px]">
+                    {cart[focTargetIndex].product.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setFocTargetIndex(null); setFocCustomReason(''); }}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-700">
+                လက်ဆောင်ပေးရသည့် အကြောင်းပြချက် ရွေးချယ်ပါ (Select FOC Reason):
+              </label>
+              <div className="grid grid-cols-1 gap-1.5 max-h-[260px] overflow-y-auto">
+                {[
+                  { id: 'promo_bundle', labelMm: '🎁 ပရိုမိုးရှင်း လက်ဆောင် (Promotion Bundle Gift)' },
+                  { id: 'vip_reward', labelMm: '👑 VIP ဝယ်လက် လက်ဆောင် (VIP Customer Reward)' },
+                  { id: 'phone_purchase', labelMm: '📱 ဖုန်းဝယ်ယူမှု အထူးလက်ဆောင် (Phone Purchase Gift)' },
+                  { id: 'lucky_draw', labelMm: '🎉 ကံစမ်းမဲ / ဆုလက်ဆောင် (Lucky Draw / Prize)' },
+                  { id: 'defect_comp', labelMm: '🔧 ချို့ယွင်းချက် လျော်ကြေး (Defect Compensation)' },
+                  { id: 'campaign', labelMm: '🏷️ အရောင်းမြှင့်တင်ရေး (Sales Promotion)' },
+                  { id: 'custom', labelMm: '✏️ အခြား အကြောင်းပြချက် (Custom Reason)' },
+                ].map(r => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => {
+                      if (r.id === 'custom') {
+                        setFocSelectedPreset('custom');
+                      } else {
+                        applyFocToItem(focTargetIndex, r.labelMm);
+                      }
+                    }}
+                    className={`text-left px-3 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                      focSelectedPreset === r.id && r.id === 'custom'
+                        ? 'bg-purple-100 text-purple-900 border-purple-400 font-bold'
+                        : 'bg-slate-50 hover:bg-purple-50 hover:text-purple-900 hover:border-purple-300 border-slate-200 text-slate-800'
+                    }`}
+                  >
+                    {r.labelMm}
+                  </button>
+                ))}
+              </div>
+
+              {focSelectedPreset === 'custom' && (
+                <div className="pt-2 space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Enter custom gift reason (e.g. မွေးနေ့လက်ဆောင်)..."
+                    value={focCustomReason}
+                    onChange={(e) => setFocCustomReason(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-purple-500 outline-hidden"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    disabled={!focCustomReason.trim()}
+                    onClick={() => applyFocToItem(focTargetIndex, focCustomReason.trim())}
+                    className="w-full py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Confirm FOC Gift (လက်ဆောင် သတ်မှတ်မည်)
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Standalone FOC Gift Distribution Modal */}
+      {isFocDistributionModalOpen && (
+        <FocDistributionModal
+          products={products}
+          settings={settings}
+          currentStaffUser={currentStaffUser}
+          onClose={() => setIsFocDistributionModalOpen(false)}
+          onSuccess={(updatedProd) => {
+            if (onProductUpdated) onProductUpdated(updatedProd);
+          }}
         />
       )}
 

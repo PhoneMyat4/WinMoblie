@@ -14,7 +14,8 @@ import {
   Phone,
   Check,
   RotateCcw,
-  AlertTriangle
+  AlertTriangle,
+  Gift
 } from 'lucide-react';
 import { Sale, ShopSettings, InvoiceCustomization } from '../../types';
 import { formatCurrency, formatDateTime, formatImei, getPaymentMethodInfo, formatSalePaymentBreakdown } from '../../utils/formatters';
@@ -127,6 +128,9 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
   };
 
   const payInfo = getPaymentMethodInfo(sale.paymentMethod);
+  const totalGiftSaved = sale.items
+    .filter(i => i.isFoc)
+    .reduce((sum, i) => sum + (i.originalPrice || i.unitPrice) * i.quantity, 0);
 
   const handlePrint = () => {
     const originalTitle = document.title;
@@ -322,6 +326,17 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                         <td className="py-2.5 px-4 align-top">
                           <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                             <span>{item.name}</span>
+                            {item.isFoc && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[9px] font-black border border-purple-200">
+                                <Gift className="w-2.5 h-2.5 text-purple-600" />
+                                FOC / လက်ဆောင်
+                              </span>
+                            )}
+                            {item.isFoc && item.focReason && (
+                              <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded italic border border-purple-100 font-normal">
+                                {item.focReason}
+                              </span>
+                            )}
                             {item.color && (
                               <span className="text-[10px] font-semibold text-amber-900 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
                                 {item.color}
@@ -362,15 +377,30 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                           ) : null}
                         </td>
                         <td className="py-2.5 px-3 text-right font-mono align-top text-slate-700">
-                          {formatCurrency(item.unitPrice, settings.currencySymbol)}
-                          {item.discount > 0 && (
-                            <span className="block text-[10px] text-rose-600">-{formatCurrency(item.discount, settings.currencySymbol)}</span>
+                          {item.isFoc ? (
+                            <div>
+                              <span className="line-through text-slate-400 block text-[10px]">
+                                {formatCurrency(item.originalPrice || item.unitPrice, settings.currencySymbol)}
+                              </span>
+                              <span className="font-bold text-emerald-700 text-xs font-mono">0 Ks (FREE)</span>
+                            </div>
+                          ) : (
+                            <>
+                              {formatCurrency(item.unitPrice, settings.currencySymbol)}
+                              {item.discount > 0 && (
+                                <span className="block text-[10px] text-rose-600">-{formatCurrency(item.discount, settings.currencySymbol)}</span>
+                              )}
+                            </>
                           )}
                         </td>
                         <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900 align-top">
-                          <span className={item.refundedQuantity === item.quantity ? 'line-through text-slate-400' : ''}>
-                            {formatCurrency(item.finalPrice, settings.currencySymbol)}
-                          </span>
+                          {item.isFoc ? (
+                            <span className="text-emerald-700 font-bold font-mono">0 Ks</span>
+                          ) : (
+                            <span className={item.refundedQuantity === item.quantity ? 'line-through text-slate-400' : ''}>
+                              {formatCurrency(item.finalPrice, settings.currencySymbol)}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -444,6 +474,13 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                     <div className="flex justify-between text-slate-600">
                       <span>Tax ({sale.taxRate}%):</span>
                       <span className="font-mono">{formatCurrency(sale.taxTotal, settings.currencySymbol)}</span>
+                    </div>
+                  )}
+
+                  {totalGiftSaved > 0 && (
+                    <div className="flex justify-between text-purple-800 font-bold bg-purple-50 px-2 py-1 rounded-lg border border-purple-200 text-[11px]">
+                      <span>🎁 Total You Saved Today:</span>
+                      <span className="font-mono">+{formatCurrency(totalGiftSaved, settings.currencySymbol)}</span>
                     </div>
                   )}
 
@@ -583,6 +620,11 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                       <div className="flex justify-between font-bold">
                         <span className="truncate pr-2 flex items-center gap-1">
                           <span>{item.name}</span>
+                          {item.isFoc && (
+                            <span className="text-[8px] bg-purple-100 text-purple-900 px-1 rounded font-black border border-purple-200">
+                              [FOC]
+                            </span>
+                          )}
                           {item.color && (
                             <span className="text-[9px] font-semibold text-amber-900 bg-amber-50 px-1 rounded border border-amber-200">
                               {item.color}
@@ -600,15 +642,21 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                           ) : null}
                         </span>
                         <span className={item.refundedQuantity === item.quantity ? 'line-through text-slate-400' : ''}>
-                          {formatCurrency(item.finalPrice, settings.currencySymbol)}
+                          {item.isFoc ? '0 Ks (FOC)' : formatCurrency(item.finalPrice, settings.currencySymbol)}
                         </span>
                       </div>
 
                       <div className="text-[10px] text-slate-500 flex justify-between">
-                        <span>
-                          {item.quantity} x {formatCurrency(item.unitPrice, settings.currencySymbol)} {item.discount > 0 ? `(-${formatCurrency(item.discount, settings.currencySymbol)})` : ''}
-                          {item.refundedQuantity && item.refundedQuantity > 0 ? ` [Ret: -${item.refundedQuantity}]` : ''}
-                        </span>
+                        {item.isFoc ? (
+                          <span className="text-purple-700 font-bold">
+                            🎁 Free Gift ({item.focReason || 'Promotion'}) [Val: {formatCurrency((item.originalPrice || item.unitPrice) * item.quantity, settings.currencySymbol)}]
+                          </span>
+                        ) : (
+                          <span>
+                            {item.quantity} x {formatCurrency(item.unitPrice, settings.currencySymbol)} {item.discount > 0 ? `(-${formatCurrency(item.discount, settings.currencySymbol)})` : ''}
+                            {item.refundedQuantity && item.refundedQuantity > 0 ? ` [Ret: -${item.refundedQuantity}]` : ''}
+                          </span>
+                        )}
                         {custom.showWarrantyDetails && item.warrantyPeriod && (
                           <span className="text-emerald-700 font-semibold">{item.warrantyPeriod}</span>
                         )}
@@ -641,6 +689,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                   <div className="flex justify-between text-slate-600">
                     <span>Tax ({sale.taxRate}%):</span>
                     <span>{formatCurrency(sale.taxTotal, settings.currencySymbol)}</span>
+                  </div>
+                )}
+                {totalGiftSaved > 0 && (
+                  <div className="flex justify-between font-bold text-purple-900 border-t border-dashed border-purple-200 pt-1">
+                    <span>Total You Saved Today:</span>
+                    <span className="font-mono">{formatCurrency(totalGiftSaved, settings.currencySymbol)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-sm font-black pt-1 border-t border-slate-300 text-slate-900">

@@ -894,6 +894,11 @@ export default function App() {
               onClearActivePreOrder={handleClearActivePreOrder}
               onCompleteSale={handleCompleteSale}
               onAddNewCustomer={handleSaveCustomer}
+              currentStaffUser={currentActiveUser}
+              rolePermissions={rolePermissions}
+              onProductUpdated={(updated) => {
+                setProducts(StorageService.getProducts());
+              }}
             />
           )}
 

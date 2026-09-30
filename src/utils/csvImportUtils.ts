@@ -587,6 +587,25 @@ export function matchHeaderKey(rawHeader: string): string | null {
     return 'name';
   }
 
+  // 19. FOC / Gift Item (e.g. "Is_FOC_Gift", "is_foc", "foc", "gift_item", "is_gift", "free_gift", "လက်ဆောင်")
+  if (
+    norm === 'isfoc' || norm === 'foc' || norm === 'isgift' || norm === 'gift' || 
+    norm === 'isgiftitem' || norm === 'isfocgift' || norm === 'freegift' ||
+    norm.includes('isfoc') || norm.includes('giftitem') || norm.includes('focgift') || 
+    (norm.includes('foc') && !norm.includes('type')) ||
+    origLower.includes('လက်ဆောင်') || origLower.includes('အခမဲ့')
+  ) {
+    return 'isGiftItem';
+  }
+
+  // 20. FOC Type (e.g. "FOC_Type", "gift_type", "foc_source")
+  if (
+    norm === 'foctype' || norm === 'gifttype' || norm.includes('foctype') || 
+    norm.includes('focsource') || norm.includes('gifttype')
+  ) {
+    return 'focType';
+  }
+
   return null;
 }
 
@@ -664,6 +683,8 @@ export function parseBulkCsvProducts(
     imeis: -1,
     warranty: -1,
     description: -1,
+    isGiftItem: -1,
+    focType: -1,
   };
 
   let dataLines: string[] = [];
@@ -772,16 +793,35 @@ export function parseBulkCsvProducts(
 
     const color = extractNormalizedColor(getVal('color')) || specsParsed.color || (isPhone ? 'Standard' : undefined);
 
+    // FOC / Gift Item attributes
+    const rawIsFoc = getVal('isGiftItem').toLowerCase();
+    const isGiftItem = rawIsFoc === 'yes' || rawIsFoc === 'true' || rawIsFoc === '1' || rawIsFoc === 'y' || rawIsFoc === 'foc' || rawIsFoc === 'gift' || rawIsFoc === 'free' || rawIsFoc.includes('လက်ဆောင်') || rawIsFoc.includes('အခမဲ့') || rawName.toLowerCase().includes('(foc)') || rawName.toLowerCase().includes('[foc]') || rawName.toLowerCase().includes('(gift)') || rawName.toLowerCase().includes('လက်ဆောင်');
+    
+    let focType: 'supplier_bonus' | 'shop_funded_asset' | 'shop_funded_expensed' | undefined;
+    if (isGiftItem) {
+      const rawFocType = getVal('focType').toLowerCase();
+      if (rawFocType.includes('asset') || rawFocType.includes('shop_funded_asset')) {
+        focType = 'shop_funded_asset';
+      } else if (rawFocType.includes('expense') || rawFocType.includes('expensed') || rawFocType.includes('shop_funded_expensed')) {
+        focType = 'shop_funded_expensed';
+      } else {
+        focType = 'supplier_bonus';
+      }
+    }
+
     const rawCost = getVal('costPrice');
-    const costPrice = parseCleanNumber(rawCost, 0);
+    let costPrice = parseCleanNumber(rawCost, 0);
+    if (isGiftItem && (focType === 'supplier_bonus' || focType === 'shop_funded_expensed' || !rawCost)) {
+      costPrice = 0;
+    }
 
     const rawSelling = getVal('sellingPrice');
     const sellingPrice = parseCleanNumber(rawSelling, 0);
 
-    if (sellingPrice <= 0) {
+    if (!isGiftItem && sellingPrice <= 0) {
       errors.push('Selling price must be greater than 0');
     }
-    if (costPrice > sellingPrice && sellingPrice > 0) {
+    if (!isGiftItem && costPrice > sellingPrice && sellingPrice > 0) {
       warnings.push(`Cost price (${costPrice.toLocaleString()}) is higher than selling price (${sellingPrice.toLocaleString()})`);
     }
 
@@ -848,6 +888,8 @@ export function parseBulkCsvProducts(
       dualImei: isPhone ? parsedImeis.some(p => !!p.imei2) : undefined,
       warrantyMonths,
       description,
+      isGiftItem: isGiftItem || undefined,
+      focType,
       lastRestockedAt: new Date().toISOString(),
     };
 
@@ -901,11 +943,12 @@ export const SAMPLE_CSV_TEMPLATES: CsvTemplatePreset[] = [
     id: 'inventory_export_format',
     name: 'Exported Inventory Stock List Format',
     description: 'Exact format exported from the Inventory screen. Directly re-importable with full SKU, Barcodes, Specs, and IMEIs.',
-    csvContent: `"Product Name","Brand","Category","Subcategory","Condition","Cost Price (Ks)","Selling Price (Ks)","Stock (Units)","Min Alert Level","RAM","ROM","Color","Specs / Storage / Color","SKU","Barcode","Serialized IMEIs","Warranty (Months)"
-"Redmi 9A","Redmi","Brand new phones","-","Brand New (Sealed)","425000","479000","1","0","4GB","64GB","Black","4GB RAM • 64GB • Black","SKU-435331","111228795337","862675065232361","12"
-"Redmi A7pro","Redmi","Brand new phones","-","Brand New (Sealed)","580000","639000","2","0","4GB","64GB","Black","4GB RAM • 64GB • Black","SKU-826254","224338118334","866286085182101; 866704087369401","12"
-"Ansty C056 Fast Charger","Ansty","Accessories","Fast Charger","Brand New","3850","6000","40","10","-","-","White","-","SKU-18419","150000293812","-","6"
-"Daw Pu ဟင်းချက်အိုး","Daw Pu","Cookware","ဟင်းချက်အိုး","Brand New","620000","770000","2","0","-","-","Silver","-","SKU-99590","901000382910","-","12"`
+    csvContent: `"Product Name","Brand","Category","Subcategory","Condition","Cost Price (Ks)","Selling Price (Ks)","Stock (Units)","Min Alert Level","RAM","ROM","Color","Specs / Storage / Color","SKU","Barcode","Serialized IMEIs","Warranty (Months)","Is_FOC_Gift","FOC_Type"
+"Redmi 9A","Redmi","Brand new phones","-","Brand New (Sealed)","425000","479000","1","0","4GB","64GB","Black","4GB RAM • 64GB • Black","SKU-435331","111228795337","862675065232361","12","No","-"
+"Redmi A7pro","Redmi","Brand new phones","-","Brand New (Sealed)","580000","639000","2","0","4GB","64GB","Black","4GB RAM • 64GB • Black","SKU-826254","224338118334","866286085182101; 866704087369401","12","No","-"
+"Remax 20W Fast Charger (Promo Gift)","Remax","Accessories","Fast Charger","Brand New","0","0","50","10","-","-","White","-","SKU-18419","150000293812","-","6","Yes","supplier_bonus"
+"Ansty C056 Fast Charger","Ansty","Accessories","Fast Charger","Brand New","3850","6000","40","10","-","-","White","-","SKU-18420","150000293813","-","6","No","-"
+"Daw Pu ဟင်းချက်အိုး","Daw Pu","Cookware","ဟင်းချက်အိုး","Brand New","620000","770000","2","0","-","-","Silver","-","SKU-99590","901000382910","-","12","No","-"`
   },
   {
     id: 'smartphones_imei',
@@ -949,5 +992,16 @@ Samsung Galaxy Buds2 Pro,Samsung,450000,380000,10,Graphite
 Remax RPP-296 20000mAh Power Bank,Remax,45000,32000,20,Black
 Baseus 100W PD 5A Type-C Cable,Baseus,18000,12000,40,Black
 Apple iPhone 15 Pro 256GB Natural Titanium,Apple,3750000,3400000,2,Natural Titanium`
+  },
+  {
+    id: 'foc_promotional_gifts',
+    name: '🎁 FOC & Promotional Gifts (Bonus Stock & Giveaways)',
+    description: 'Bulk register supplier bonus gifts (Cost 0 Ks) and shop-funded giveaways with FOC flags and accounting types.',
+    csvContent: `Name,Brand,Category,SubCategory,CostPrice,SellingPrice,Stock,Is_FOC_Gift,FOC_Type,Description
+Remax 20W Fast Charger (Promo Gift),Remax,accessories,Fast Chargers & Adapters,0,25000,50,Yes,supplier_bonus,Supplier bonus gift given with phone purchase
+9D Privacy Tempered Glass (Gift),Remax,accessories,Screen Protectors,0,12000,100,Yes,supplier_bonus,Free screen protector gift with phone
+Transparent Silicone Case (VIP Gift),Generic,accessories,Cases & Covers,0,8000,80,Yes,supplier_bonus,Free transparent clear protective case
+Samsung 10000mAh Powerbank (PR Gift),Samsung,accessories,Power Banks,0,45000,20,Yes,shop_funded_expensed,Influencer and VIP promotional giveaway
+Hoco W35 Wireless Headphones (Event Gift),Hoco,gadgets,Audio,0,35000,15,Yes,supplier_bonus,Grand opening contest prize unit`
   }
 ];
