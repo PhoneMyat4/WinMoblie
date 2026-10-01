@@ -973,7 +973,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                         </span>
                       </div>
                       <span className="text-[10px] text-slate-400 font-mono">
-                        Model: {marketCheckData.modelUsed || 'gemini-3.5-flash'}
+                        Model: {marketCheckData.modelUsed || 'gemini-3.8-flash'}
                       </span>
                     </div>
 

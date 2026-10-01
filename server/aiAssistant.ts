@@ -542,15 +542,18 @@ export function filterByDateRange(sales: Sale[], dateRangePreset: string): Sale[
 
   let startDate: Date;
   let endDate = endOfMyanmarDay(year, month, date);
+  let targetIsoDate = mNow.isoDateString;
 
   switch (dateRangePreset) {
     case 'today':
       startDate = startOfMyanmarDay(year, month, date);
+      targetIsoDate = mNow.isoDateString;
       break;
     case 'yesterday': {
       const yDate = new Date(Date.UTC(year, month, date) - 24 * 60 * 60 * 1000);
       startDate = startOfMyanmarDay(yDate.getUTCFullYear(), yDate.getUTCMonth(), yDate.getUTCDate());
       endDate = endOfMyanmarDay(yDate.getUTCFullYear(), yDate.getUTCMonth(), yDate.getUTCDate());
+      targetIsoDate = `${yDate.getUTCFullYear()}-${String(yDate.getUTCMonth() + 1).padStart(2, '0')}-${String(yDate.getUTCDate()).padStart(2, '0')}`;
       break;
     }
     case 'last_7_days': {
@@ -577,6 +580,12 @@ export function filterByDateRange(sales: Sale[], dateRangePreset: string): Sale[
 
   return sales.filter(s => {
     if (!s.date) return false;
+    if (dateRangePreset === 'today' && isSameMyanmarDate(s.date, mNow.isoDateString)) {
+      return true;
+    }
+    if (dateRangePreset === 'yesterday' && isSameMyanmarDate(s.date, targetIsoDate)) {
+      return true;
+    }
     const d = new Date(s.date);
     if (isNaN(d.getTime())) return false;
     return d >= startDate && d <= endDate;
@@ -593,14 +602,18 @@ export function executeQueryPosReports(args: any, context: PosDataContext): any 
   const cashDrawer = context.cashDrawer;
 
   // Verify Admin authorization for trade secrets (Cost, Profit, Supplier details)
-  const hasAdminAuth = admin_secret_key === 'WIN_ADMIN_UNMASK_2026' ||
-    Boolean(process.env.ADMIN_AUDIT_KEY && admin_secret_key === process.env.ADMIN_AUDIT_KEY);
+  const hasAdminAuth =
+    admin_secret_key === 'WIN_ADMIN_UNMASK_2026' ||
+    Boolean(process.env.ADMIN_AUDIT_KEY && admin_secret_key === process.env.ADMIN_AUDIT_KEY) ||
+    Boolean(args.isAdmin || (context as any)?.isAdmin || (context.settings as any)?.isAdmin);
 
   const relevantSales = filterByDateRange(sales, report_type === 'z_report' && !args.date_range ? 'today' : date_range);
 
+  const isCompletedSale = (s: Sale) => s.status === 'completed' || !s.status || s.status.toLowerCase() === 'completed';
+
   switch (report_type) {
     case 'z_report': {
-      const completedSales = relevantSales.filter(s => s.status === 'completed');
+      const completedSales = relevantSales.filter(isCompletedSale);
       const refundedSales = relevantSales.filter(s => s.status === 'refunded' || s.status === 'partially_refunded');
 
       let totalGrossSales = 0;
@@ -791,7 +804,7 @@ export function executeQueryPosReports(args: any, context: PosDataContext): any 
       // Find products that have stock > 0 but ZERO units sold in sales history
       const soldProductIds = new Set<string>();
       sales.forEach(s => {
-        if (s.status === 'completed') {
+        if (s.status === 'completed' || !s.status || s.status.toLowerCase() === 'completed') {
           s.items.forEach(i => soldProductIds.add(i.productId));
         }
       });
@@ -935,7 +948,7 @@ export function executeQueryPosReports(args: any, context: PosDataContext): any 
       };
 
       relevantSales.forEach(s => {
-        if (s.status === 'completed') {
+        if (s.status === 'completed' || !s.status || s.status.toLowerCase() === 'completed') {
           s.items.forEach(item => {
             const cat = item.category || 'new_phones';
             if (!categoryMap[cat]) {
@@ -1363,7 +1376,7 @@ export function executeGeneratePdfReport(args: any, context: PosDataContext) {
     const daySales = sales.filter((s) => isSameMyanmarDate(s.date, selectedDate));
     const dayExpenses = expenses.filter((e) => isSameMyanmarDate(e.date, selectedDate));
 
-    const completedSales = daySales.filter((s) => s.status === 'completed');
+    const completedSales = daySales.filter((s) => s.status === 'completed' || !s.status || s.status.toLowerCase() === 'completed');
     const refundedSales = daySales.filter((s) => s.status === 'refunded' || s.status === 'partially_refunded');
 
     let grossRevenue = 0;
@@ -2112,7 +2125,7 @@ Focus details:
 - Provide concise, accurate, structured information in polite Burmese (မြန်မာဘာသာ) with model names and specs in English.`;
 
     const response = await genAI.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-3.8-flash',
       contents: searchPrompt,
       config: {
         systemInstruction: `You are an expert smartphone market researcher with real-time Google Search grounding. Search Google to provide verified, up-to-date retail market prices in Myanmar (MMK Kyats) and accurate technical specifications. Always cite key findings accurately. Respond concisely in Burmese.`,

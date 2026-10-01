@@ -910,7 +910,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                     <h4 className="text-xs font-bold text-slate-900">Google Search Grounded Specs & Live Market Price</h4>
                     <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded-full flex items-center gap-1">
                       <Sparkles className="w-3 h-3" />
-                      gemini-3.5-flash • googleSearch
+                      gemini-3.8-flash • googleSearch
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-600 mt-0.5">

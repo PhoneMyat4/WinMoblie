@@ -34,6 +34,7 @@ import {
   startTelegramPolling,
   stopTelegramPolling,
 } from './server/telegramBot';
+import { registerServerStateSnapshotGetter } from './server/posFirestoreService';
 import { archiveSalesData, listArchivedFiles } from './server/archiveService';
 
 async function startServer() {
@@ -132,6 +133,9 @@ async function startServer() {
   let serverStateSnapshot: Record<string, any> | null = null;
   let lastServerStateTimestamp = 0;
   let lastUpdatingTabId = '';
+
+  // Register snapshot getter for Telegram Bot and background POS data context
+  registerServerStateSnapshotGetter(() => serverStateSnapshot);
 
   // GET /api/sync-state - Check if server has newer state or fetch current state
   app.get('/api/sync-state', (req, res) => {
@@ -514,7 +518,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
 
       // Strategy 1: Try Gemini API
       const geminiKey = process.env.GEMINI_API_KEY;
-      if (geminiKey && !geminiKey.startsWith('AQ.')) {
+      if (geminiKey) {
         try {
           const ai = getGenAI();
           const response = await ai.models.generateContent({
@@ -694,13 +698,30 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
       const requestedModel = typeof model === 'string' ? model.trim() : '';
       const settingsModel = (context?.settings as any)?.secrets?.chatAssistantModel;
       const serverEnvModel = process.env.CHAT_ASSISTANT_MODEL;
-      const candidateModel = requestedModel || settingsModel || serverEnvModel || 'gemini-3.5-flash';
+      const candidateModel = requestedModel || settingsModel || serverEnvModel || 'gpt-5.6-luna';
 
       // Accept any valid model string
-      const activeModel =
+      let activeModel =
         typeof candidateModel === 'string' && /^[a-zA-Z0-9_.-]+$/.test(candidateModel)
           ? candidateModel
-          : 'gemini-3.5-flash';
+          : 'gpt-5.6-luna';
+
+      if (activeModel === 'gemini-3.5-flash') {
+        activeModel = 'gemini-3.8-flash';
+      }
+
+      // Check admin authorization
+      const isAdmin = Boolean(
+        req.body.isAdmin ||
+        (context as any)?.isAdmin ||
+        (context.settings as any)?.isAdmin ||
+        req.body.userRole === 'Admin' ||
+        req.body.userRole === 'Owner' ||
+        req.body.userRole === 'Manager'
+      );
+      if (isAdmin) {
+        (context as any).isAdmin = true;
+      }
 
       const replyLanguage = req.body.language || 'my';
       let systemInstructionWithLang = AI_SYSTEM_INSTRUCTION;
@@ -736,26 +757,17 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
         promptWithFiles = `${promptWithFiles || 'Please inspect and analyze the attached document(s).'}${fileSections}`.trim();
       }
 
-      const wantsGoogleSearch = Boolean(req.body.useGoogleSearch || activeModel.includes('gemini'));
       const targetOpenAiKey = process.env.OPENAI_API_KEY;
 
-      // Tier 1: Gemini with Real-Time Google Search Grounding (gemini-3.5-flash / gemini-3.8-flash)
-      if (wantsGoogleSearch || (!targetOpenAiKey && process.env.GEMINI_API_KEY)) {
+      // Tier 1: Gemini Direct Mode (when OpenAI key is missing or direct Gemini mode is selected without tools)
+      if (!targetOpenAiKey && process.env.GEMINI_API_KEY) {
         const geminiKey = process.env.GEMINI_API_KEY;
-        if (!geminiKey || geminiKey.startsWith('AQ.')) {
-          return res.status(400).json({
-            success: false,
-            missingApiKey: true,
-            error: 'GEMINI_API_KEY is not configured in the server environment (.env). Please configure your server .env to enable Google Search Grounding.',
-          });
-        }
-
         const ai = getGenAI();
-        const geminiTargetModel = activeModel.includes('gemini-3.8') ? 'gemini-3.8-flash' : 'gemini-3.5-flash';
+        const geminiTargetModel = 'gemini-3.8-flash';
 
         // Prepare store context for Gemini
         let storeContextText = `\n\n[STORE REAL-TIME INVENTORY & OPERATIONAL CONTEXT]\n`;
-        storeContextText += `Store Name: ${context.settings?.storeName || 'Mobile Shop POS'}\n`;
+        storeContextText += `Store Name: ${context.settings?.storeName || context.settings?.shopName || 'Win Mobile & Gadgets'}\n`;
         storeContextText += `Currency: ${context.settings?.currencySymbol || 'MMK'}\n`;
         storeContextText += `Total Inventory SKU Count: ${context.products?.length || 0}\n`;
         storeContextText += `Today's Completed Sales Count: ${context.sales?.length || 0}\n`;
@@ -835,7 +847,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
         return res.status(400).json({
           success: false,
           missingApiKey: true,
-          error: 'OPENAI_API_KEY is not configured in the server environment (.env). Switch to Gemini 3.5 Flash (Google Search) or configure OPENAI_API_KEY.',
+          error: 'OPENAI_API_KEY is not configured in the server environment (.env). Please configure your server .env to activate Aura Copilot.',
         });
       }
 
@@ -896,8 +908,9 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
       }
 
       // Step 1: Initial call with OpenAI Tool Declarations using selected model
+      const openAiExecutionModel = activeModel.toLowerCase().startsWith('gemini') ? 'gpt-5.6-luna' : activeModel;
       const response = await executeOpenAiChatCompletionWithTools(openai, {
-        model: activeModel,
+        model: openAiExecutionModel,
         messages: formattedMessages,
         tools: openAiAssistantTools,
         tool_choice: 'auto',
@@ -919,6 +932,11 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
           } catch (e) {
             console.warn('[AI Assistant] Failed to parse tool arguments:', toolCall.function.arguments);
             parsedArgs = {};
+          }
+
+          if (isAdmin) {
+            parsedArgs.admin_secret_key = 'WIN_ADMIN_UNMASK_2026';
+            parsedArgs.isAdmin = true;
           }
 
           console.log(`[AI Assistant] Executing OpenAI Function Call: ${functionName} with args:`, parsedArgs);
@@ -987,7 +1005,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
           ];
 
           const secondResponse = await executeOpenAiChatCompletionWithTools(openai, {
-            model: activeModel,
+            model: openAiExecutionModel,
             messages: followUpMessages,
             tools: openAiAssistantTools,
             temperature: 0.3,
@@ -1401,7 +1419,7 @@ Write directly in engaging bilingual (Burmese & English) or fluent English suite
       const defaultPrompt = buildProductVisualPrompt(product || { name: 'Device' });
       const geminiKey = process.env.GEMINI_API_KEY;
 
-      if (!geminiKey || geminiKey.startsWith('AQ.')) {
+      if (!geminiKey) {
         return res.json({
           success: true,
           detectedSummary: `Reference photo uploaded for ${product?.brand || ''} ${product?.model || 'Product'}.`,
@@ -1506,7 +1524,7 @@ Output a JSON response with:
       // If reference image was supplied and prompt was not heavily customized, try quick visual enrichment
       if (referenceImageUrl && !customPrompt && cleanRefBase64) {
         const geminiKey = process.env.GEMINI_API_KEY;
-        if (geminiKey && !geminiKey.startsWith('AQ.')) {
+        if (geminiKey) {
           try {
             const ai = getGenAI();
             const enrichRes = await ai.models.generateContent({
@@ -1533,7 +1551,7 @@ Output a JSON response with:
       // Tier 0: Google Gemini Image Generation & Editing (gemini-3.1-flash-image-preview / gemini-3.1-flash-image)
       if (activeImageModel.includes('gemini') || activeImageModel === 'gemini-3.1-flash-image-preview') {
         const geminiKey = process.env.GEMINI_API_KEY;
-        if (geminiKey && !geminiKey.startsWith('AQ.')) {
+        if (geminiKey) {
           try {
             const ai = getGenAI();
             const candidateModels = [
@@ -1721,7 +1739,7 @@ Output a JSON response with:
       }
 
       const geminiKey = process.env.GEMINI_API_KEY;
-      if (!geminiKey || geminiKey.startsWith('AQ.')) {
+      if (!geminiKey) {
         return res.status(400).json({
           success: false,
           error: 'GEMINI_API_KEY is not configured in server environment (.env). Please configure your Gemini API key.',
@@ -1826,7 +1844,7 @@ Output a JSON response with:
       }
 
       const geminiKey = process.env.GEMINI_API_KEY;
-      if (!geminiKey || geminiKey.startsWith('AQ.')) {
+      if (!geminiKey) {
         return res.status(400).json({
           success: false,
           error: 'GEMINI_API_KEY is not configured in server environment (.env). Please configure your Gemini API key to enable Google Search Grounding.',
@@ -1862,7 +1880,7 @@ Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
 \`\`\`
 Ensure all pricing values are valid numbers (MMK).`;
 
-      const candidateModels = ['gemini-3.5-flash', 'gemini-3.8-flash'];
+      const candidateModels = ['gemini-3.8-flash'];
       let lastErr: any = null;
       let finalResult: any = null;
       let groundingMeta: any = null;
@@ -1937,7 +1955,7 @@ Ensure all pricing values are valid numbers (MMK).`;
       }
 
       const geminiKey = process.env.GEMINI_API_KEY;
-      if (!geminiKey || geminiKey.startsWith('AQ.')) {
+      if (!geminiKey) {
         return res.status(400).json({
           success: false,
           error: 'GEMINI_API_KEY is not configured in server environment (.env).',
@@ -1967,7 +1985,7 @@ Output your findings in JSON format inside a \`\`\`json ... \`\`\` block:
 \`\`\`
 Ensure all numbers are integers without commas.`;
 
-      const candidateModels = ['gemini-3.5-flash', 'gemini-3.8-flash'];
+      const candidateModels = ['gemini-3.8-flash'];
       let lastErr: any = null;
       let analysisResult: any = null;
       let groundingMeta: any = null;

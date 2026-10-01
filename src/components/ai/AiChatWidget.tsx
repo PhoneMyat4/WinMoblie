@@ -63,8 +63,7 @@ export interface CopilotModelOption {
 }
 
 export const COPILOT_MODELS: CopilotModelOption[] = [
-  { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash (Google Search)', badge: 'Live Google Search', description: 'Real-time Google search grounding for up-to-date specs, Myanmar market prices & live mobile trends' },
-  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Google Search)', badge: 'Frontier Search', description: 'Multimodal reasoning with live Google search web grounding' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Google Search)', badge: 'Live Google Search', description: 'Real-time Google search grounding for up-to-date specs, Myanmar market prices & live mobile trends' },
   { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', badge: 'GPT-5.6 Flagship', description: 'Fastest & most cost-efficient GPT-5.6 for store operations' },
   { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', badge: 'GPT-5.6', description: 'Balanced speed & depth for POS inventory & sales execution' },
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', badge: 'Frontier', description: 'Frontier intelligence flagship with comprehensive deep reasoning' },
@@ -225,14 +224,19 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
       const cached = localStorage.getItem('mobileshop_copilot_model');
-      if (cached && typeof cached === 'string') return cached;
+      if (cached && typeof cached === 'string') {
+        if (cached === 'gemini-3.5-flash') return 'gemini-3.8-flash';
+        return cached;
+      }
     } catch {}
-    return settings?.secrets?.chatAssistantModel || 'gemini-3.5-flash';
+    const defaultModel = settings?.secrets?.chatAssistantModel;
+    if (defaultModel === 'gemini-3.5-flash') return 'gemini-3.8-flash';
+    return defaultModel || 'gpt-5.6-luna';
   });
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [customModelInput, setCustomModelInput] = useState('');
 
-  // Google Search Grounding Toggle State (gemini-3.5-flash with googleSearch tool)
+  // Google Search Grounding Toggle State (gemini-3.8-flash with googleSearch tool)
   const [useGoogleSearch, setUseGoogleSearch] = useState<boolean>(() => {
     try {
       const cached = localStorage.getItem('mobileshop_copilot_google_search');
@@ -563,7 +567,9 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           history: historyPayload,
           model: selectedModel,
           language: chatLanguage,
-          useGoogleSearch: useGoogleSearch || selectedModel.includes('gemini'),
+          useGoogleSearch: useGoogleSearch,
+          isAdmin: currentStaffUser?.role === 'Admin' || currentStaffUser?.role === 'Owner' || currentStaffUser?.role === 'Manager',
+          userRole: currentStaffUser?.role || 'Staff',
           context: {
             ...posContext,
             settings: safeSettings,
@@ -887,7 +893,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
                 ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs ring-1 ring-white/30'
                 : 'bg-indigo-950/60 text-indigo-300 hover:text-white border border-indigo-700/60'
             }`}
-            title="Toggle Live Google Search Grounding (gemini-3.5-flash with googleSearch tool)"
+            title="Toggle Live Google Search Grounding (gemini-3.8-flash with googleSearch tool)"
           >
             <Globe className="w-3.5 h-3.5 text-sky-300 shrink-0" />
             <span className="hidden sm:inline">Google Search</span>
@@ -1305,7 +1311,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
                         <div className="flex items-center justify-between gap-1.5">
                           <div className="flex items-center gap-1.5 font-bold text-blue-900 text-[11px]">
                             <Globe className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                            <span>Grounded with Google Search (gemini-3.5-flash)</span>
+                            <span>Grounded with Google Search (gemini-3.8-flash)</span>
                           </div>
                           <span className="text-[10px] font-bold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-full border border-blue-200">
                             Live Google Verified

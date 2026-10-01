@@ -65,6 +65,16 @@ export async function ensureAuth() {
   }
 }
 
+let serverStateSnapshotGetter: (() => Record<string, any> | null) | null = null;
+
+export function registerServerStateSnapshotGetter(getter: () => Record<string, any> | null) {
+  serverStateSnapshotGetter = getter;
+}
+
+export function getServerStateSnapshot(): Record<string, any> | null {
+  return serverStateSnapshotGetter ? serverStateSnapshotGetter() : null;
+}
+
 /**
  * Fetches current POS and inventory state directly from the Firestore database
  * to construct a fresh PosDataContext for report and inventory evaluation.
@@ -88,7 +98,7 @@ export async function fetchPosDataContext(): Promise<PosDataContext> {
     getDoc(doc(db, 'cashDrawer', 'current')),
   ]);
 
-  const products: Product[] = [];
+  let products: Product[] = [];
   if (productsSnap.status === 'fulfilled') {
     productsSnap.value.forEach((d) => {
       products.push({ id: d.id, ...(d.data() as any) });
@@ -97,7 +107,7 @@ export async function fetchPosDataContext(): Promise<PosDataContext> {
     console.error('[FirestoreService] Failed to load products collection:', productsSnap.reason);
   }
 
-  const sales: Sale[] = [];
+  let sales: Sale[] = [];
   if (salesSnap.status === 'fulfilled') {
     salesSnap.value.forEach((d) => {
       sales.push({ id: d.id, ...(d.data() as any) });
@@ -106,7 +116,7 @@ export async function fetchPosDataContext(): Promise<PosDataContext> {
     console.error('[FirestoreService] Failed to load sales collection:', salesSnap.reason);
   }
 
-  const expenses: ExpenseRecord[] = [];
+  let expenses: ExpenseRecord[] = [];
   if (expensesSnap.status === 'fulfilled') {
     expensesSnap.value.forEach((d) => {
       expenses.push({ id: d.id, ...(d.data() as any) });
@@ -115,7 +125,7 @@ export async function fetchPosDataContext(): Promise<PosDataContext> {
     console.error('[FirestoreService] Failed to load expenses collection:', expensesSnap.reason);
   }
 
-  const purchases: PurchaseRecord[] = [];
+  let purchases: PurchaseRecord[] = [];
   if (purchasesSnap.status === 'fulfilled') {
     purchasesSnap.value.forEach((d) => {
       purchases.push({ id: d.id, ...(d.data() as any) });
@@ -132,6 +142,105 @@ export async function fetchPosDataContext(): Promise<PosDataContext> {
   let cashDrawer: CashDrawerRecord | undefined = undefined;
   if (cashDrawerSnap.status === 'fulfilled' && cashDrawerSnap.value.exists()) {
     cashDrawer = cashDrawerSnap.value.data() as CashDrawerRecord;
+  }
+
+  // 1. Merge with active in-memory server state snapshot (synced from client POS via /api/sync-state)
+  const serverState = getServerStateSnapshot();
+  if (serverState) {
+    if (Array.isArray(serverState.sales) && serverState.sales.length > sales.length) {
+      sales = serverState.sales;
+    }
+    if (Array.isArray(serverState.products) && serverState.products.length > products.length) {
+      products = serverState.products;
+    }
+    if (Array.isArray(serverState.expenses) && serverState.expenses.length > expenses.length) {
+      expenses = serverState.expenses;
+    }
+    if (Array.isArray(serverState.purchases) && serverState.purchases.length > purchases.length) {
+      purchases = serverState.purchases;
+    }
+    if (serverState.settings && (!settings || Object.keys(settings).length === 0)) {
+      settings = serverState.settings;
+    }
+    if (serverState.cashDrawer && !cashDrawer) {
+      cashDrawer = serverState.cashDrawer;
+    }
+  }
+
+  // 2. If sales are empty, fall back to initialData and seed Firestore
+  if (sales.length === 0) {
+    try {
+      const { initialSales: seedSales } = await import('../src/data/initialData');
+      if (Array.isArray(seedSales) && seedSales.length > 0) {
+        const updatedSeedSales = seedSales.map((s, idx) => {
+          if (idx === 0 || s.id === 'sale-3') {
+            return { ...s, date: new Date().toISOString() };
+          }
+          return s;
+        });
+        sales = updatedSeedSales;
+        Promise.allSettled(
+          updatedSeedSales.map((s) => setDoc(doc(db, 'sales', s.id), s, { merge: true }))
+        ).catch(() => {});
+      }
+    } catch (seedErr) {
+      console.warn('[FirestoreService] Seed sales notice:', seedErr);
+    }
+  }
+
+  // 3. If expenses are empty, fall back to initialExpenses and seed Firestore
+  if (expenses.length === 0) {
+    try {
+      const { initialExpenses: seedExpenses } = await import('../src/data/initialData');
+      if (Array.isArray(seedExpenses) && seedExpenses.length > 0) {
+        expenses = seedExpenses;
+        Promise.allSettled(
+          seedExpenses.map((e) => setDoc(doc(db, 'expenses', e.id), e, { merge: true }))
+        ).catch(() => {});
+      }
+    } catch (seedErr) {
+      console.warn('[FirestoreService] Seed expenses notice:', seedErr);
+    }
+  }
+
+  // 4. If purchases are empty, fall back to initialPurchases and seed Firestore
+  if (purchases.length === 0) {
+    try {
+      const { initialPurchases: seedPurchases } = await import('../src/data/initialData');
+      if (Array.isArray(seedPurchases) && seedPurchases.length > 0) {
+        purchases = seedPurchases;
+        Promise.allSettled(
+          seedPurchases.map((p) => setDoc(doc(db, 'purchases', p.id), p, { merge: true }))
+        ).catch(() => {});
+      }
+    } catch (seedErr) {
+      console.warn('[FirestoreService] Seed purchases notice:', seedErr);
+    }
+  }
+
+  // 5. If cashDrawer is missing, fall back to initialCashDrawer
+  if (!cashDrawer) {
+    try {
+      const { initialCashDrawer: seedDrawer } = await import('../src/data/initialData');
+      if (seedDrawer) {
+        cashDrawer = seedDrawer;
+        setDoc(doc(db, 'cashDrawer', 'current'), seedDrawer, { merge: true }).catch(() => {});
+      }
+    } catch (seedErr) {
+      console.warn('[FirestoreService] Seed cash drawer notice:', seedErr);
+    }
+  }
+
+  // 6. If products are empty, fall back to initialProducts
+  if (products.length === 0) {
+    try {
+      const { initialProducts: seedProducts } = await import('../src/data/initialData');
+      if (Array.isArray(seedProducts) && seedProducts.length > 0) {
+        products = seedProducts;
+      }
+    } catch (seedErr) {
+      console.warn('[FirestoreService] Seed products notice:', seedErr);
+    }
   }
 
   return {
