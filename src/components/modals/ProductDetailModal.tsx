@@ -142,7 +142,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       `📱 ${product.name}`,
       `Brand: ${product.brand}${product.model ? ` | Model: ${product.model}` : ''}`,
       `Category: ${getCategoryLabel(product.category)}${product.subCategory ? ` (${product.subCategory})` : ''}`,
-      `Condition: ${cond.label}`,
+      isPhone ? `Condition: ${cond.label}` : (product.childCategory || product.variant ? `Variant: ${product.childCategory || product.variant}` : null),
       product.ram && product.ram !== '-' ? `RAM: ${product.ram}` : null,
       product.rom && product.rom !== '-' ? `Storage: ${product.rom}` : product.storage ? `Storage: ${product.storage}` : null,
       product.color ? `Color: ${product.color}` : null,

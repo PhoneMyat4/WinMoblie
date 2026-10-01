@@ -541,7 +541,17 @@ export function matchHeaderKey(rawHeader: string): string | null {
     return 'category';
   }
 
-  // 14. Condition: matches "condition", "grade", "state", "quality"
+  // 14. Variant / Child Category: matches "variant", "childcategory", "child_category", "childcat"
+  if (
+    norm.includes('childcat') || norm.includes('child_category') || norm.includes('childcategory') || norm === 'variant' || norm.includes('variant')
+  ) {
+    if (norm.includes('condition')) {
+      return 'conditionOrVariant';
+    }
+    return 'childCategory';
+  }
+
+  // 15. Condition: matches "condition", "grade", "state", "quality"
   if (
     norm.includes('condition') || norm.includes('grade') || norm.includes('state')
   ) {
@@ -669,6 +679,8 @@ export function parseBulkCsvProducts(
     brand: -1,
     category: -1,
     subCategory: -1,
+    childCategory: -1,
+    conditionOrVariant: -1,
     condition: -1,
     costPrice: -1,
     sellingPrice: -1,
@@ -764,10 +776,32 @@ export function parseBulkCsvProducts(
     const category = normalizeCategory(rawCategory, rawName);
     const isPhone = category === 'brand_new_phones' || category === 'pre_owned_phones' || category === 'new_phones' || category === 'used_phones';
 
+    const rawChildCategory = getVal('childCategory');
+    const rawConditionOrVariant = getVal('conditionOrVariant');
     const rawCondition = getVal('condition');
-    const condition = isPhone && (category === 'pre_owned_phones' || category === 'used_phones') && !rawCondition
-      ? 'used_grade_a'
-      : normalizeCondition(rawCondition);
+
+    let childCategory: string | undefined = rawChildCategory && rawChildCategory !== '-' ? rawChildCategory.trim() : undefined;
+    if (!childCategory && rawConditionOrVariant && rawConditionOrVariant !== '-') {
+      if (!isPhone) {
+        childCategory = rawConditionOrVariant.trim();
+      }
+    }
+    if (!isPhone && !childCategory && rawCondition && rawCondition !== '-' && rawCondition.toLowerCase() !== 'none') {
+      const lowerCond = rawCondition.toLowerCase().trim();
+      if (!['brand_new', 'brand new', 'new', 'sealed', 'brand new (sealed)', 'brand new (box pack)'].includes(lowerCond)) {
+        childCategory = rawCondition.trim();
+      }
+    }
+
+    const effectiveConditionInput = isPhone
+      ? (rawCondition || rawConditionOrVariant)
+      : undefined;
+
+    const condition = isPhone
+      ? ((category === 'pre_owned_phones' || category === 'used_phones') && !effectiveConditionInput
+          ? 'used_grade_a'
+          : normalizeCondition(effectiveConditionInput))
+      : 'brand_new';
 
     let subCategory = getVal('subCategory') || undefined;
     if (subCategory === '-' || subCategory?.toLowerCase() === 'none') {
@@ -871,6 +905,8 @@ export function parseBulkCsvProducts(
       model: rawName,
       category,
       subCategory,
+      childCategory: !isPhone && childCategory ? childCategory : undefined,
+      variant: !isPhone && childCategory ? childCategory : undefined,
       condition,
       sku,
       barcode,
@@ -899,7 +935,8 @@ export function parseBulkCsvProducts(
       (!brand || (p.brand || '').toLowerCase() === brand.toLowerCase()) &&
       (!ram || (p.ram || '').toLowerCase() === ram.toLowerCase()) &&
       (!rom || (p.rom || '').toLowerCase() === rom.toLowerCase()) &&
-      (!color || (p.color || '').toLowerCase() === color.toLowerCase())
+      (!color || (p.color || '').toLowerCase() === color.toLowerCase()) &&
+      (!childCategory || (p.childCategory || p.variant || '').toLowerCase() === childCategory.toLowerCase())
     );
 
     const isValid = errors.length === 0;
@@ -943,12 +980,12 @@ export const SAMPLE_CSV_TEMPLATES: CsvTemplatePreset[] = [
     id: 'inventory_export_format',
     name: 'Exported Inventory Stock List Format',
     description: 'Exact format exported from the Inventory screen. Directly re-importable with full SKU, Barcodes, Specs, and IMEIs.',
-    csvContent: `"Product Name","Brand","Category","Subcategory","Condition","Cost Price (Ks)","Selling Price (Ks)","Stock (Units)","Min Alert Level","RAM","ROM","Color","Specs / Storage / Color","SKU","Barcode","Serialized IMEIs","Warranty (Months)","Is_FOC_Gift","FOC_Type"
+    csvContent: `"Product Name","Brand","Category","Subcategory","Condition / Child Category","Cost Price (Ks)","Selling Price (Ks)","Stock (Units)","Min Alert Level","RAM","ROM","Color","Specs / Storage / Color","SKU","Barcode","Serialized IMEIs","Warranty (Months)","Is_FOC_Gift","FOC_Type"
 "Redmi 9A","Redmi","Brand new phones","-","Brand New (Sealed)","425000","479000","1","0","4GB","64GB","Black","4GB RAM • 64GB • Black","SKU-435331","111228795337","862675065232361","12","No","-"
 "Redmi A7pro","Redmi","Brand new phones","-","Brand New (Sealed)","580000","639000","2","0","4GB","64GB","Black","4GB RAM • 64GB • Black","SKU-826254","224338118334","866286085182101; 866704087369401","12","No","-"
-"Remax 20W Fast Charger (Promo Gift)","Remax","Accessories","Fast Charger","Brand New","0","0","50","10","-","-","White","-","SKU-18419","150000293812","-","6","Yes","supplier_bonus"
-"Ansty C056 Fast Charger","Ansty","Accessories","Fast Charger","Brand New","3850","6000","40","10","-","-","White","-","SKU-18420","150000293813","-","6","No","-"
-"Daw Pu ဟင်းချက်အိုး","Daw Pu","Cookware","ဟင်းချက်အိုး","Brand New","620000","770000","2","0","-","-","Silver","-","SKU-99590","901000382910","-","12","No","-"`
+"Remax 20W Fast Charger (Promo Gift)","Remax","Accessories","Fast Charger","20W Type-C","0","0","50","10","-","-","White","-","SKU-18419","150000293812","-","6","Yes","supplier_bonus"
+"Ansty C056 Fast Charger","Ansty","Accessories","Fast Charger","65W GaN Dual Port","3850","6000","40","10","-","-","White","-","SKU-18420","150000293813","-","6","No","-"
+"Daw Pu ဟင်းချက်အိုး","Daw Pu","Cookware","ဟင်းချက်အိုး","3.5L Double Layer","620000","770000","2","0","-","-","Silver","-","SKU-99590","901000382910","-","12","No","-"`
   },
   {
     id: 'smartphones_imei',
@@ -964,23 +1001,23 @@ Apple iPhone 13 Pro Max (Pre-Owned),Apple,used_phones,used_grade_a,1950000,22500
     id: 'accessories',
     name: 'Phone Accessories (Chargers, Cables, Cases)',
     description: 'Bulk accessories without IMEIs: original fast chargers, heavy-duty cables, screen protectors, cases, and power banks.',
-    csvContent: `Name,Brand,Category,SubCategory,Condition,CostPrice,SellingPrice,Stock,MinAlert,Warranty,Description
-Apple 20W USB-C Fast Power Adapter,Apple,accessories,Fast Chargers & Adapters,brand_new,65000,85000,30,5,6,Original Apple 20W USB-C fast power adapter
-Anker 737 Power Bank (PowerCore 24K),Anker,accessories,Power Banks,brand_new,260000,320000,12,2,12,140W fast output 24000mAh portable charger with smart digital display
-Baseus 100W PD 5A Type-C Cable 1.5m,Baseus,accessories,Cables & Connectors,brand_new,12000,18000,50,10,3,High durability braided fast charging cable
-Remax 9D King Kong Tempered Glass (iPhone 15 Pro),Remax,accessories,Screen Protectors,brand_new,6000,12000,60,15,0,Full coverage privacy tempered glass screen protector
-UAG Monarch Rugged Case (Samsung S24 Ultra),UAG,accessories,Cases & Covers,brand_new,85000,125000,15,3,12,5-layer heavy duty drop-tested protective case`
+    csvContent: `Name,Brand,Category,SubCategory,ChildCategory,CostPrice,SellingPrice,Stock,MinAlert,Warranty,Description
+Apple 20W USB-C Fast Power Adapter,Apple,accessories,Fast Chargers & Adapters,20W USB-C,65000,85000,30,5,6,Original Apple 20W USB-C fast power adapter
+Anker 737 Power Bank (PowerCore 24K),Anker,accessories,Power Banks,140W 24000mAh,260000,320000,12,2,12,140W fast output 24000mAh portable charger with smart digital display
+Baseus 100W PD 5A Type-C Cable 1.5m,Baseus,accessories,Cables & Connectors,100W 1.5m,12000,18000,50,10,3,High durability braided fast charging cable
+Remax 9D King Kong Tempered Glass (iPhone 15 Pro),Remax,accessories,Screen Protectors,Matte Privacy,6000,12000,60,15,0,Full coverage privacy tempered glass screen protector
+UAG Monarch Rugged Case (Samsung S24 Ultra),UAG,accessories,Cases & Covers,Kevlar Black,85000,125000,15,3,12,5-layer heavy duty drop-tested protective case`
   },
   {
     id: 'gadgets',
     name: 'Smart Gadgets (Smartwatches & Audio)',
     description: 'Smart wearable devices, wireless Bluetooth earbuds, portable audio speakers, and lifestyle gadgets.',
-    csvContent: `Name,Brand,Category,SubCategory,Condition,CostPrice,SellingPrice,Stock,MinAlert,Warranty,Description
-Samsung Galaxy Buds2 Pro,Samsung,gadgets,Wireless Earbuds,brand_new,380000,450000,10,2,6,Active Noise Cancelling 24-bit Hi-Fi sound wireless earbuds
-Apple AirPods Pro 2 (USB-C),Apple,gadgets,Wireless Earbuds,brand_new,620000,695000,8,2,12,H2 chip with Adaptive Audio and MagSafe USB-C case
-Xiaomi Smart Band 8 Pro,Xiaomi,gadgets,Smartwatches & Bands,brand_new,165000,195000,15,3,6,1.74 inch AMOLED 60Hz display with GNSS and 14-day battery
-Haylou Solar Plus RT3 Smartwatch,Haylou,gadgets,Smartwatches & Bands,brand_new,95000,125000,12,3,3,1.43 inch AMOLED Bluetooth phone call smartwatch
-JBL Flip 6 Portable Bluetooth Speaker,JBL,gadgets,Bluetooth Speakers,brand_new,290000,350000,6,2,12,2-way speaker system IP67 waterproof and dustproof`
+    csvContent: `Name,Brand,Category,SubCategory,ChildCategory,CostPrice,SellingPrice,Stock,MinAlert,Warranty,Description
+Samsung Galaxy Buds2 Pro,Samsung,gadgets,Wireless Earbuds,Pro ANC Graphite,380000,450000,10,2,6,Active Noise Cancelling 24-bit Hi-Fi sound wireless earbuds
+Apple AirPods Pro 2 (USB-C),Apple,gadgets,Wireless Earbuds,USB-C MagSafe,620000,695000,8,2,12,H2 chip with Adaptive Audio and MagSafe USB-C case
+Xiaomi Smart Band 8 Pro,Xiaomi,gadgets,Smartwatches & Bands,1.74" AMOLED Black,165000,195000,15,3,6,1.74 inch AMOLED 60Hz display with GNSS and 14-day battery
+Haylou Solar Plus RT3 Smartwatch,Haylou,gadgets,Smartwatches & Bands,1.43" AMOLED Silver,95000,125000,12,3,3,1.43 inch AMOLED Bluetooth phone call smartwatch
+JBL Flip 6 Portable Bluetooth Speaker,JBL,gadgets,Bluetooth Speakers,IP67 Ocean Blue,290000,350000,6,2,12,2-way speaker system IP67 waterproof and dustproof`
   },
   {
     id: 'simple_quick',
@@ -997,11 +1034,11 @@ Apple iPhone 15 Pro 256GB Natural Titanium,Apple,3750000,3400000,2,Natural Titan
     id: 'foc_promotional_gifts',
     name: '🎁 FOC & Promotional Gifts (Bonus Stock & Giveaways)',
     description: 'Bulk register supplier bonus gifts (Cost 0 Ks) and shop-funded giveaways with FOC flags and accounting types.',
-    csvContent: `Name,Brand,Category,SubCategory,CostPrice,SellingPrice,Stock,Is_FOC_Gift,FOC_Type,Description
-Remax 20W Fast Charger (Promo Gift),Remax,accessories,Fast Chargers & Adapters,0,25000,50,Yes,supplier_bonus,Supplier bonus gift given with phone purchase
-9D Privacy Tempered Glass (Gift),Remax,accessories,Screen Protectors,0,12000,100,Yes,supplier_bonus,Free screen protector gift with phone
-Transparent Silicone Case (VIP Gift),Generic,accessories,Cases & Covers,0,8000,80,Yes,supplier_bonus,Free transparent clear protective case
-Samsung 10000mAh Powerbank (PR Gift),Samsung,accessories,Power Banks,0,45000,20,Yes,shop_funded_expensed,Influencer and VIP promotional giveaway
-Hoco W35 Wireless Headphones (Event Gift),Hoco,gadgets,Audio,0,35000,15,Yes,supplier_bonus,Grand opening contest prize unit`
+    csvContent: `Name,Brand,Category,SubCategory,ChildCategory,CostPrice,SellingPrice,Stock,Is_FOC_Gift,FOC_Type,Description
+Remax 20W Fast Charger (Promo Gift),Remax,accessories,Fast Chargers & Adapters,20W Type-C,0,25000,50,Yes,supplier_bonus,Supplier bonus gift given with phone purchase
+9D Privacy Tempered Glass (Gift),Remax,accessories,Screen Protectors,Privacy Matte,0,12000,100,Yes,supplier_bonus,Free screen protector gift with phone
+Transparent Silicone Case (VIP Gift),Generic,accessories,Cases & Covers,Clear TPU,0,8000,80,Yes,supplier_bonus,Free transparent clear protective case
+Samsung 10000mAh Powerbank (PR Gift),Samsung,accessories,Power Banks,10000mAh 15W,0,45000,20,Yes,shop_funded_expensed,Influencer and VIP promotional giveaway
+Hoco W35 Wireless Headphones (Event Gift),Hoco,gadgets,Audio,Silver Bluetooth,0,35000,15,Yes,supplier_bonus,Grand opening contest prize unit`
   }
 ];

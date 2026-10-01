@@ -2086,10 +2086,10 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                   </div>
                 </div>
 
-                {/* Category, Subcategory & Condition Grade */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start">
+                {/* Category, Subcategory & Condition Grade / Child Category */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
                   <div>
-                    <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                    <div className="h-5 mb-1.5 flex items-center justify-between gap-1 overflow-hidden">
                       <label className="block font-bold text-slate-800 text-xs truncate">Category *</label>
                     </div>
                     <select
@@ -2106,7 +2106,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                   </div>
 
                   <div>
-                    <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                    <div className="h-5 mb-1.5 flex items-center justify-between gap-1 overflow-hidden">
                       <label className="block font-bold text-slate-800 text-xs truncate min-w-0">Subcategory</label>
                       {availableSubCategories.length > 0 && (
                         <span className="text-[10px] text-slate-400 font-medium shrink-0">({availableSubCategories.length})</span>
@@ -2142,7 +2142,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
                   {isPhone ? (
                     <div>
-                      <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                      <div className="h-5 mb-1.5 flex items-center justify-between gap-1 overflow-hidden">
                         <label className="block font-bold text-slate-800 text-xs truncate">Condition Grade</label>
                       </div>
                       <select
@@ -2157,12 +2157,12 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                     </div>
                   ) : (
                     <div>
-                      <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
+                      <div className="h-5 mb-1.5 flex items-center justify-between gap-1 overflow-hidden">
                         <label 
                           className="block font-bold text-slate-800 text-xs truncate min-w-0 flex-1"
-                          title={itemSubCategory ? `${itemSubCategory} Variant (Child Category)` : 'Variant / Child Category'}
+                          title={itemSubCategory ? `${itemSubCategory} Child Category` : 'Child Category'}
                         >
-                          {itemSubCategory ? `${itemSubCategory} Variant` : 'Variant / Child Category'}
+                          Child Category
                         </label>
                         {availableChildCategories.length > 0 && (
                           <span className="text-[10px] text-slate-400 font-medium shrink-0">({availableChildCategories.length})</span>
@@ -2173,7 +2173,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                           type="text"
                           autoComplete="off"
                           list="po-childcategory-list"
-                          placeholder={itemSubCategory ? `Type ${itemSubCategory} variant...` : 'Type variant / child category...'}
+                          placeholder={itemSubCategory ? `Type ${itemSubCategory} child category...` : 'Type child category / variant...'}
                           value={itemChildCategory}
                           onChange={(e) => setItemChildCategory(e.target.value)}
                           className="h-9 w-full pl-3 pr-8 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500"

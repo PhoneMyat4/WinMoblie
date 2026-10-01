@@ -355,7 +355,7 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
               <textarea
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
-                placeholder="Paste CSV rows here... e.g.:&#10;Name,Brand,Category,SubCategory,Condition,CostPrice,SellingPrice,Stock,Warranty,IMEIs&#10;Apple iPhone 15 Pro,Apple,new_phones,,brand_new,3400000,3750000,1,12,358765123456789 / 358765123456790&#10;Apple 20W USB-C Fast Adapter,Apple,accessories,Fast Chargers & Adapters,brand_new,65000,85000,30,6,&#10;Samsung Galaxy Buds2 Pro,Samsung,gadgets,Wireless Earbuds,brand_new,380000,450000,10,6,"
+                placeholder="Paste CSV rows here... e.g.:&#10;Name,Brand,Category,SubCategory,ChildCategory,CostPrice,SellingPrice,Stock,Warranty,IMEIs&#10;Apple iPhone 15 Pro,Apple,new_phones,,brand_new,3400000,3750000,1,12,358765123456789 / 358765123456790&#10;Apple 20W USB-C Fast Adapter,Apple,accessories,Fast Chargers & Adapters,20W USB-C,65000,85000,30,6,&#10;Samsung Galaxy Buds2 Pro,Samsung,gadgets,Wireless Earbuds,Pro ANC Graphite,380000,450000,10,6,"
                 rows={10}
                 className="w-full p-3.5 bg-slate-50 text-slate-900 font-mono text-xs rounded-xl border border-slate-300 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-hidden leading-relaxed resize-y placeholder:text-slate-400"
               />
@@ -606,9 +606,11 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                               <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-bold whitespace-nowrap">
                                 {getCategoryLabel(product.category)}
                               </span>
-                              <div className="text-[10px] text-slate-500 mt-0.5">
-                                {getConditionLabel(product.condition).label}
-                              </div>
+                              {isPhoneCategory(product.category) ? (
+                                <div className="text-[10px] text-slate-500 mt-0.5">
+                                  {getConditionLabel(product.condition).label}
+                                </div>
+                              ) : null}
                             </td>
 
                             <td className="py-2.5 px-3">
@@ -622,9 +624,26 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                                   </div>
                                 </div>
                               ) : (
-                                <span className="text-slate-500 text-[11px]">
-                                  {product.subCategory || '-'}
-                                </span>
+                                <div className="space-y-0.5">
+                                  {product.subCategory && (
+                                    <div className="font-semibold text-slate-800 text-[11px]">
+                                      {product.subCategory}
+                                    </div>
+                                  )}
+                                  {(product.childCategory || product.variant) && (
+                                    <div className="text-[10px] text-indigo-700 font-medium">
+                                      Child Cat: <span className="font-bold">{product.childCategory || product.variant}</span>
+                                    </div>
+                                  )}
+                                  {product.color && product.color !== '-' && (
+                                    <div className="text-[10px] text-slate-500">
+                                      Color: <span className="font-semibold text-slate-700">{product.color}</span>
+                                    </div>
+                                  )}
+                                  {!product.subCategory && !product.childCategory && !product.variant && (
+                                    <span className="text-slate-400 text-[11px]">-</span>
+                                  )}
+                                </div>
                               )}
                             </td>
 
@@ -776,11 +795,18 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                       <td className="py-2 px-3 text-slate-600">Subcategory for accessories and smart gadgets.</td>
                     </tr>
                     <tr>
-                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">Condition</td>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">ChildCategory / Variant</td>
+                      <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
+                      <td className="py-2 px-3 font-mono text-slate-500">ChildCategory, child_category, variant, childcat</td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">20W Type-C, Pro ANC Graphite, 3.5L Double Layer</td>
+                      <td className="py-2 px-3 text-slate-600">Child category / variant for non-phone items (accessories, gadgets, cookware).</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-900">Condition (Phones only)</td>
                       <td className="py-2 px-3"><span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 font-bold rounded">Optional</span></td>
                       <td className="py-2 px-3 font-mono text-slate-500">Condition, state, grade</td>
                       <td className="py-2 px-3 font-semibold text-slate-800">Brand New (Sealed), Brand New, Used Grade A</td>
-                      <td className="py-2 px-3 text-slate-600">Device condition / grade. Defaults to Brand New.</td>
+                      <td className="py-2 px-3 text-slate-600">Device condition / grade for phones. Not required for accessories or gadgets.</td>
                     </tr>
                     <tr>
                       <td className="py-2 px-3 font-mono font-bold text-indigo-900">Cost Price</td>

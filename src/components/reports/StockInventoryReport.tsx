@@ -33,7 +33,7 @@ import { Product, ShopSettings, StockAdjustment } from '../../types';
 import { exportToCsv } from '../../utils/reportUtils';
 import { exportReportToPdf } from '../../utils/pdfExportUtils';
 import { formatCurrency, formatDateTime, getCategoryLabel, getConditionLabel } from '../../utils/formatters';
-import { canonicalCategory } from '../../data/categoryTaxonomy';
+import { canonicalCategory, isPhoneCategory } from '../../data/categoryTaxonomy';
 import { ColumnVisibilityFilter, ColumnDefinition } from '../common/ColumnVisibilityFilter';
 
 const STOCK_REPORT_COLUMNS: ColumnDefinition[] = [
@@ -306,7 +306,11 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
         row.push(p.sku, p.name, p.brand || '-');
       }
       if (visibleColumns.category_brand !== false) {
-        row.push(getCategoryLabel(p.category), p.subCategory || '-', getConditionLabel(p.condition).label);
+        row.push(
+          getCategoryLabel(p.category), 
+          p.subCategory || '-', 
+          isPhoneCategory(p.category) ? getConditionLabel(p.condition).label : (p.childCategory || p.variant || '-')
+        );
       }
       if (visibleColumns.stock_level !== false) {
         row.push(
