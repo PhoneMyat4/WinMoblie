@@ -3321,6 +3321,7 @@ export const StorageService = {
     if (!data || typeof data !== 'object') return;
     try {
       const isFresh = isFreshDatabase();
+      const isResetAction = Boolean(data.isReset);
 
       if (data.deletedLocationIds && Array.isArray(data.deletedLocationIds)) {
         data.deletedLocationIds.forEach((id: string) => StorageService.recordDeletedLocationId(id));
@@ -3329,55 +3330,147 @@ export const StorageService = {
         data.deletedProductIds.forEach((id: string) => StorageService.recordDeletedProductId(id));
       }
 
-      if (data.settings) {
-        // If local is currently fresh but incoming settings does not have it, preserve fresh flag
-        const settingsToSave = isFresh ? { ...data.settings, isFreshDatabase: true } : data.settings;
+      if (data.settings && typeof data.settings === 'object') {
+        const currentSettings = StorageService.getSettings();
+        // Safe settings merge: Never let empty remote logoUrl/invoiceLogoUrl/faviconUrl overwrite valid local branding
+        const hasValidIncomingLogo = Boolean(data.settings.logoUrl && data.settings.logoUrl.trim() !== '');
+        const hasValidIncomingInvoiceLogo = Boolean(data.settings.invoiceLogoUrl && data.settings.invoiceLogoUrl.trim() !== '');
+        const hasValidIncomingFavicon = Boolean(data.settings.faviconUrl && data.settings.faviconUrl.trim() !== '');
+
+        const settingsToSave = {
+          ...currentSettings,
+          ...data.settings,
+          shopName: data.settings.shopName || currentSettings.shopName,
+          logoUrl: hasValidIncomingLogo ? data.settings.logoUrl : (currentSettings.logoUrl || ''),
+          invoiceLogoUrl: hasValidIncomingInvoiceLogo ? data.settings.invoiceLogoUrl : (currentSettings.invoiceLogoUrl || ''),
+          faviconUrl: hasValidIncomingFavicon ? data.settings.faviconUrl : (currentSettings.faviconUrl || ''),
+          isFreshDatabase: isFresh ? true : (data.settings.isFreshDatabase ?? currentSettings.isFreshDatabase),
+        };
         localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settingsToSave));
       }
-      if (data.staffUsers) localStorage.setItem(STORAGE_KEYS.STAFF_USERS, JSON.stringify(data.staffUsers));
-      if (data.rolePermissions) localStorage.setItem(STORAGE_KEYS.ROLE_PERMISSIONS, JSON.stringify(data.rolePermissions));
 
-      // If user initialized fresh database and remote data has mock/demo data, do not overwrite empty collections with mock data
+      if (data.staffUsers && Array.isArray(data.staffUsers)) {
+        const currentStaff = StorageService.getStaffUsers();
+        if (data.staffUsers.length > 0 || currentStaff.length === 0 || isResetAction) {
+          localStorage.setItem(STORAGE_KEYS.STAFF_USERS, JSON.stringify(data.staffUsers));
+        }
+      }
+      if (data.rolePermissions && typeof data.rolePermissions === 'object' && Object.keys(data.rolePermissions).length > 0) {
+        localStorage.setItem(STORAGE_KEYS.ROLE_PERMISSIONS, JSON.stringify(data.rolePermissions));
+      }
+
+      // CRITICAL DATA PRESERVATION: Never overwrite existing populated collections with empty arrays
+      // unless data.isReset is explicitly true (an authorized, confirmed admin reset event).
+      const currentProducts = StorageService.getProducts();
       if (data.products && Array.isArray(data.products)) {
         const deletedProdIds = new Set(StorageService.getDeletedProductIds());
         const filteredProds = data.products.filter((p: any) => p && p.id && !deletedProdIds.has(p.id) && !isMockProduct(p));
-        if (!isFresh || (filteredProds.length === 0 || !filteredProds[0]?.id?.startsWith('prod-'))) {
-          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(filteredProds));
+        if (filteredProds.length > 0 || currentProducts.length === 0 || isResetAction) {
+          if (!isFresh || (filteredProds.length === 0 || !filteredProds[0]?.id?.startsWith('prod-'))) {
+            localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(filteredProds));
+          }
         }
       }
-      if (data.sales) {
-        if (!isFresh || (Array.isArray(data.sales) && (data.sales.length === 0 || !data.sales[0]?.id?.startsWith('sale-')))) {
-          localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(data.sales));
+
+      const currentSales = StorageService.getSales();
+      if (data.sales && Array.isArray(data.sales)) {
+        if (data.sales.length > 0 || currentSales.length === 0 || isResetAction) {
+          if (!isFresh || (data.sales.length === 0 || !data.sales[0]?.id?.startsWith('sale-'))) {
+            localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(data.sales));
+          }
         }
       }
-      if (data.creditSales) localStorage.setItem(STORAGE_KEYS.CREDIT_SALES, JSON.stringify(data.creditSales));
-      if (data.purchases) {
-        if (!isFresh || (Array.isArray(data.purchases) && (data.purchases.length === 0 || !data.purchases[0]?.id?.startsWith('purch-')))) {
-          localStorage.setItem(STORAGE_KEYS.PURCHASES, JSON.stringify(data.purchases));
+
+      const currentCreditSales = StorageService.getCreditSales();
+      if (data.creditSales && Array.isArray(data.creditSales)) {
+        if (data.creditSales.length > 0 || currentCreditSales.length === 0 || isResetAction) {
+          localStorage.setItem(STORAGE_KEYS.CREDIT_SALES, JSON.stringify(data.creditSales));
         }
       }
-      if (data.expenses) {
-        if (!isFresh || (Array.isArray(data.expenses) && (data.expenses.length === 0 || !data.expenses[0]?.id?.startsWith('exp-')))) {
-          localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(data.expenses));
+
+      const currentPurchases = StorageService.getPurchases();
+      if (data.purchases && Array.isArray(data.purchases)) {
+        if (data.purchases.length > 0 || currentPurchases.length === 0 || isResetAction) {
+          if (!isFresh || (data.purchases.length === 0 || !data.purchases[0]?.id?.startsWith('purch-'))) {
+            localStorage.setItem(STORAGE_KEYS.PURCHASES, JSON.stringify(data.purchases));
+          }
         }
       }
-      if (data.expenseCategories) localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(data.expenseCategories));
-      if (data.stockAdjustments) localStorage.setItem(STORAGE_KEYS.STOCK_ADJUSTMENTS, JSON.stringify(data.stockAdjustments));
-      if (data.priceChanges) localStorage.setItem(STORAGE_KEYS.PRICE_CHANGES, JSON.stringify(data.priceChanges));
-      if (data.stockAudits) localStorage.setItem(STORAGE_KEYS.STOCK_AUDITS, JSON.stringify(data.stockAudits));
-      if (data.customers) {
-        if (!isFresh || (Array.isArray(data.customers) && (data.customers.length === 0 || !data.customers[0]?.id?.startsWith('cust-')))) {
-          localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(data.customers));
+
+      const currentExpenses = StorageService.getExpenses();
+      if (data.expenses && Array.isArray(data.expenses)) {
+        if (data.expenses.length > 0 || currentExpenses.length === 0 || isResetAction) {
+          if (!isFresh || (data.expenses.length === 0 || !data.expenses[0]?.id?.startsWith('exp-'))) {
+            localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(data.expenses));
+          }
         }
       }
-      if (data.suppliers) localStorage.setItem(STORAGE_KEYS.SUPPLIERS, JSON.stringify(data.suppliers));
-      if (data.cashDrawer) localStorage.setItem(STORAGE_KEYS.CASH_DRAWER, JSON.stringify(data.cashDrawer));
-      if (data.preOrders) localStorage.setItem(STORAGE_KEYS.PRE_ORDERS, JSON.stringify(data.preOrders));
-      if (data.announcements) localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(data.announcements));
-      if (data.chatChannels) localStorage.setItem(STORAGE_KEYS.CHAT_CHANNELS, JSON.stringify(data.chatChannels));
-      if (data.chatMessages) localStorage.setItem(STORAGE_KEYS.CHAT_MESSAGES, JSON.stringify(data.chatMessages));
-      if (data.damageLogs) localStorage.setItem(STORAGE_KEYS.DAMAGE_LOGS, JSON.stringify(data.damageLogs));
-      if (data.auditLogs) localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(data.auditLogs));
+
+      if (data.expenseCategories && Array.isArray(data.expenseCategories) && data.expenseCategories.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.EXPENSE_CATEGORIES, JSON.stringify(data.expenseCategories));
+      }
+      if (data.stockAdjustments && Array.isArray(data.stockAdjustments)) {
+        localStorage.setItem(STORAGE_KEYS.STOCK_ADJUSTMENTS, JSON.stringify(data.stockAdjustments));
+      }
+      if (data.priceChanges && Array.isArray(data.priceChanges)) {
+        localStorage.setItem(STORAGE_KEYS.PRICE_CHANGES, JSON.stringify(data.priceChanges));
+      }
+      if (data.stockAudits && Array.isArray(data.stockAudits)) {
+        localStorage.setItem(STORAGE_KEYS.STOCK_AUDITS, JSON.stringify(data.stockAudits));
+      }
+
+      const currentCustomers = StorageService.getCustomers();
+      if (data.customers && Array.isArray(data.customers)) {
+        if (data.customers.length > 0 || currentCustomers.length === 0 || isResetAction) {
+          if (!isFresh || (data.customers.length === 0 || !data.customers[0]?.id?.startsWith('cust-'))) {
+            localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(data.customers));
+          }
+        }
+      }
+
+      const currentSuppliers = StorageService.getSuppliers();
+      if (data.suppliers && Array.isArray(data.suppliers)) {
+        if (data.suppliers.length > 0 || currentSuppliers.length === 0 || isResetAction) {
+          localStorage.setItem(STORAGE_KEYS.SUPPLIERS, JSON.stringify(data.suppliers));
+        }
+      }
+
+      if (data.cashDrawer && (data.cashDrawer.id || isResetAction)) {
+        localStorage.setItem(STORAGE_KEYS.CASH_DRAWER, JSON.stringify(data.cashDrawer));
+      }
+
+      const currentPreOrders = StorageService.getPreOrders();
+      if (data.preOrders && Array.isArray(data.preOrders)) {
+        if (data.preOrders.length > 0 || currentPreOrders.length === 0 || isResetAction) {
+          localStorage.setItem(STORAGE_KEYS.PRE_ORDERS, JSON.stringify(data.preOrders));
+        }
+      }
+
+      if (data.announcements && Array.isArray(data.announcements)) {
+        if (data.announcements.length > 0 || isResetAction) {
+          localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(data.announcements));
+        }
+      }
+      if (data.chatChannels && Array.isArray(data.chatChannels)) {
+        if (data.chatChannels.length > 0 || isResetAction) {
+          localStorage.setItem(STORAGE_KEYS.CHAT_CHANNELS, JSON.stringify(data.chatChannels));
+        }
+      }
+      if (data.chatMessages && Array.isArray(data.chatMessages)) {
+        if (data.chatMessages.length > 0 || isResetAction) {
+          localStorage.setItem(STORAGE_KEYS.CHAT_MESSAGES, JSON.stringify(data.chatMessages));
+        }
+      }
+      if (data.damageLogs && Array.isArray(data.damageLogs)) {
+        if (data.damageLogs.length > 0 || isResetAction) {
+          localStorage.setItem(STORAGE_KEYS.DAMAGE_LOGS, JSON.stringify(data.damageLogs));
+        }
+      }
+      if (data.auditLogs && Array.isArray(data.auditLogs)) {
+        if (data.auditLogs.length > 0 || isResetAction) {
+          localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(data.auditLogs));
+        }
+      }
       
       if (data.locations && Array.isArray(data.locations)) {
         const deletedLocIds = new Set(StorageService.getDeletedLocationIds());

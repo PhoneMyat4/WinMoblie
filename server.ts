@@ -175,9 +175,63 @@ async function startServer() {
       }
 
       if (data && typeof data === 'object') {
-        // If server has no state yet, or client timestamp is within reasonable clock drift (3s), or same tab is updating
+        const incomingHasData = Boolean(
+          (Array.isArray(data.products) && data.products.length > 0) ||
+          (Array.isArray(data.sales) && data.sales.length > 0) ||
+          (Array.isArray(data.purchases) && data.purchases.length > 0) ||
+          (Array.isArray(data.expenses) && data.expenses.length > 0) ||
+          (Array.isArray(data.customers) && data.customers.length > 0)
+        );
+
+        const serverHasData = Boolean(
+          serverStateSnapshot &&
+          ((Array.isArray(serverStateSnapshot.products) && serverStateSnapshot.products.length > 0) ||
+           (Array.isArray(serverStateSnapshot.sales) && serverStateSnapshot.sales.length > 0) ||
+           (Array.isArray(serverStateSnapshot.purchases) && serverStateSnapshot.purchases.length > 0) ||
+           (Array.isArray(serverStateSnapshot.expenses) && serverStateSnapshot.expenses.length > 0) ||
+           (Array.isArray(serverStateSnapshot.customers) && serverStateSnapshot.customers.length > 0))
+        );
+
+        // CRITICAL DATA PROTECTION:
+        // If the server already has real store data and an incoming client pushes empty data (e.g. newly opened browser/device),
+        // NEVER allow the empty client to wipe the server state unless isReset is explicitly true.
+        // Instead, return the existing server state back to the client so it can hydrate!
+        if (serverHasData && !incomingHasData && !isReset) {
+          return res.json({
+            success: true,
+            updated: false,
+            serverTimestamp: lastServerStateTimestamp,
+            hasNewerServerData: true,
+            data: serverStateSnapshot,
+          });
+        }
+
+        // If server has no state yet, or incoming has data and is newer/same tab
         if (!serverStateSnapshot || incomingTimestamp >= (lastServerStateTimestamp - 3000) || (clientTabId && clientTabId === lastUpdatingTabId)) {
-          serverStateSnapshot = { ...serverStateSnapshot, ...data };
+          if (serverStateSnapshot) {
+            serverStateSnapshot = {
+              ...serverStateSnapshot,
+              ...data,
+              // Never replace existing populated collections with empty arrays
+              products: (Array.isArray(data.products) && data.products.length > 0) ? data.products : (serverStateSnapshot.products || []),
+              sales: (Array.isArray(data.sales) && data.sales.length > 0) ? data.sales : (serverStateSnapshot.sales || []),
+              creditSales: (Array.isArray(data.creditSales) && data.creditSales.length > 0) ? data.creditSales : (serverStateSnapshot.creditSales || []),
+              purchases: (Array.isArray(data.purchases) && data.purchases.length > 0) ? data.purchases : (serverStateSnapshot.purchases || []),
+              expenses: (Array.isArray(data.expenses) && data.expenses.length > 0) ? data.expenses : (serverStateSnapshot.expenses || []),
+              customers: (Array.isArray(data.customers) && data.customers.length > 0) ? data.customers : (serverStateSnapshot.customers || []),
+              suppliers: (Array.isArray(data.suppliers) && data.suppliers.length > 0) ? data.suppliers : (serverStateSnapshot.suppliers || []),
+              settings: data.settings ? {
+                ...serverStateSnapshot.settings,
+                ...data.settings,
+                shopName: data.settings.shopName || serverStateSnapshot.settings?.shopName || 'Win Mobile & Gadgets',
+                logoUrl: data.settings.logoUrl || serverStateSnapshot.settings?.logoUrl || '',
+                invoiceLogoUrl: data.settings.invoiceLogoUrl || serverStateSnapshot.settings?.invoiceLogoUrl || '',
+                faviconUrl: data.settings.faviconUrl || serverStateSnapshot.settings?.faviconUrl || '',
+              } : serverStateSnapshot.settings,
+            };
+          } else {
+            serverStateSnapshot = { ...data };
+          }
           lastServerStateTimestamp = Math.max(incomingTimestamp, Date.now());
           lastUpdatingTabId = clientTabId || 'unknown';
 

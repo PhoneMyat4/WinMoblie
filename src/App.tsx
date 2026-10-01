@@ -65,6 +65,7 @@ import { FirebaseAuthService } from './services/firebaseAuthService';
 import { firestoreSync } from './services/firestoreSyncService';
 import { updateDocumentFavicon } from './utils/favicon';
 import { LanguageProvider } from './context/LanguageContext';
+import { Store } from 'lucide-react';
 
 const VALID_TABS: AppTab[] = [
   'dashboard',
@@ -111,8 +112,8 @@ export default function App() {
   // Activate global new-tab link and button delegation
   useGlobalNewTabLinks();
 
-  // Periodic localStorage-to-server synchronization hook (checks every 2 seconds & on tab focus)
-  const syncInfo = usePeriodicSync(2000);
+  // Multi-tab synchronization and online connectivity state for header badge
+  const syncInfo = usePeriodicSync();
 
   // Application Data State
   const [products, setProducts] = useState<Product[]>(StorageService.getProducts());
@@ -140,6 +141,23 @@ export default function App() {
                    localStorage.getItem('mobileshop_auth_active') === 'true';
     return !isAuth;
   });
+
+  // Authoritative First-Device Startup Hydration State (Waits for first Firestore snapshots before rendering POS UI)
+  const [isStoreHydrated, setIsStoreHydrated] = useState<boolean>(() => {
+    const hasLocalProducts = StorageService.getProducts().length > 0;
+    const isAuth = sessionStorage.getItem('mobileshop_session_auth') === 'true' || 
+                   localStorage.getItem('mobileshop_auth_active') === 'true';
+    if (!isAuth) return true; // LoginScreen manages its own pre-auth state
+    return hasLocalProducts || firestoreSync.isInitialHydrationComplete();
+  });
+
+  useEffect(() => {
+    if (!isLocked && !isStoreHydrated) {
+      return firestoreSync.onHydrationComplete(() => {
+        setIsStoreHydrated(true);
+      });
+    }
+  }, [isLocked, isStoreHydrated]);
 
   // UI Navigation State - initialized from URL parameters & browser history
   const [activeTab, setActiveTabState] = useState<AppTab>(getInitialTab);
@@ -789,6 +807,32 @@ export default function App() {
           settings={settings}
           onLoginSuccess={handleLoginSuccess}
         />
+      </LanguageProvider>
+    );
+  }
+
+  // Section 8: Authoritative First-Device Startup Gate - Wait for Firestore snapshots before rendering POS UI
+  if (!isStoreHydrated) {
+    return (
+      <LanguageProvider 
+        initialLanguage={settings.systemLanguage || 'my'} 
+        onLanguageChange={(newLang) => handleUpdateSettings({ ...settings, systemLanguage: newLang })}
+      >
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white select-none">
+          <div className="flex flex-col items-center max-w-sm text-center space-y-5">
+            <div className="w-16 h-16 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center shadow-lg shadow-indigo-500/10 animate-pulse">
+              <Store className="w-8 h-8 text-indigo-400" />
+            </div>
+            <div className="space-y-1.5">
+              <h2 className="text-xl font-bold tracking-tight text-white">{settings.shopName || 'Win Mobile & Gadgets'}</h2>
+              <p className="text-xs text-slate-400">Connecting to cloud database & synchronizing live store catalog...</p>
+            </div>
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/60 text-xs text-indigo-300 font-medium">
+              <div className="w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+              <span>Initializing store data...</span>
+            </div>
+          </div>
+        </div>
       </LanguageProvider>
     );
   }

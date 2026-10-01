@@ -85,12 +85,39 @@ export class FirestoreSyncService {
   private purchasesSyncTimeout: any = null;
   private staffUsersSyncTimeout: any = null;
   private isFlushingLogs: boolean = false;
+  private hasHydrated: boolean = false;
+  private hydrationListeners: Set<(isHydrated: boolean) => void> = new Set();
+  private initialCollectionsPending = new Set(['settings', 'staffUsers', 'products']);
   private status: FirestoreSyncStatus = {
     isConnected: false,
     isSyncing: false,
     lastSyncedAt: null,
     error: null,
   };
+
+  public isInitialHydrationComplete(): boolean {
+    return this.hasHydrated;
+  }
+
+  public onHydrationComplete(cb: (isHydrated: boolean) => void): () => void {
+    this.hydrationListeners.add(cb);
+    if (this.hasHydrated) {
+      setTimeout(() => cb(true), 0);
+    }
+    return () => {
+      this.hydrationListeners.delete(cb);
+    };
+  }
+
+  public markCollectionHydrated(col: string) {
+    this.initialCollectionsPending.delete(col);
+    if (this.initialCollectionsPending.size === 0 && !this.hasHydrated) {
+      this.hasHydrated = true;
+      this.hydrationListeners.forEach(fn => {
+        try { fn(true); } catch {}
+      });
+    }
+  }
 
   public static getInstance(): FirestoreSyncService {
     if (!this.instance) {
@@ -321,6 +348,10 @@ export class FirestoreSyncService {
     return {
       ...current,
       ...remoteSettings,
+      // Preserve local terminal session identity so remote changes do not clobber this terminal's active user
+      currentStaffId: current.currentStaffId,
+      currentStaffName: current.currentStaffName,
+      currentStaffRole: current.currentStaffRole,
       logoUrl: resolvedLogoUrl,
       faviconUrl: resolvedFaviconUrl,
       invoiceLogoUrl: resolvedInvoiceLogoUrl,
@@ -419,6 +450,13 @@ export class FirestoreSyncService {
     }
 
     try {
+      // Offline fallback timer: ensure UI unblocks after 2.5s even if network is offline
+      setTimeout(() => {
+        this.markCollectionHydrated('settings');
+        this.markCollectionHydrated('products');
+        this.markCollectionHydrated('staffUsers');
+      }, 2500);
+
       // Purge any residual mock staff from Firestore in the background
       this.purgeMockStaffUsersFromFirestore().catch(() => {});
 
@@ -445,10 +483,18 @@ export class FirestoreSyncService {
               this.updateStatus({ lastSyncedAt: new Date(), error: null });
             } finally {
               this.isProcessingRemoteSnapshot = false;
+              this.markCollectionHydrated('settings');
             }
+          } else {
+            this.markCollectionHydrated('settings');
           }
+        } else {
+          this.markCollectionHydrated('settings');
         }
-      }, (err) => console.warn('[FirestoreSync] Settings listener:', err.message));
+      }, (err) => {
+        console.warn('[FirestoreSync] Settings listener:', err.message);
+        this.markCollectionHydrated('settings');
+      });
       this.unsubscribers.push(unsubSettings);
 
       // 2. Products Listener - handles 'removed' changes, expunges locally deleted tombstones, and preserves recent local sales
@@ -466,7 +512,12 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveProducts([], false);
+            const currentLocal = StorageService.getProducts();
+            if (currentLocal.length > 0 && !StorageService.isFreshDatabase()) {
+              this.syncProducts(currentLocal).catch(() => {});
+            } else {
+              StorageService.saveProducts([], false);
+            }
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -517,8 +568,12 @@ export class FirestoreSyncService {
           console.warn('[FirestoreSync] Products listener error:', err?.message || err);
         } finally {
           this.isProcessingRemoteSnapshot = false;
+          this.markCollectionHydrated('products');
         }
-      }, (err) => console.warn('[FirestoreSync] Products listener:', err.message));
+      }, (err) => {
+        console.warn('[FirestoreSync] Products listener:', err.message);
+        this.markCollectionHydrated('products');
+      });
       this.unsubscribers.push(unsubProducts);
 
       // 3. Sales Listener - strictly replaces local state and handles 'removed' changes
@@ -535,7 +590,12 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveSales([], false);
+            const currentLocal = StorageService.getSales();
+            if (currentLocal.length > 0 && !StorageService.isFreshDatabase()) {
+              this.syncSales(currentLocal).catch(() => {});
+            } else {
+              StorageService.saveSales([], false);
+            }
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -578,7 +638,10 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveCreditSales([], false);
+            const currentLocal = StorageService.getCreditSales();
+            if (currentLocal.length === 0 || StorageService.isFreshDatabase()) {
+              StorageService.saveCreditSales([], false);
+            }
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -615,7 +678,12 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.savePurchases([], false);
+            const currentLocal = StorageService.getPurchases();
+            if (currentLocal.length > 0 && !StorageService.isFreshDatabase()) {
+              this.syncPurchases(currentLocal).catch(() => {});
+            } else {
+              StorageService.savePurchases([], false);
+            }
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -652,7 +720,10 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveCustomers([], false);
+            const currentLocal = StorageService.getCustomers();
+            if (currentLocal.length === 0 || StorageService.isFreshDatabase()) {
+              StorageService.saveCustomers([], false);
+            }
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -689,7 +760,10 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveExpenses([], false);
+            const currentLocal = StorageService.getExpenses();
+            if (currentLocal.length === 0 || StorageService.isFreshDatabase()) {
+              StorageService.saveExpenses([], false);
+            }
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -743,7 +817,10 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveSuppliers([], false);
+            const currentLocal = StorageService.getSuppliers();
+            if (currentLocal.length === 0 || StorageService.isFreshDatabase()) {
+              StorageService.saveSuppliers([], false);
+            }
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -800,8 +877,12 @@ export class FirestoreSyncService {
           console.warn('[FirestoreSync] Staff listener error:', err?.message || err);
         } finally {
           this.isProcessingRemoteSnapshot = false;
+          this.markCollectionHydrated('staffUsers');
         }
-      }, (err) => console.warn('[FirestoreSync] Staff listener:', err.message));
+      }, (err) => {
+        console.warn('[FirestoreSync] Staff listener:', err.message);
+        this.markCollectionHydrated('staffUsers');
+      });
       this.unsubscribers.push(unsubStaff);
 
       // 11. Role Permissions Listener
@@ -852,7 +933,10 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.savePreOrders([], false);
+            const currentLocal = StorageService.getPreOrders();
+            if (currentLocal.length === 0 || StorageService.isFreshDatabase()) {
+              StorageService.savePreOrders([], false);
+            }
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -1968,9 +2052,15 @@ export class FirestoreSyncService {
 
   public async syncSettings(settings: ShopSettings): Promise<void> {
     try {
+      const cleanSettings = { ...settings };
+      // Strip terminal-local session staff identifiers before syncing store-wide global settings
+      delete (cleanSettings as any).currentStaffId;
+      delete (cleanSettings as any).currentStaffName;
+      delete (cleanSettings as any).currentStaffRole;
+
       const docRef = doc(db, 'settings', 'global');
       await setDoc(docRef, sanitizeForFirestore({
-        ...settings,
+        ...cleanSettings,
         lastSyncedAt: new Date().toISOString(),
       }), { merge: true });
       this.updateStatus({ lastSyncedAt: new Date(), error: null });

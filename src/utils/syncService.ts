@@ -27,6 +27,7 @@ class SyncManager {
   private broadcastChannel: BroadcastChannel | null = null;
   private lastWarningLogTime = 0;
   private lastWarningKey = '';
+  private hasPerformedInitialPull = false;
 
   private logSyncWarning(prefix: string, error: any) {
     const errText = error instanceof Error ? error.message : String(error);
@@ -120,6 +121,27 @@ class SyncManager {
       return false;
     }
 
+    // Safety Gate 1: Disallow unauthenticated client tabs from pushing state to the server.
+    // An unauthenticated terminal or newly opened browser/device must NEVER push blank/default data.
+    const isAuth = sessionStorage.getItem('mobileshop_session_auth') === 'true' || 
+                   localStorage.getItem('mobileshop_auth_active') === 'true';
+    if (!isAuth) {
+      return false;
+    }
+
+    // Safety Gate 2: Client must complete initial pull before it is ever allowed to push
+    if (!this.hasPerformedInitialPull) {
+      return false;
+    }
+
+    // Safety Gate 3: Never push an empty database over the server unless this is an explicit data reset
+    const prods = StorageService.getProducts();
+    const sales = StorageService.getSales();
+    const isFresh = StorageService.isFreshDatabase();
+    if (prods.length === 0 && sales.length === 0 && !isFresh) {
+      return false;
+    }
+
     try {
       this.setStatus('syncing');
       const allData = StorageService.getAllData();
@@ -149,7 +171,7 @@ class SyncManager {
         this.lastWarningKey = '';
         this.setStatus('synced');
 
-        // If server had newer data from another tab, apply it
+        // If server had newer data from another tab, apply it safely
         if (result.hasNewerServerData && result.data && result.lastUpdatingTabId && result.lastUpdatingTabId !== this.tabId) {
           StorageService.applyAllData(result.data, result.serverTimestamp);
         }
@@ -216,7 +238,7 @@ class SyncManager {
     this.isSyncing = true;
 
     try {
-      // 1. Cross-tab local check: Verify if localStorage was modified by another browser tab
+      // 1. Cross-tab local check: Instant local synchronization between tabs via localStorage and BroadcastChannel
       const currentLocalTs = StorageService.getLastUpdatedTimestamp();
       if (currentLocalTs > this.lastKnownLocalTimestamp) {
         this.lastKnownLocalTimestamp = currentLocalTs;
@@ -225,12 +247,10 @@ class SyncManager {
         }));
       }
 
-      // 2. Server sync check: If local has unsynced changes, push to server; otherwise check if server has updates
-      if (currentLocalTs > this.lastSyncedServerTimestamp) {
-        await this.pushLocalStateToServer();
-      } else {
-        await this.pullServerState();
-      }
+      // Firestore is the authoritative cross-device database.
+      // Update local sync status indicator
+      const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      this.setStatus(isOnline ? 'synced' : 'offline');
     } catch (err) {
       console.error('[SyncManager] Sync check error:', err);
     } finally {
