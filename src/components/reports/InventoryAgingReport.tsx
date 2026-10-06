@@ -23,6 +23,7 @@ import { formatCurrency, getCategoryLabel } from '../../utils/formatters';
 import { exportToCsv } from '../../utils/reportUtils';
 import { exportReportToPdf } from '../../utils/pdfExportUtils';
 import { ColumnVisibilityFilter, ColumnDefinition } from '../common/ColumnVisibilityFilter';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 const AGING_REPORT_COLUMNS: ColumnDefinition[] = [
   { id: 'product_specs', label: 'Product & Specs', required: true },
@@ -85,9 +86,12 @@ export const InventoryAgingReport: React.FC<InventoryAgingReportProps> = ({
     return calculateInventoryAging(products, []);
   }, [products]);
 
+  // Interactive Column Sorting
+  const { sortField, sortDirection, handleSort, sortItems } = useTableSort<ProductAgingRow>();
+
   // Filter rows
   const filteredRows = useMemo(() => {
-    return agingData.rows.filter(row => {
+    const matched = agingData.rows.filter(row => {
       if (selectedBucket !== 'all' && row.agingBucket !== selectedBucket) return false;
       if (categoryFilter !== 'all' && row.category !== categoryFilter) return false;
       if (!searchQuery.trim()) return true;
@@ -100,12 +104,27 @@ export const InventoryAgingReport: React.FC<InventoryAgingReportProps> = ({
         row.barcode.toLowerCase().includes(q) ||
         row.serializedImeis.some(im => im.toLowerCase().includes(q))
       );
-    }).sort((a, b) => {
+    });
+
+    if (sortField && sortDirection) {
+      return sortItems(matched, {
+        product_specs: (a, b) => a.productName.localeCompare(b.productName, undefined, { numeric: true }),
+        category: (a, b) => a.category.localeCompare(b.category),
+        stock_qty: (a, b) => a.stock - b.stock,
+        unit_cost: (a, b) => a.costPrice - b.costPrice,
+        tied_up_capital: (a, b) => a.totalCostTiedUp - b.totalCostTiedUp,
+        days_in_stock: (a, b) => a.daysInStock - b.daysInStock,
+        aging_status: (a, b) => a.daysInStock - b.daysInStock,
+        recommended_action: (a, b) => (a.suggestedAction || '').localeCompare(b.suggestedAction || ''),
+      });
+    }
+
+    return [...matched].sort((a, b) => {
       if (sortBy === 'days') return b.daysInStock - a.daysInStock;
       if (sortBy === 'capital') return b.totalCostTiedUp - a.totalCostTiedUp;
       return a.productName.localeCompare(b.productName);
     });
-  }, [agingData.rows, selectedBucket, categoryFilter, searchQuery, sortBy]);
+  }, [agingData.rows, selectedBucket, categoryFilter, searchQuery, sortBy, sortField, sortDirection]);
 
   // Export Data preparation
   const getExportData = () => {
@@ -442,14 +461,87 @@ export const InventoryAgingReport: React.FC<InventoryAgingReportProps> = ({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-500">
-                {visibleColumns.product_specs !== false && <th className="py-3.5 px-4">Product & Specs</th>}
-                {visibleColumns.category !== false && <th className="py-3.5 px-3">Category</th>}
-                {visibleColumns.stock_qty !== false && <th className="py-3.5 px-3 text-right">In Stock</th>}
-                {visibleColumns.unit_cost !== false && <th className="py-3.5 px-3 text-right">Unit Cost</th>}
-                {visibleColumns.tied_up_capital !== false && <th className="py-3.5 px-3 text-right">Tied-up Capital</th>}
-                {visibleColumns.days_in_stock !== false && <th className="py-3.5 px-3 text-center">Days in Stock</th>}
-                {visibleColumns.aging_status !== false && <th className="py-3.5 px-3 text-center">Aging Status</th>}
-                {visibleColumns.recommended_action !== false && <th className="py-3.5 px-4">Recommended Action</th>}
+                {visibleColumns.product_specs !== false && (
+                  <SortableHeader
+                    field="product_specs"
+                    label="Product & Specs"
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.category !== false && (
+                  <SortableHeader
+                    field="category"
+                    label="Category"
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.stock_qty !== false && (
+                  <SortableHeader
+                    field="stock_qty"
+                    label="In Stock"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.unit_cost !== false && (
+                  <SortableHeader
+                    field="unit_cost"
+                    label="Unit Cost"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.tied_up_capital !== false && (
+                  <SortableHeader
+                    field="tied_up_capital"
+                    label="Tied-up Capital"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.days_in_stock !== false && (
+                  <SortableHeader
+                    field="days_in_stock"
+                    label="Days in Stock"
+                    align="center"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.aging_status !== false && (
+                  <SortableHeader
+                    field="aging_status"
+                    label="Aging Status"
+                    align="center"
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.recommended_action !== false && (
+                  <SortableHeader
+                    field="recommended_action"
+                    label="Recommended Action"
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">

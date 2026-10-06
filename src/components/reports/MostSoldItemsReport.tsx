@@ -33,6 +33,7 @@ import { SoldItemAggregate, computeMostSoldItems, exportToCsv } from '../../util
 import { exportReportToPdf } from '../../utils/pdfExportUtils';
 import { formatCurrency, getCategoryLabel } from '../../utils/formatters';
 import { ColumnVisibilityFilter, ColumnDefinition } from '../common/ColumnVisibilityFilter';
+import { SortableHeader } from '../common/SortableHeader';
 import { isPhoneCategory } from '../../data/categoryTaxonomy';
 
 const MOST_SOLD_COLUMNS: ColumnDefinition[] = [
@@ -53,7 +54,7 @@ interface MostSoldItemsReportProps {
   timeframeLabel: string;
 }
 
-type SortField = 'unitsSold' | 'totalRevenue' | 'grossProfit' | 'profitMarginPercent' | 'currentStock';
+type SortField = 'rank' | 'name' | 'category' | 'unitsSold' | 'totalRevenue' | 'grossProfit' | 'profitMarginPercent' | 'currentStock';
 
 export const MostSoldItemsReport: React.FC<MostSoldItemsReportProps> = ({
   sales,
@@ -120,8 +121,20 @@ export const MostSoldItemsReport: React.FC<MostSoldItemsReportProps> = ({
         );
       })
       .sort((a, b) => {
-        const valA = a[sortField];
-        const valB = b[sortField];
+        if (sortField === 'name') {
+          const res = a.name.localeCompare(b.name, undefined, { numeric: true });
+          return sortOrder === 'desc' ? -res : res;
+        }
+        if (sortField === 'category') {
+          const res = a.category.localeCompare(b.category);
+          return sortOrder === 'desc' ? -res : res;
+        }
+        if (sortField === 'rank') {
+          const res = b.unitsSold - a.unitsSold;
+          return sortOrder === 'desc' ? -res : res;
+        }
+        const valA = (a as any)[sortField] || 0;
+        const valB = (b as any)[sortField] || 0;
         return sortOrder === 'desc' ? (valB > valA ? 1 : -1) : (valA > valB ? 1 : -1);
       });
   }, [aggregatedItems, searchQuery, sortField, sortOrder, viewMode]);
@@ -579,63 +592,90 @@ export const MostSoldItemsReport: React.FC<MostSoldItemsReportProps> = ({
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-100/75 text-slate-700 uppercase font-extrabold text-[11px] tracking-wider border-b border-slate-200">
               <tr>
-                {visibleColumns.rank !== false && <th className="py-3 px-4 w-12 text-center">Rank</th>}
-                {visibleColumns.product_details !== false && <th className="py-3 px-4">Product Details</th>}
-                {visibleColumns.category !== false && <th className="py-3 px-4">Category</th>}
+                {visibleColumns.rank !== false && (
+                  <SortableHeader
+                    field="rank"
+                    label="Rank"
+                    align="center"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as SortField)}
+                    className="w-12 text-center"
+                  />
+                )}
+                {visibleColumns.product_details !== false && (
+                  <SortableHeader
+                    field="name"
+                    label="Product Details"
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as SortField)}
+                  />
+                )}
+                {visibleColumns.category !== false && (
+                  <SortableHeader
+                    field="category"
+                    label="Category"
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as SortField)}
+                  />
+                )}
                 {visibleColumns.units_sold !== false && (
-                  <th 
-                    className="py-3 px-4 text-right cursor-pointer hover:bg-slate-200/60 transition-colors"
-                    onClick={() => handleSort('unitsSold')}
-                  >
-                    <div className="inline-flex items-center gap-1">
-                      <span>Units Sold</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
+                  <SortableHeader
+                    field="unitsSold"
+                    label="Units Sold"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as SortField)}
+                  />
                 )}
                 {visibleColumns.total_revenue !== false && (
-                  <th 
-                    className="py-3 px-4 text-right cursor-pointer hover:bg-slate-200/60 transition-colors"
-                    onClick={() => handleSort('totalRevenue')}
-                  >
-                    <div className="inline-flex items-center gap-1">
-                      <span>Total Revenue</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
+                  <SortableHeader
+                    field="totalRevenue"
+                    label="Total Revenue"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as SortField)}
+                  />
                 )}
                 {visibleColumns.gross_profit !== false && (
-                  <th 
-                    className="py-3 px-4 text-right cursor-pointer hover:bg-slate-200/60 transition-colors"
-                    onClick={() => handleSort('grossProfit')}
-                  >
-                    <div className="inline-flex items-center gap-1">
-                      <span>Gross Profit</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
+                  <SortableHeader
+                    field="grossProfit"
+                    label="Gross Profit"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as SortField)}
+                  />
                 )}
                 {visibleColumns.profit_margin !== false && (
-                  <th 
-                    className="py-3 px-4 text-right cursor-pointer hover:bg-slate-200/60 transition-colors"
-                    onClick={() => handleSort('profitMarginPercent')}
-                  >
-                    <div className="inline-flex items-center gap-1">
-                      <span>Margin %</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
+                  <SortableHeader
+                    field="profitMarginPercent"
+                    label="Margin %"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as SortField)}
+                  />
                 )}
                 {visibleColumns.remaining_stock !== false && (
-                  <th 
-                    className="py-3 px-4 text-center cursor-pointer hover:bg-slate-200/60 transition-colors"
-                    onClick={() => handleSort('currentStock')}
-                  >
-                    <div className="inline-flex items-center gap-1">
-                      <span>Remaining Stock</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
+                  <SortableHeader
+                    field="currentStock"
+                    label="Remaining Stock"
+                    align="center"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as SortField)}
+                  />
                 )}
               </tr>
             </thead>

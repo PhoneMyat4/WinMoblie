@@ -62,6 +62,7 @@ import { formatCurrency, formatDateTime, formatDate, getCategoryLabel, getPaymen
 import { canonicalCategory } from '../../data/categoryTaxonomy';
 import { exportToCsv } from '../../utils/reportUtils';
 import { exportReportToPdf } from '../../utils/pdfExportUtils';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 interface SaleKpiReportProps {
   sales: Sale[];
@@ -893,6 +894,55 @@ export const SaleKpiReport: React.FC<SaleKpiReportProps> = ({
       return true;
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [sales, statusFilter, cashierFilter, paymentFilter, searchQuery]);
+
+  // Interactive Column Sorting for Staff Leaderboard
+  type StaffRow = typeof kpis.staffLeaderboard[number];
+  const { 
+    sortField: staffSortField, 
+    sortDirection: staffSortDirection, 
+    handleSort: handleStaffSort, 
+    sortItems: sortStaffItems 
+  } = useTableSort<StaffRow>();
+
+  const sortedStaffLeaderboard = useMemo(() => {
+    if (staffSortField && staffSortDirection) {
+      return sortStaffItems(kpis.staffLeaderboard, {
+        rank: (a, b) => b.revenue - a.revenue,
+        salesperson: (a, b) => a.name.localeCompare(b.name),
+        closed_invoices: (a, b) => a.invoices - b.invoices,
+        units_sold: (a, b) => a.units - b.units,
+        total_revenue: (a, b) => a.revenue - b.revenue,
+        gross_profit: (a, b) => a.profit - b.profit,
+        margin_percent: (a, b) => a.marginPercent - b.marginPercent,
+        avg_ticket: (a, b) => a.aov - b.aov,
+        revenue_share: (a, b) => a.revenueShare - b.revenueShare,
+      });
+    }
+    return kpis.staffLeaderboard;
+  }, [kpis.staffLeaderboard, staffSortField, staffSortDirection]);
+
+  // Interactive Column Sorting for Transactions
+  const { 
+    sortField: saleSortField, 
+    sortDirection: saleSortDirection, 
+    handleSort: handleSaleSort, 
+    sortItems: sortSaleItems 
+  } = useTableSort<Sale>();
+
+  const sortedFilteredSales = useMemo(() => {
+    if (saleSortField && saleSortDirection) {
+      return sortSaleItems(filteredSales, {
+        invoice_number: (a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber, undefined, { numeric: true }),
+        date_time: (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+        customer: (a, b) => (a.customerName || '').localeCompare(b.customerName || ''),
+        items_summary: (a, b) => a.items.length - b.items.length,
+        payment: (a, b) => a.paymentMethod.localeCompare(b.paymentMethod),
+        cashier: (a, b) => (a.cashierName || a.soldBy || '').localeCompare(b.cashierName || b.soldBy || ''),
+        grand_total: (a, b) => a.grandTotal - b.grandTotal,
+      });
+    }
+    return filteredSales;
+  }, [filteredSales, saleSortField, saleSortDirection]);
 
   // Export handlers
   const handleExportPdf = () => {
@@ -2327,19 +2377,89 @@ export const SaleKpiReport: React.FC<SaleKpiReportProps> = ({
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
-                  <th className="py-3.5 px-4 text-center">Rank</th>
-                  <th className="py-3.5 px-4">Salesperson</th>
-                  <th className="py-3.5 px-4 text-center">Closed Invoices</th>
-                  <th className="py-3.5 px-4 text-center">Units Sold</th>
-                  <th className="py-3.5 px-4 text-right">Total Revenue</th>
-                  <th className="py-3.5 px-4 text-right">Gross Profit</th>
-                  <th className="py-3.5 px-4 text-right">Margin %</th>
-                  <th className="py-3.5 px-4 text-right">Avg Ticket (AOV)</th>
-                  <th className="py-3.5 px-4 text-right">Revenue Share</th>
+                  <SortableHeader
+                    field="rank"
+                    label="Rank"
+                    align="center"
+                    numeric
+                    currentSortField={staffSortField}
+                    currentSortDirection={staffSortDirection}
+                    onSort={handleStaffSort}
+                  />
+                  <SortableHeader
+                    field="salesperson"
+                    label="Salesperson"
+                    currentSortField={staffSortField}
+                    currentSortDirection={staffSortDirection}
+                    onSort={handleStaffSort}
+                  />
+                  <SortableHeader
+                    field="closed_invoices"
+                    label="Closed Invoices"
+                    align="center"
+                    numeric
+                    currentSortField={staffSortField}
+                    currentSortDirection={staffSortDirection}
+                    onSort={handleStaffSort}
+                  />
+                  <SortableHeader
+                    field="units_sold"
+                    label="Units Sold"
+                    align="center"
+                    numeric
+                    currentSortField={staffSortField}
+                    currentSortDirection={staffSortDirection}
+                    onSort={handleStaffSort}
+                  />
+                  <SortableHeader
+                    field="total_revenue"
+                    label="Total Revenue"
+                    align="right"
+                    numeric
+                    currentSortField={staffSortField}
+                    currentSortDirection={staffSortDirection}
+                    onSort={handleStaffSort}
+                  />
+                  <SortableHeader
+                    field="gross_profit"
+                    label="Gross Profit"
+                    align="right"
+                    numeric
+                    currentSortField={staffSortField}
+                    currentSortDirection={staffSortDirection}
+                    onSort={handleStaffSort}
+                  />
+                  <SortableHeader
+                    field="margin_percent"
+                    label="Margin %"
+                    align="right"
+                    numeric
+                    currentSortField={staffSortField}
+                    currentSortDirection={staffSortDirection}
+                    onSort={handleStaffSort}
+                  />
+                  <SortableHeader
+                    field="avg_ticket"
+                    label="Avg Ticket (AOV)"
+                    align="right"
+                    numeric
+                    currentSortField={staffSortField}
+                    currentSortDirection={staffSortDirection}
+                    onSort={handleStaffSort}
+                  />
+                  <SortableHeader
+                    field="revenue_share"
+                    label="Revenue Share"
+                    align="right"
+                    numeric
+                    currentSortField={staffSortField}
+                    currentSortDirection={staffSortDirection}
+                    onSort={handleStaffSort}
+                  />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {kpis.staffLeaderboard.map((st, idx) => (
+                {sortedStaffLeaderboard.map((st, idx) => (
                   <tr key={st.name} className="hover:bg-slate-50/80 transition-colors">
                     {/* Rank */}
                     <td className="py-3.5 px-4 text-center">
@@ -2553,18 +2673,64 @@ export const SaleKpiReport: React.FC<SaleKpiReportProps> = ({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
-                <th className="py-3 px-4">Invoice #</th>
-                <th className="py-3 px-4">Date & Time</th>
-                <th className="py-3 px-4">Customer</th>
-                <th className="py-3 px-4">Items Summary</th>
-                <th className="py-3 px-4">Payment</th>
-                <th className="py-3 px-4 text-center">Cashier</th>
-                <th className="py-3 px-4 text-right">Grand Total</th>
-                <th className="py-3 px-4 text-center">Action</th>
+                <SortableHeader
+                  field="invoice_number"
+                  label="Invoice #"
+                  currentSortField={saleSortField}
+                  currentSortDirection={saleSortDirection}
+                  onSort={handleSaleSort}
+                />
+                <SortableHeader
+                  field="date_time"
+                  label="Date & Time"
+                  currentSortField={saleSortField}
+                  currentSortDirection={saleSortDirection}
+                  onSort={handleSaleSort}
+                />
+                <SortableHeader
+                  field="customer"
+                  label="Customer"
+                  currentSortField={saleSortField}
+                  currentSortDirection={saleSortDirection}
+                  onSort={handleSaleSort}
+                />
+                <SortableHeader
+                  field="items_summary"
+                  label="Items Summary"
+                  numeric
+                  currentSortField={saleSortField}
+                  currentSortDirection={saleSortDirection}
+                  onSort={handleSaleSort}
+                />
+                <SortableHeader
+                  field="payment"
+                  label="Payment"
+                  currentSortField={saleSortField}
+                  currentSortDirection={saleSortDirection}
+                  onSort={handleSaleSort}
+                />
+                <SortableHeader
+                  field="cashier"
+                  label="Cashier"
+                  align="center"
+                  currentSortField={saleSortField}
+                  currentSortDirection={saleSortDirection}
+                  onSort={handleSaleSort}
+                />
+                <SortableHeader
+                  field="grand_total"
+                  label="Grand Total"
+                  align="right"
+                  numeric
+                  currentSortField={saleSortField}
+                  currentSortDirection={saleSortDirection}
+                  onSort={handleSaleSort}
+                />
+                <th className="py-3 px-4 text-center select-none">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredSales.slice(0, 50).map(sale => {
+              {sortedFilteredSales.slice(0, 50).map(sale => {
                 const isRefunded = sale.status === 'refunded';
                 const payInfo = getPaymentMethodInfo(sale.paymentMethod);
 

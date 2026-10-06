@@ -985,7 +985,7 @@ export const SAMPLE_CSV_TEMPLATES: CsvTemplatePreset[] = [
 "Redmi A7pro","Redmi","Brand new phones","-","Brand New (Sealed)","580000","639000","2","0","4GB","64GB","Black","4GB RAM • 64GB • Black","SKU-826254","224338118334","866286085182101; 866704087369401","12","No","-"
 "Remax 20W Fast Charger (Promo Gift)","Remax","Accessories","Fast Charger","20W Type-C","0","0","50","10","-","-","White","-","SKU-18419","150000293812","-","6","Yes","supplier_bonus"
 "Ansty C056 Fast Charger","Ansty","Accessories","Fast Charger","65W GaN Dual Port","3850","6000","40","10","-","-","White","-","SKU-18420","150000293813","-","6","No","-"
-"Daw Pu ဟင်းချက်အိုး","Daw Pu","Cookware","ဟင်းချက်အိုး","3.5L Double Layer","620000","770000","2","0","-","-","Silver","-","SKU-99590","901000382910","-","12","No","-"`
+"Borofone BR13 Bluetooth Speaker","Borofone","Accessories","Wireless Speaker","Portable Bass","32000","45000","10","2","-","-","Black","-","SKU-99590","901000382910","-","6","No","-"`
   },
   {
     id: 'smartphones_imei',

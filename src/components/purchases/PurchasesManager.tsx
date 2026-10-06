@@ -48,7 +48,8 @@ import {
   Image as ImageIcon,
   Paperclip,
   ExternalLink,
-  Gift
+  Gift,
+  AlertTriangle
 } from 'lucide-react';
 import { 
   Product, 
@@ -834,10 +835,6 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       alert('Please enter or select a product item name.');
       return;
     }
-    if (!itemIsFoc && itemUnitCost <= 0) {
-      alert('Please enter a valid purchase unit cost.');
-      return;
-    }
 
     // Check if matching existing product in catalog exists by id, sister variant, or name/brand/cat
     const existingMatch = selectedExistingProdId
@@ -856,8 +853,12 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     const flatImeiList = itemImeiPairs.map(p => p.imei1);
 
     const finalUnitCost = itemIsFoc
-      ? (itemFocType === 'shop_funded_asset' ? Number(itemUnitCost) : 0)
-      : Number(itemUnitCost);
+      ? (itemFocType === 'shop_funded_asset' ? Math.max(0, Number(itemUnitCost) || 0) : 0)
+      : Math.max(0, Number(itemUnitCost) || 0);
+
+    const finalSellingPrice = (itemSellingPrice !== undefined && itemSellingPrice !== null && !isNaN(Number(itemSellingPrice)))
+      ? Math.max(0, Number(itemSellingPrice) || 0)
+      : (existingMatch ? existingMatch.sellingPrice : 0);
 
     const newItem: PurchaseItem = {
       productId: finalProductId,
@@ -880,7 +881,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       description: itemDescription || existingMatch?.description,
       quantity: Number(itemQty),
       unitCost: finalUnitCost,
-      sellingPrice: Number(itemSellingPrice) || (existingMatch ? existingMatch.sellingPrice : (finalUnitCost > 0 ? Number(finalUnitCost) * 1.2 : 0)),
+      sellingPrice: finalSellingPrice,
       totalCost: Number(itemQty) * finalUnitCost,
       imeiPairs: itemImeiPairs.length > 0 ? itemImeiPairs : undefined,
       dualImei: itemDualImei,
@@ -2661,7 +2662,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-[11px] font-bold text-slate-300 mb-1">Order Quantity *</label>
                       <input
@@ -2692,7 +2693,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-[11px] font-bold text-slate-300">
-                          Supplier Unit Cost ({settings.currencySymbol}) *
+                          Supplier Unit Cost ({settings.currencySymbol})
                         </label>
                         <button
                           type="button"
@@ -2732,12 +2733,69 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                           const val = e.target.value;
                           setItemUnitCost(val === '' ? 0 : Math.max(0, parseFloat(val) || 0));
                         }}
-                        className={`w-full px-3 py-2 rounded-lg font-mono font-bold text-xs focus:ring-2 focus:ring-indigo-500 outline-hidden ${
+                        className={`w-full px-3 py-2 rounded-lg font-mono font-bold text-xs outline-hidden transition-all ${
                           itemIsFoc && (itemFocType === 'supplier_bonus' || itemFocType === 'shop_funded_expensed')
                             ? 'bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed'
-                            : 'bg-white text-slate-900'
+                            : (itemUnitCost <= 0 && !itemIsFoc
+                                ? 'bg-rose-50/95 text-rose-950 border-2 border-rose-500 ring-2 ring-rose-400/40 focus:ring-rose-500'
+                                : 'bg-white text-slate-900 border border-slate-300 focus:ring-2 focus:ring-indigo-500')
                         }`}
                       />
+                      {itemUnitCost <= 0 && !itemIsFoc && (
+                        <span className="text-[10px] text-rose-300 font-bold flex items-center gap-1 mt-1">
+                          <AlertTriangle className="w-2.5 h-2.5 shrink-0 text-rose-400" />
+                          Cost 0 Ks (unpriced warning)
+                        </span>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-bold text-slate-300">
+                          Target Retail Price ({settings.currencySymbol})
+                        </label>
+                        {itemSellingPrice <= 0 && !itemIsFoc && (
+                          <span className="text-[10px] text-rose-400 font-bold">0 Ks</span>
+                        )}
+                      </div>
+
+                      <input
+                        id="po-item-selling-price-input"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="any"
+                        placeholder="0"
+                        value={itemSellingPrice === 0 ? '' : itemSellingPrice}
+                        onFocus={(e) => e.target.select()}
+                        onClick={(e) => e.currentTarget.select()}
+                        onKeyDown={(e) => {
+                          if (['e', 'E', '+', '-'].includes(e.key)) {
+                            e.preventDefault();
+                          }
+                        }}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setItemSellingPrice(val === '' ? 0 : Math.max(0, parseFloat(val) || 0));
+                        }}
+                        className={`w-full px-3 py-2 rounded-lg font-mono font-bold text-xs outline-hidden transition-all ${
+                          itemSellingPrice <= 0 && !itemIsFoc
+                            ? 'bg-rose-50/95 text-rose-950 border-2 border-rose-500 ring-2 ring-rose-400/40 focus:ring-rose-500'
+                            : 'bg-white text-slate-900 border border-slate-300 focus:ring-2 focus:ring-emerald-500'
+                        }`}
+                      />
+                      {itemSellingPrice <= 0 && !itemIsFoc ? (
+                        <span className="text-[10px] text-rose-300 font-bold flex items-center gap-1 mt-1">
+                          <AlertTriangle className="w-2.5 h-2.5 shrink-0 text-rose-400" />
+                          Price 0 Ks (unpriced warning)
+                        </span>
+                      ) : (
+                        itemSellingPrice > itemUnitCost && itemUnitCost > 0 && (
+                          <span className="text-[10px] text-emerald-300 font-semibold block mt-1">
+                            +{formatCurrency(itemSellingPrice - itemUnitCost, settings.currencySymbol)} profit ({Math.round(((itemSellingPrice - itemUnitCost) / itemSellingPrice) * 100)}% margin)
+                          </span>
+                        )
+                      )}
                     </div>
                   </div>
 
@@ -2960,7 +3018,11 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                               {/* Adjustable Unit Cost */}
                               <td className="p-2.5 text-right align-top">
                                 <div className="flex flex-col items-end gap-1">
-                                  <div className="inline-flex items-center justify-end space-x-1 bg-slate-50 p-1 rounded-lg border border-slate-200 shadow-2xs">
+                                  <div className={`inline-flex items-center justify-end space-x-1 p-1 rounded-lg shadow-2xs ${
+                                    item.unitCost <= 0 && !item.isFoc
+                                      ? 'bg-rose-50 border-2 border-rose-500 ring-1 ring-rose-400'
+                                      : 'bg-slate-50 border border-slate-200'
+                                  }`}>
                                     <input
                                       type="number"
                                       min="0"
@@ -2972,18 +3034,31 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                                         const val = raw === '' ? 0 : parseFloat(raw);
                                         handleUpdateItemCost(idx, isNaN(val) ? 0 : val);
                                       }}
-                                      className="w-24 sm:w-28 px-2 py-0.5 text-right font-mono font-bold text-xs bg-white border border-slate-200 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden transition-all text-slate-900"
+                                      className={`w-24 sm:w-28 px-2 py-0.5 text-right font-mono font-bold text-xs rounded outline-hidden transition-all text-slate-900 ${
+                                        item.unitCost <= 0 && !item.isFoc
+                                          ? 'bg-rose-50 text-rose-950 focus:ring-2 focus:ring-rose-500'
+                                          : 'bg-white border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500'
+                                      }`}
                                       title="Edit Buy / Cost Price per unit"
                                     />
                                     <span className="text-[10px] text-slate-500 font-bold pr-1 shrink-0">{settings.currencySymbol}</span>
                                   </div>
+                                  {item.unitCost <= 0 && !item.isFoc && (
+                                    <span className="text-[9px] text-rose-600 font-bold flex items-center gap-0.5 pr-1">
+                                      <AlertTriangle className="w-2.5 h-2.5 shrink-0 text-rose-500" /> 0 Ks Cost Warning
+                                    </span>
+                                  )}
                                 </div>
                               </td>
 
                               {/* Adjustable Retail Selling Price & Profit Margin */}
                               <td className="p-2.5 text-right align-top">
                                 <div className="flex flex-col items-end gap-1">
-                                  <div className="inline-flex items-center justify-end space-x-1 bg-slate-50 p-1 rounded-lg border border-slate-200 shadow-2xs">
+                                  <div className={`inline-flex items-center justify-end space-x-1 p-1 rounded-lg shadow-2xs ${
+                                    item.sellingPrice <= 0 && !item.isFoc
+                                      ? 'bg-rose-50 border-2 border-rose-500 ring-1 ring-rose-400'
+                                      : 'bg-slate-50 border border-slate-200'
+                                  }`}>
                                     <input
                                       type="number"
                                       min="0"
@@ -2995,22 +3070,32 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                                         const val = raw === '' ? 0 : parseFloat(raw);
                                         handleUpdateItemSellingPrice(idx, isNaN(val) ? 0 : val);
                                       }}
-                                      className="w-24 sm:w-28 px-2 py-0.5 text-right font-mono font-bold text-xs bg-white border border-slate-200 rounded focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-hidden transition-all text-slate-900"
+                                      className={`w-24 sm:w-28 px-2 py-0.5 text-right font-mono font-bold text-xs rounded outline-hidden transition-all text-slate-900 ${
+                                        item.sellingPrice <= 0 && !item.isFoc
+                                          ? 'bg-rose-50 text-rose-950 focus:ring-2 focus:ring-rose-500'
+                                          : 'bg-white border border-slate-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500'
+                                      }`}
                                       title="Edit Retail Selling Price"
                                     />
                                     <span className="text-[10px] text-slate-500 font-bold pr-1 shrink-0">{settings.currencySymbol}</span>
                                   </div>
-                                  <div className="text-[9px] flex items-center gap-1 font-semibold pr-1">
-                                    {profitPerUnit >= 0 ? (
-                                      <span className="text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
-                                        +{formatCurrency(profitPerUnit, settings.currencySymbol)} ({marginPercent}%)
-                                      </span>
-                                    ) : (
-                                      <span className="text-rose-700 bg-rose-50 px-1 py-0.2 rounded border border-rose-200">
-                                        Loss: {formatCurrency(profitPerUnit, settings.currencySymbol)}
-                                      </span>
-                                    )}
-                                  </div>
+                                  {item.sellingPrice <= 0 && !item.isFoc ? (
+                                    <span className="text-[9px] text-rose-600 font-bold flex items-center gap-0.5 pr-1">
+                                      <AlertTriangle className="w-2.5 h-2.5 shrink-0 text-rose-500" /> 0 Ks Price Warning
+                                    </span>
+                                  ) : (
+                                    <div className="text-[9px] flex items-center gap-1 font-semibold pr-1">
+                                      {profitPerUnit >= 0 ? (
+                                        <span className="text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
+                                          +{formatCurrency(profitPerUnit, settings.currencySymbol)} ({marginPercent}%)
+                                        </span>
+                                      ) : (
+                                        <span className="text-rose-700 bg-rose-50 px-1 py-0.2 rounded border border-rose-200">
+                                          Loss: {formatCurrency(profitPerUnit, settings.currencySymbol)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               </td>
 

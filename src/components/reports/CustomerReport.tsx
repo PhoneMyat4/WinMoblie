@@ -31,6 +31,7 @@ import { exportToCsv } from '../../utils/reportUtils';
 import { exportReportToPdf } from '../../utils/pdfExportUtils';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { ColumnVisibilityFilter, ColumnDefinition } from '../common/ColumnVisibilityFilter';
+import { SortableHeader } from '../common/SortableHeader';
 
 const CUSTOMER_REPORT_COLUMNS: ColumnDefinition[] = [
   { id: 'customer_name', label: 'Customer Name', required: true },
@@ -50,6 +51,8 @@ interface CustomerReportProps {
   timeframeLabel: string;
 }
 
+type CustomerSortField = 'name' | 'address' | 'periodOrders' | 'periodSpent' | 'totalSpent' | 'loyaltyPoints' | 'lastVisitDate';
+
 export const CustomerReport: React.FC<CustomerReportProps> = ({
   customers,
   sales,
@@ -58,7 +61,7 @@ export const CustomerReport: React.FC<CustomerReportProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCustomer, setSelectedCustomer] = useState<(Customer & { invoices?: Sale[] }) | null>(null);
-  const [sortField, setSortField] = useState<'periodSpent' | 'periodOrders' | 'totalSpent' | 'loyaltyPoints'>('periodSpent');
+  const [sortField, setSortField] = useState<CustomerSortField>('periodSpent');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   // Column Visibility Filter State
@@ -162,8 +165,20 @@ export const CustomerReport: React.FC<CustomerReportProps> = ({
         );
       })
       .sort((a, b) => {
-        const valA = a[sortField];
-        const valB = b[sortField];
+        if (sortField === 'name') {
+          const res = a.name.localeCompare(b.name, undefined, { numeric: true });
+          return sortOrder === 'desc' ? -res : res;
+        }
+        if (sortField === 'address') {
+          const res = a.address.localeCompare(b.address);
+          return sortOrder === 'desc' ? -res : res;
+        }
+        if (sortField === 'lastVisitDate') {
+          const res = new Date(a.lastVisitDate || 0).getTime() - new Date(b.lastVisitDate || 0).getTime();
+          return sortOrder === 'desc' ? -res : res;
+        }
+        const valA = (a as any)[sortField] || 0;
+        const valB = (b as any)[sortField] || 0;
         return sortOrder === 'desc' ? (valB > valA ? 1 : -1) : (valA > valB ? 1 : -1);
       });
   }, [customerActivity, searchQuery, sortField, sortOrder]);
@@ -480,54 +495,79 @@ export const CustomerReport: React.FC<CustomerReportProps> = ({
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-100/75 text-slate-700 uppercase font-extrabold text-[11px] tracking-wider border-b border-slate-200">
               <tr>
-                {visibleColumns.customer_name !== false && <th className="py-3 px-4">Customer Name</th>}
-                {visibleColumns.contact_location !== false && <th className="py-3 px-4">Contact & Location</th>}
+                {visibleColumns.customer_name !== false && (
+                  <SortableHeader
+                    field="name"
+                    label="Customer Name"
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as CustomerSortField)}
+                  />
+                )}
+                {visibleColumns.contact_location !== false && (
+                  <SortableHeader
+                    field="address"
+                    label="Contact & Location"
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as CustomerSortField)}
+                  />
+                )}
                 {visibleColumns.orders !== false && (
-                  <th 
-                    className="py-3 px-4 text-center cursor-pointer hover:bg-slate-200/60 transition-colors"
-                    onClick={() => handleSort('periodOrders')}
-                  >
-                    <div className="inline-flex items-center gap-1">
-                      <span>Orders in Period</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
+                  <SortableHeader
+                    field="periodOrders"
+                    label="Orders in Period"
+                    align="center"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as CustomerSortField)}
+                  />
                 )}
                 {visibleColumns.period_spent !== false && (
-                  <th 
-                    className="py-3 px-4 text-right cursor-pointer hover:bg-slate-200/60 transition-colors"
-                    onClick={() => handleSort('periodSpent')}
-                  >
-                    <div className="inline-flex items-center gap-1">
-                      <span>Spent in Period</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
+                  <SortableHeader
+                    field="periodSpent"
+                    label="Spent in Period"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as CustomerSortField)}
+                  />
                 )}
                 {visibleColumns.lifetime_spend !== false && (
-                  <th 
-                    className="py-3 px-4 text-right cursor-pointer hover:bg-slate-200/60 transition-colors"
-                    onClick={() => handleSort('totalSpent')}
-                  >
-                    <div className="inline-flex items-center gap-1">
-                      <span>Lifetime Spend</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
+                  <SortableHeader
+                    field="totalSpent"
+                    label="Lifetime Spend"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as CustomerSortField)}
+                  />
                 )}
                 {visibleColumns.loyalty_points !== false && (
-                  <th 
-                    className="py-3 px-4 text-center cursor-pointer hover:bg-slate-200/60 transition-colors"
-                    onClick={() => handleSort('loyaltyPoints')}
-                  >
-                    <div className="inline-flex items-center gap-1">
-                      <span>Loyalty Points</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
+                  <SortableHeader
+                    field="loyaltyPoints"
+                    label="Loyalty Points"
+                    align="center"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as CustomerSortField)}
+                  />
                 )}
-                {visibleColumns.last_purchase !== false && <th className="py-3 px-4 text-center">Last Purchase</th>}
-                {visibleColumns.invoices !== false && <th className="py-3 px-4 text-center">Invoices</th>}
+                {visibleColumns.last_purchase !== false && (
+                  <SortableHeader
+                    field="lastVisitDate"
+                    label="Last Purchase"
+                    align="center"
+                    currentSortField={sortField}
+                    currentSortDirection={sortOrder}
+                    onSort={(f) => handleSort(f as CustomerSortField)}
+                  />
+                )}
+                {visibleColumns.invoices !== false && <th className="py-3 px-4 text-center select-none">Invoices</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">

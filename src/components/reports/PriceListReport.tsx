@@ -41,6 +41,7 @@ import { exportToCsv } from '../../utils/reportUtils';
 import { exportReportToPdf } from '../../utils/pdfExportUtils';
 import { formatCurrency, getCategoryLabel, getConditionLabel } from '../../utils/formatters';
 import { ColumnVisibilityFilter, ColumnDefinition } from '../common/ColumnVisibilityFilter';
+import { SortableHeader, SortDirection } from '../common/SortableHeader';
 
 export interface PriceListReportProps {
   products: Product[];
@@ -90,8 +91,8 @@ export const PriceListReport: React.FC<PriceListReportProps> = ({
   const [marginTierFilter, setMarginTierFilter] = useState<string>('all');
 
   // Sorting
-  const [sortBy, setSortBy] = useState<'name' | 'price' | 'cost' | 'margin' | 'stock' | 'brand'>('name');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [sortBy, setSortBy] = useState<string | null>('product_info');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
   // Column Visibility Filter State
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(() => {
@@ -237,21 +238,44 @@ export const PriceListReport: React.FC<PriceListReportProps> = ({
 
       return true;
     }).sort((a, b) => {
+      if (!sortBy || !sortDirection) return 0;
       let comparison = 0;
-      if (sortBy === 'name') {
-        comparison = a.name.localeCompare(b.name);
-      } else if (sortBy === 'price') {
-        comparison = a.sellingPrice - b.sellingPrice;
-      } else if (sortBy === 'cost') {
-        comparison = a.costPrice - b.costPrice;
-      } else if (sortBy === 'margin') {
-        const marginA = a.sellingPrice > 0 ? (a.sellingPrice - a.costPrice) / a.sellingPrice : 0;
-        const marginB = b.sellingPrice > 0 ? (b.sellingPrice - b.costPrice) / b.sellingPrice : 0;
+      if (sortBy === 'product_info' || sortBy === 'name') {
+        comparison = a.name.localeCompare(b.name, undefined, { numeric: true });
+      } else if (sortBy === 'sku_barcode') {
+        comparison = (a.sku || a.barcode || '').localeCompare(b.sku || b.barcode || '', undefined, { numeric: true });
+      } else if (sortBy === 'category_brand' || sortBy === 'brand') {
+        comparison = (a.brand || a.category || '').localeCompare(b.brand || b.category || '');
+      } else if (sortBy === 'condition') {
+        comparison = (a.condition || '').localeCompare(b.condition || '');
+      } else if (sortBy === 'stock_status' || sortBy === 'stock') {
+        comparison = (a.stock || 0) - (b.stock || 0);
+      } else if (sortBy === 'cost_price' || sortBy === 'cost') {
+        comparison = (a.costPrice || 0) - (b.costPrice || 0);
+      } else if (sortBy === 'selling_price' || sortBy === 'price') {
+        comparison = (a.sellingPrice || 0) - (b.sellingPrice || 0);
+      } else if (sortBy === 'margin_amount') {
+        const profitA = (a.sellingPrice || 0) - (a.costPrice || 0);
+        const profitB = (b.sellingPrice || 0) - (b.costPrice || 0);
+        comparison = profitA - profitB;
+      } else if (sortBy === 'margin_percent' || sortBy === 'margin') {
+        const marginA = a.sellingPrice > 0 ? ((a.sellingPrice - (a.costPrice || 0)) / a.sellingPrice) : 0;
+        const marginB = b.sellingPrice > 0 ? ((b.sellingPrice - (b.costPrice || 0)) / b.sellingPrice) : 0;
         comparison = marginA - marginB;
-      } else if (sortBy === 'stock') {
-        comparison = a.stock - b.stock;
-      } else if (sortBy === 'brand') {
-        comparison = a.brand.localeCompare(b.brand);
+      } else if (sortBy === 'markup_percent') {
+        const markupA = a.costPrice && a.costPrice > 0 ? ((a.sellingPrice - a.costPrice) / a.costPrice) : 0;
+        const markupB = b.costPrice && b.costPrice > 0 ? ((b.sellingPrice - b.costPrice) / b.costPrice) : 0;
+        comparison = markupA - markupB;
+      } else if (sortBy === 'wholesale_tier1') {
+        const t1A = Math.round(a.sellingPrice * 0.95);
+        const t1B = Math.round(b.sellingPrice * 0.95);
+        comparison = t1A - t1B;
+      } else if (sortBy === 'wholesale_tier2') {
+        const t2A = Math.round(a.sellingPrice * 0.90);
+        const t2B = Math.round(b.sellingPrice * 0.90);
+        comparison = t2A - t2B;
+      } else if (sortBy === 'warranty') {
+        comparison = (a.warrantyMonths || 0) - (b.warrantyMonths || 0);
       }
       return sortDirection === 'asc' ? comparison : -comparison;
     });
@@ -362,9 +386,16 @@ export const PriceListReport: React.FC<PriceListReportProps> = ({
   }, [filteredProducts]);
 
   // Handle Sort Click
-  const handleSort = (field: 'name' | 'price' | 'cost' | 'margin' | 'stock' | 'brand') => {
+  const handleSort = (field: string) => {
     if (sortBy === field) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortBy(null);
+        setSortDirection(null);
+      } else {
+        setSortDirection('asc');
+      }
     } else {
       setSortBy(field);
       setSortDirection('asc');
@@ -1031,107 +1062,154 @@ export const PriceListReport: React.FC<PriceListReportProps> = ({
                 <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
                   
                   {visibleColumns.product_info !== false && (
-                    <th 
-                      className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition-colors"
-                      onClick={() => handleSort('name')}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span>Product & Specs</span>
-                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                      </div>
-                    </th>
+                    <SortableHeader
+                      field="product_info"
+                      label="Product & Specs"
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {visibleColumns.sku_barcode !== false && (
-                    <th className="py-3 px-4">SKU / Barcode</th>
+                    <SortableHeader
+                      field="sku_barcode"
+                      label="SKU / Barcode"
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {visibleColumns.category_brand !== false && (
-                    <th 
-                      className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition-colors"
-                      onClick={() => handleSort('brand')}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span>Brand & Category</span>
-                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                      </div>
-                    </th>
+                    <SortableHeader
+                      field="category_brand"
+                      label="Brand & Category"
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {visibleColumns.condition !== false && (
-                    <th className="py-3 px-4">Condition</th>
+                    <SortableHeader
+                      field="condition"
+                      label="Condition"
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {visibleColumns.stock_status !== false && (
-                    <th 
-                      className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition-colors text-center"
-                      onClick={() => handleSort('stock')}
-                    >
-                      <div className="flex items-center justify-center gap-1.5">
-                        <span>Availability</span>
-                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                      </div>
-                    </th>
+                    <SortableHeader
+                      field="stock_status"
+                      label="Availability"
+                      align="center"
+                      numeric
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {priceMode !== 'retail' && visibleColumns.cost_price !== false && (
-                    <th 
-                      className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition-colors text-right"
-                      onClick={() => handleSort('cost')}
-                    >
-                      <div className="flex items-center justify-end gap-1.5">
-                        <span>Cost Price</span>
-                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                      </div>
-                    </th>
+                    <SortableHeader
+                      field="cost_price"
+                      label="Cost Price"
+                      align="right"
+                      numeric
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {visibleColumns.selling_price !== false && (
-                    <th 
-                      className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition-colors text-right"
-                      onClick={() => handleSort('price')}
-                    >
-                      <div className="flex items-center justify-end gap-1.5">
-                        <span>Selling Price</span>
-                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                      </div>
-                    </th>
+                    <SortableHeader
+                      field="selling_price"
+                      label="Selling Price"
+                      align="right"
+                      numeric
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {priceMode !== 'retail' && visibleColumns.margin_amount !== false && (
-                    <th className="py-3 px-4 text-right">Gross Profit</th>
+                    <SortableHeader
+                      field="margin_amount"
+                      label="Gross Profit"
+                      align="right"
+                      numeric
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {priceMode !== 'retail' && visibleColumns.margin_percent !== false && (
-                    <th 
-                      className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition-colors text-right"
-                      onClick={() => handleSort('margin')}
-                    >
-                      <div className="flex items-center justify-end gap-1.5">
-                        <span>Margin %</span>
-                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                      </div>
-                    </th>
+                    <SortableHeader
+                      field="margin_percent"
+                      label="Margin %"
+                      align="right"
+                      numeric
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {priceMode !== 'retail' && visibleColumns.markup_percent !== false && (
-                    <th className="py-3 px-4 text-right">Markup %</th>
+                    <SortableHeader
+                      field="markup_percent"
+                      label="Markup %"
+                      align="right"
+                      numeric
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {(priceMode === 'wholesale' || visibleColumns.wholesale_tier1 !== false) && (
-                    <th className="py-3 px-4 text-right">Tier 1 (-5%)</th>
+                    <SortableHeader
+                      field="wholesale_tier1"
+                      label="Tier 1 (-5%)"
+                      align="right"
+                      numeric
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {(priceMode === 'wholesale' || visibleColumns.wholesale_tier2 !== false) && (
-                    <th className="py-3 px-4 text-right">Tier 2 (-10%)</th>
+                    <SortableHeader
+                      field="wholesale_tier2"
+                      label="Tier 2 (-10%)"
+                      align="right"
+                      numeric
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {visibleColumns.warranty !== false && (
-                    <th className="py-3 px-4 text-center">Warranty</th>
+                    <SortableHeader
+                      field="warranty"
+                      label="Warranty"
+                      align="center"
+                      currentSortField={sortBy}
+                      currentSortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
                   )}
 
                   {visibleColumns.actions !== false && (
-                    <th className="py-3 px-4 text-center">Actions</th>
+                    <th className="py-3 px-4 text-center select-none">Actions</th>
                   )}
 
                 </tr>

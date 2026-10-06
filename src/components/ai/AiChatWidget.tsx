@@ -568,7 +568,7 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
           model: selectedModel,
           language: chatLanguage,
           useGoogleSearch: useGoogleSearch,
-          isAdmin: currentStaffUser?.role === 'Admin' || currentStaffUser?.role === 'Owner' || currentStaffUser?.role === 'Manager',
+          isAdmin: currentStaffUser?.role === 'Owner' || currentStaffUser?.role === 'Manager',
           userRole: currentStaffUser?.role || 'Staff',
           context: {
             ...posContext,

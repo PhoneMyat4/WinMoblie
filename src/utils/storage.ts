@@ -140,22 +140,10 @@ try {
 }
 
 function isFreshDatabase(): boolean {
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return false;
-  if (localStorage.getItem(STORAGE_KEYS.IS_FRESH_DATABASE) === 'true') return true;
-  try {
-    const rawSettings = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-    if (rawSettings) {
-      const parsed = JSON.parse(rawSettings);
-      if (parsed?.isFreshDatabase === true) {
-        // Also heal the dedicated flag so subsequent checks are fast
-        localStorage.setItem(STORAGE_KEYS.IS_FRESH_DATABASE, 'true');
-        return true;
-      }
-    }
-  } catch {
-    // ignore parse error
+  if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+    localStorage.setItem(STORAGE_KEYS.IS_FRESH_DATABASE, 'true');
   }
-  return false;
+  return true;
 }
 
 function getItem<T>(key: string, defaultValue: T): T {
@@ -252,13 +240,18 @@ export interface StorageChangeHandler {
   onPurchasesBatch?: (purchases: PurchaseRecord[]) => void;
   onPurchaseDelete?: (id: string) => void;
   onCustomerUpsert?: (customer: Customer) => void;
+  onCustomersBatch?: (customers: Customer[]) => void;
+  onSupplierUpsert?: (supplier: Supplier) => void;
+  onSuppliersBatch?: (suppliers: Supplier[]) => void;
   onExpenseUpsert?: (expense: ExpenseRecord) => void;
+  onExpensesBatch?: (expenses: ExpenseRecord[]) => void;
   onExpenseDelete?: (id: string) => void;
+  onAnnouncementsBatch?: (announcements: Announcement[]) => void;
+  onCashDrawerUpsert?: (drawer: CashDrawerRecord) => void;
   onProductUpsert?: (product: Product) => void;
   onProductsBatch?: (products: Product[]) => void;
   onProductDelete?: (id: string) => void;
   onSettingsUpsert?: (settings: ShopSettings) => void;
-  onSupplierUpsert?: (supplier: Supplier) => void;
   onStaffUserUpsert?: (user: StaffUser) => void;
   onStaffUsersBatch?: (users: StaffUser[]) => void;
   onStaffUserDelete?: (id: string) => void;
@@ -278,9 +271,12 @@ export const MOCK_PRODUCT_IDS = new Set<string>([
   'prod-cook-1', 'prod-cook-2', 'prod-cook-3', 'prod-cook-4', 'prod-cook-5', 'prod-cook-6'
 ]);
 
-export function isMockProduct(p: { id?: string } | null | undefined): boolean {
+export function isMockProduct(p: { id?: string; category?: string; brand?: string; name?: string } | null | undefined): boolean {
   if (!p || !p.id) return false;
-  return MOCK_PRODUCT_IDS.has(p.id) || p.id.startsWith('prod-cook-');
+  if (MOCK_PRODUCT_IDS.has(p.id) || p.id.startsWith('prod-cook-')) return true;
+  if (p.category === 'cookware') return true;
+  if (p.brand === 'Daw Pu' || (p.name && p.name.toLowerCase().includes('daw pu'))) return true;
+  return false;
 }
 
 // Known IDs and names of mock/sample demonstration staff users
@@ -303,6 +299,69 @@ export function isMockStaffUser(u: { id?: string; name?: string; username?: stri
     u.name.includes('Ko Min Thu') ||
     u.name.includes('Ko Zaw Zaw')
   )) return true;
+  return false;
+}
+
+export const MOCK_PURCHASE_IDS = new Set<string>(['po-1', 'po-2', 'po-3', 'po-4', 'po-5']);
+export function isMockPurchase(p: { id?: string; createdBy?: string; supplierName?: string; referenceInvoiceNo?: string; purchaseOrderNumber?: string } | null | undefined): boolean {
+  if (!p || !p.id) return false;
+  if (MOCK_PURCHASE_IDS.has(p.id)) return true;
+  if (p.id.startsWith('po-') && !p.id.includes('-17') && !p.id.includes('-18')) return true;
+  if (p.createdBy === 'Ma Su Su') return true;
+  if (p.supplierName && (p.supplierName.includes('Yangon Gadget & Accessories Hub') || p.supplierName.includes('Apple Authorized'))) return true;
+  if (p.referenceInvoiceNo === 'MDY-PO-771') return true;
+  if (p.purchaseOrderNumber && p.purchaseOrderNumber.startsWith('PO-2026-08')) return true;
+  return false;
+}
+
+export const MOCK_EXPENSE_IDS = new Set<string>(['exp-1', 'exp-2', 'exp-3', 'exp-deliv-po-1', 'exp-deliv-po-2']);
+export function isMockExpense(e: { id?: string; voucherNumber?: string; paidTo?: string; recordedBy?: string; title?: string } | null | undefined): boolean {
+  if (!e || !e.id) return false;
+  if (MOCK_EXPENSE_IDS.has(e.id)) return true;
+  if (e.paidTo === 'TrueNet Telecom Co., Ltd' || e.paidTo?.includes('Aung Mingalar Highway')) return true;
+  if (e.recordedBy && (e.recordedBy.includes('Ma Thandar') || e.recordedBy.includes('Ko Aung Kyaw'))) return true;
+  if (e.title && (e.title.includes('Staff Afternoon Tea & Snacks') || e.title.includes('High-speed Fiber WiFi Monthly Bill'))) return true;
+  if (e.voucherNumber && (e.voucherNumber.startsWith('EXP-DELIV-PO202608') || e.voucherNumber === 'EXP-2026-001' || e.voucherNumber === 'EXP-2026-002' || e.voucherNumber === 'EXP-2026-003')) return true;
+  return false;
+}
+
+export const MOCK_ANNOUNCEMENT_IDS = new Set<string>(['ann-1', 'ann-2', 'ann-3', 'ann-4']);
+export function isMockAnnouncement(a: { id?: string; title?: string } | null | undefined): boolean {
+  if (!a || !a.id) return false;
+  return MOCK_ANNOUNCEMENT_IDS.has(a.id);
+}
+
+export const MOCK_TRANSFER_IDS = new Set<string>(['trf_demo_001']);
+export function isMockStockTransfer(t: { id?: string; transferNumber?: string } | null | undefined): boolean {
+  if (!t || !t.id) return false;
+  return MOCK_TRANSFER_IDS.has(t.id) || t.transferNumber === 'TRF-2026-1001';
+}
+
+export const MOCK_CUSTOMER_IDS = new Set<string>(['cust-1', 'cust-2', 'cust-3', 'cust-4', 'cust-5']);
+export const MOCK_CUSTOMER_NAMES = new Set<string>(['U Thura Min', 'Daw Hnin Nu Wai', 'Ko Sithu Win', 'Daw Myat Noe', 'Ko Kyaw Zayar']);
+export function isMockCustomer(c: { id?: string; name?: string } | null | undefined): boolean {
+  if (!c || !c.id) return false;
+  return MOCK_CUSTOMER_IDS.has(c.id) || (c.name ? MOCK_CUSTOMER_NAMES.has(c.name) : false);
+}
+
+export const MOCK_SUPPLIER_IDS = new Set<string>(['sup-1', 'sup-2', 'sup-3', 'sup-4']);
+export function isMockSupplier(s: { id?: string; name?: string } | null | undefined): boolean {
+  if (!s || !s.id) return false;
+  return MOCK_SUPPLIER_IDS.has(s.id) || (s.name ? (s.name.includes('Apple Authorized') || s.name.includes('Yangon Gadget')) : false);
+}
+
+export function isMockCashDrawer(d: CashDrawerRecord | null | undefined): boolean {
+  if (!d) return false;
+  if (d.openedBy === 'Ko Min Thu (Cashier)' || d.openedBy === 'Ko Min Thu') return true;
+  if (d.transactions && d.transactions.some(t => ['tx-1', 'tx-2', 'tx-3', 'tx-4'].includes(t.id))) return true;
+  return false;
+}
+
+export function isMockAuditLog(l: { id?: string; staffName?: string; staffId?: string } | null | undefined): boolean {
+  if (!l) return false;
+  if (l.id && (l.id.startsWith('audit-log-') || ['audit-log-1', 'audit-log-2', 'audit-log-3', 'audit-log-4', 'audit-log-5'].includes(l.id))) return true;
+  if (l.staffName && (l.staffName.includes('Ko Aung Kyaw') || l.staffName.includes('Ko Min Thu') || l.staffName.includes('Ma Thandar'))) return true;
+  if (l.staffId && ['staff-1', 'staff-2', 'staff-3', 'staff-4'].includes(l.staffId)) return true;
   return false;
 }
 
@@ -345,42 +404,7 @@ export const DEFAULT_LOCATIONS: StoreLocation[] = [
   },
 ];
 
-export const DEFAULT_TRANSFERS: StockTransfer[] = [
-  {
-    id: 'trf_demo_001',
-    transferNumber: 'TRF-2026-1001',
-    fromLocationId: 'loc_wh_central',
-    fromLocationName: 'Central Distribution Warehouse',
-    toLocationId: 'loc_br_yangon_01',
-    toLocationName: 'Yangon Flagship Store',
-    status: 'received',
-    items: [
-      {
-        productId: 'prod_1',
-        productName: 'iPhone 15 Pro Max',
-        brand: 'Apple',
-        model: 'iPhone 15 Pro Max',
-        sku: 'IPHONE-15-PM-256',
-        requestedQty: 5,
-        dispatchedQty: 5,
-        receivedQty: 5,
-        discrepancyQty: 0,
-      }
-    ],
-    totalRequestedQty: 5,
-    totalDispatchedQty: 5,
-    totalReceivedQty: 5,
-    requestedBy: { staffId: 'staff_1', name: 'Daw Thandar', date: '2026-09-20T08:00:00.000Z' },
-    approvedBy: { staffId: 'staff_admin', name: 'Store Owner', date: '2026-09-20T08:30:00.000Z' },
-    dispatchedBy: { staffId: 'staff_wh', name: 'Ko Kyaw Zin', date: '2026-09-20T09:00:00.000Z' },
-    receivedBy: { staffId: 'staff_1', name: 'Daw Thandar', date: '2026-09-20T14:30:00.000Z' },
-    notes: 'Initial flagship restock',
-    createdAt: '2026-09-20T08:00:00.000Z',
-    updatedAt: '2026-09-20T14:30:00.000Z',
-    dispatchedAt: '2026-09-20T09:00:00.000Z',
-    receivedAt: '2026-09-20T14:30:00.000Z',
-  }
-];
+export const DEFAULT_TRANSFERS: StockTransfer[] = [];
 
 export const StorageService = {
   setSyncHandler: (handler: StorageChangeHandler | null) => {
@@ -883,7 +907,10 @@ export const StorageService = {
   },
 
   // User Activity & Audit Log History
-  getAuditLogs: (): AuditLogEntry[] => getItem(STORAGE_KEYS.AUDIT_LOGS, initialAuditLogs),
+  getAuditLogs: (): AuditLogEntry[] => {
+    const raw = getItem<AuditLogEntry[]>(STORAGE_KEYS.AUDIT_LOGS, []);
+    return (Array.isArray(raw) ? raw : []).filter(l => l && !isMockAuditLog(l));
+  },
   saveAuditLogs: (logs: AuditLogEntry[], triggerSync = true) => setItem(STORAGE_KEYS.AUDIT_LOGS, logs, triggerSync),
   addAuditLog: (entry: AuditLogEntry | (Partial<AuditLogEntry> & { actionType: AuditActionType; category: AuditCategory; severity: AuditSeverity; summary: string })): AuditLogEntry => {
     const fullEntry: AuditLogEntry = {
@@ -1111,7 +1138,186 @@ export const StorageService = {
   },
 
   // Sales
-  getSales: (): Sale[] => getItem(STORAGE_KEYS.SALES, initialSales),
+  getSales: (): Sale[] => {
+    const list = getItem<Sale[]>(STORAGE_KEYS.SALES, []);
+    if (!Array.isArray(list) || list.length === 0) return [];
+    // Ensure mock demo sales (sale-1 to sale-6) never appear in real store sales
+    const MOCK_IDS = new Set(['sale-1', 'sale-2', 'sale-3', 'sale-4', 'sale-5', 'sale-6']);
+    return list.filter(s => !MOCK_IDS.has(s.id) && !s.soldBy?.includes('Ko Min Thu'));
+  },
+
+  purgeMockSales: (triggerSync = true): string[] => {
+    const raw = getItem<Sale[]>(STORAGE_KEYS.SALES, []);
+    if (!Array.isArray(raw) || raw.length === 0) return [];
+    const MOCK_IDS = new Set(['sale-1', 'sale-2', 'sale-3', 'sale-4', 'sale-5', 'sale-6']);
+    const MOCK_INVOICE_NUMS = new Set(['INV-2026-001', 'INV-2026-002', 'INV-2026-003', 'INV-2026-004', 'INV-2026-005', 'INV-2026-006']);
+    
+    const purgedIds: string[] = [];
+    const cleanList = raw.filter(s => {
+      const isMock = MOCK_IDS.has(s.id) ||
+        MOCK_INVOICE_NUMS.has(s.invoiceNumber) ||
+        (s.soldBy && s.soldBy.includes('Ko Min Thu') && (s.id.startsWith('sale-') || s.invoiceNumber.startsWith('INV-2026-00')));
+      if (isMock) {
+        purgedIds.push(s.id);
+        return false;
+      }
+      return true;
+    });
+
+    if (purgedIds.length > 0) {
+      setItem(STORAGE_KEYS.SALES, cleanList);
+      if (triggerSync) {
+        if (activeStorageSyncHandler?.onSalesDelete) {
+          activeStorageSyncHandler.onSalesDelete(purgedIds);
+        } else if (activeStorageSyncHandler?.onSaleDelete) {
+          purgedIds.forEach(id => activeStorageSyncHandler?.onSaleDelete?.(id));
+        }
+      }
+    }
+    return purgedIds;
+  },
+
+  purgeAllMockData: (triggerSync = true) => {
+    // 1. Sales
+    const MOCK_SALE_IDS = new Set(['sale-1', 'sale-2', 'sale-3', 'sale-4', 'sale-5', 'sale-6']);
+    const rawSales = getItem<Sale[]>(STORAGE_KEYS.SALES, []);
+    const cleanSales = (rawSales || []).filter(s => s && !MOCK_SALE_IDS.has(s.id) && !s.soldBy?.includes('Ko Min Thu'));
+    setItem(STORAGE_KEYS.SALES, cleanSales);
+    if (triggerSync && activeStorageSyncHandler?.onSalesBatch) {
+      activeStorageSyncHandler.onSalesBatch(cleanSales);
+    }
+
+    // 2. Purchases
+    const rawPurchases = getItem<PurchaseRecord[]>(STORAGE_KEYS.PURCHASES, []);
+    const cleanPurchases = (rawPurchases || []).filter(p => p && !isMockPurchase(p));
+    setItem(STORAGE_KEYS.PURCHASES, cleanPurchases);
+    if (triggerSync && activeStorageSyncHandler?.onPurchasesBatch) {
+      activeStorageSyncHandler.onPurchasesBatch(cleanPurchases);
+    }
+
+    // 3. Customers
+    const rawCustomers = getItem<Customer[]>(STORAGE_KEYS.CUSTOMERS, []);
+    const cleanCustomers = (rawCustomers || []).filter(c => c && !isMockCustomer(c));
+    setItem(STORAGE_KEYS.CUSTOMERS, cleanCustomers);
+    if (triggerSync && activeStorageSyncHandler?.onCustomersBatch) {
+      activeStorageSyncHandler.onCustomersBatch(cleanCustomers);
+    }
+
+    // 4. Suppliers
+    const rawSuppliers = getItem<Supplier[]>(STORAGE_KEYS.SUPPLIERS, []);
+    const cleanSuppliers = (rawSuppliers || []).filter(s => s && !isMockSupplier(s));
+    setItem(STORAGE_KEYS.SUPPLIERS, cleanSuppliers);
+    if (triggerSync && activeStorageSyncHandler?.onSuppliersBatch) {
+      activeStorageSyncHandler.onSuppliersBatch(cleanSuppliers);
+    }
+
+    // 5. Expenses
+    const rawExpenses = getItem<ExpenseRecord[]>(STORAGE_KEYS.EXPENSES, []);
+    const cleanExpenses = (rawExpenses || []).filter(e => e && !isMockExpense(e));
+    setItem(STORAGE_KEYS.EXPENSES, cleanExpenses);
+    if (triggerSync && activeStorageSyncHandler?.onExpensesBatch) {
+      activeStorageSyncHandler.onExpensesBatch(cleanExpenses);
+    }
+
+    // 6. Adjustments
+    const MOCK_ADJ_IDS = new Set(['adj-1', 'adj-2', 'adj-3']);
+    const rawAdj = getItem<StockAdjustment[]>(STORAGE_KEYS.STOCK_ADJUSTMENTS, []);
+    const cleanAdj = (rawAdj || []).filter(a => a && !MOCK_ADJ_IDS.has(a.id));
+    setItem(STORAGE_KEYS.STOCK_ADJUSTMENTS, cleanAdj);
+
+    // 7. Price Changes
+    const MOCK_PC_IDS = new Set(['pc-1', 'pc-2', 'pc-3', 'pc-4', 'pc-5']);
+    const rawPc = getItem<PriceChangeRecord[]>(STORAGE_KEYS.PRICE_CHANGES, []);
+    const cleanPc = (rawPc || []).filter(p => p && !MOCK_PC_IDS.has(p.id));
+    setItem(STORAGE_KEYS.PRICE_CHANGES, cleanPc);
+
+    // 8. Audits
+    const MOCK_AUDIT_IDS = new Set(['audit-1']);
+    const rawAudits = getItem<StockAuditSession[]>(STORAGE_KEYS.STOCK_AUDITS, []);
+    const cleanAudits = (rawAudits || []).filter(a => a && !MOCK_AUDIT_IDS.has(a.id));
+    setItem(STORAGE_KEYS.STOCK_AUDITS, cleanAudits);
+
+    // 9. Pre-orders
+    const MOCK_PRE_IDS = new Set(['pre-1725100010001', 'pre-1725100020002']);
+    const rawPre = getItem<PreOrder[]>(STORAGE_KEYS.PRE_ORDERS, []);
+    const cleanPre = (rawPre || []).filter(p => p && !MOCK_PRE_IDS.has(p.id) && !p.preOrderNumber?.startsWith('PRE-20260831'));
+    setItem(STORAGE_KEYS.PRE_ORDERS, cleanPre);
+
+    // 10. Announcements
+    const rawAnn = getItem<Announcement[]>(STORAGE_KEYS.ANNOUNCEMENTS, []);
+    const cleanAnn = (rawAnn || []).filter(a => a && !isMockAnnouncement(a));
+    setItem(STORAGE_KEYS.ANNOUNCEMENTS, cleanAnn);
+    if (triggerSync && activeStorageSyncHandler?.onAnnouncementsBatch) {
+      activeStorageSyncHandler.onAnnouncementsBatch(cleanAnn);
+    }
+
+    // 11. Chat Messages
+    const MOCK_MSG_IDS = new Set(['msg-1', 'msg-2', 'msg-3', 'msg-4', 'msg-5', 'msg-6']);
+    const rawMsg = getItem<ChatMessage[]>(STORAGE_KEYS.CHAT_MESSAGES, []);
+    const cleanMsg = (rawMsg || []).filter(m => m && !MOCK_MSG_IDS.has(m.id));
+    setItem(STORAGE_KEYS.CHAT_MESSAGES, cleanMsg);
+
+    // 12. Credit Sales
+    const MOCK_CR_IDS = new Set(['credit-1', 'credit-2', 'credit-3', 'credit-4']);
+    const rawCr = getItem<CreditSaleRecord[]>(STORAGE_KEYS.CREDIT_SALES, []);
+    const cleanCr = (rawCr || []).filter(c => c && !MOCK_CR_IDS.has(c.id));
+    setItem(STORAGE_KEYS.CREDIT_SALES, cleanCr);
+
+    // 13. Damage Logs
+    const MOCK_DMG_IDS = new Set(['dmg-1', 'dmg-2', 'dmg-3']);
+    const rawDmg = getItem<DamageLog[]>(STORAGE_KEYS.DAMAGE_LOGS, []);
+    const cleanDmg = (rawDmg || []).filter(d => d && !MOCK_DMG_IDS.has(d.id));
+    setItem(STORAGE_KEYS.DAMAGE_LOGS, cleanDmg);
+
+    // 14. Audit Logs
+    const rawLogs = getItem<AuditLogEntry[]>(STORAGE_KEYS.AUDIT_LOGS, []);
+    const cleanLogs = (rawLogs || []).filter(l => l && !isMockAuditLog(l));
+    setItem(STORAGE_KEYS.AUDIT_LOGS, cleanLogs);
+
+    // 15. Stock Transfers
+    const rawTransfers = getItem<StockTransfer[]>(STORAGE_KEYS.STOCK_TRANSFERS, []);
+    const cleanTransfers = (rawTransfers || []).filter(t => t && !isMockStockTransfer(t));
+    setItem(STORAGE_KEYS.STOCK_TRANSFERS, cleanTransfers);
+    if (triggerSync && activeStorageSyncHandler?.onStockTransfersBatch) {
+      activeStorageSyncHandler.onStockTransfersBatch(cleanTransfers);
+    }
+
+    // 16. Personal Transactions
+    const rawPtx = getItem<PersonalTransaction[]>(STORAGE_KEYS.PERSONAL_TRANSACTIONS, []);
+    const cleanPtx = (rawPtx || []).filter(p => p && !p.id?.startsWith('ptx-20260'));
+    setItem(STORAGE_KEYS.PERSONAL_TRANSACTIONS, cleanPtx);
+
+    // 17. Personal Budgets
+    const MOCK_BG_IDS = new Set(['bg-p-1', 'bg-p-2', 'bg-p-3', 'bg-p-4']);
+    const rawBg = getItem<PersonalBudget[]>(STORAGE_KEYS.PERSONAL_BUDGETS, []);
+    const cleanBg = (rawBg || []).filter(b => b && !MOCK_BG_IDS.has(b.id));
+    setItem(STORAGE_KEYS.PERSONAL_BUDGETS, cleanBg);
+
+    // 18. Personal Goals
+    const MOCK_GOAL_IDS = new Set(['goal-p-1', 'goal-p-2']);
+    const rawGoal = getItem<PersonalSavingsGoal[]>(STORAGE_KEYS.PERSONAL_GOALS, []);
+    const cleanGoal = (rawGoal || []).filter(g => g && !MOCK_GOAL_IDS.has(g.id));
+    setItem(STORAGE_KEYS.PERSONAL_GOALS, cleanGoal);
+
+    // 19. Personal Debts
+    const MOCK_DEBT_IDS = new Set(['debt-p-1', 'debt-p-2']);
+    const rawDebt = getItem<PersonalDebtIOU[]>(STORAGE_KEYS.PERSONAL_DEBTS, []);
+    const cleanDebt = (rawDebt || []).filter(d => d && !MOCK_DEBT_IDS.has(d.id));
+    setItem(STORAGE_KEYS.PERSONAL_DEBTS, cleanDebt);
+
+    // 20. Cash Drawer
+    const rawDrawer = getItem<CashDrawerRecord>(STORAGE_KEYS.CASH_DRAWER, initialCashDrawer);
+    if (isMockCashDrawer(rawDrawer)) {
+      setItem(STORAGE_KEYS.CASH_DRAWER, initialCashDrawer);
+      if (triggerSync && activeStorageSyncHandler?.onCashDrawerUpsert) {
+        activeStorageSyncHandler.onCashDrawerUpsert(initialCashDrawer);
+      }
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEYS.IS_FRESH_DATABASE, 'true');
+    }
+  },
 
   generateNextInvoiceNumber: (prefix?: string): string => {
     const existingSales = StorageService.getSales();
@@ -1628,7 +1834,10 @@ export const StorageService = {
   },
 
   // Purchases (Supplier Orders & Stock In)
-  getPurchases: (): PurchaseRecord[] => getItem(STORAGE_KEYS.PURCHASES, initialPurchases),
+  getPurchases: (): PurchaseRecord[] => {
+    const raw = getItem<PurchaseRecord[]>(STORAGE_KEYS.PURCHASES, []);
+    return (Array.isArray(raw) ? raw : []).filter(p => p && !isMockPurchase(p));
+  },
   savePurchases: (purchases: PurchaseRecord[], triggerSync = false) => {
     setItem(STORAGE_KEYS.PURCHASES, purchases);
     if (triggerSync && activeStorageSyncHandler?.onPurchasesBatch) {
@@ -2217,8 +2426,8 @@ export const StorageService = {
 
   // Expenses
   getExpenses: (): ExpenseRecord[] => {
-    const expenses = getItem<ExpenseRecord[]>(STORAGE_KEYS.EXPENSES, initialExpenses);
-    return expenses;
+    const expenses = getItem<ExpenseRecord[]>(STORAGE_KEYS.EXPENSES, []);
+    return (Array.isArray(expenses) ? expenses : []).filter(e => e && !isMockExpense(e));
   },
   saveExpenses: (expenses: ExpenseRecord[], triggerSync = true) => setItem(STORAGE_KEYS.EXPENSES, expenses, triggerSync),
   saveExpense: (expense: ExpenseRecord, triggerSync = true) => {
@@ -2345,7 +2554,10 @@ export const StorageService = {
   },
 
   // Customers
-  getCustomers: (): Customer[] => getItem(STORAGE_KEYS.CUSTOMERS, initialCustomers),
+  getCustomers: (): Customer[] => {
+    const raw = getItem<Customer[]>(STORAGE_KEYS.CUSTOMERS, []);
+    return (Array.isArray(raw) ? raw : []).filter(c => c && !isMockCustomer(c));
+  },
   saveCustomers: (customers: Customer[], triggerSync = true) => setItem(STORAGE_KEYS.CUSTOMERS, customers, triggerSync),
   saveCustomer: (customer: Customer, triggerSync = true) => {
     const customers = StorageService.getCustomers();
@@ -2373,7 +2585,10 @@ export const StorageService = {
   },
 
   // Suppliers
-  getSuppliers: (): Supplier[] => getItem(STORAGE_KEYS.SUPPLIERS, initialSuppliers),
+  getSuppliers: (): Supplier[] => {
+    const raw = getItem<Supplier[]>(STORAGE_KEYS.SUPPLIERS, []);
+    return (Array.isArray(raw) ? raw : []).filter(s => s && !isMockSupplier(s));
+  },
   saveSuppliers: (suppliers: Supplier[], triggerSync = true) => setItem(STORAGE_KEYS.SUPPLIERS, suppliers, triggerSync),
   saveSupplier: (supplier: Supplier, triggerSync = true) => {
     const suppliers = StorageService.getSuppliers();
@@ -2399,7 +2614,14 @@ export const StorageService = {
   },
 
   // Cash Drawer
-  getCashDrawer: (): CashDrawerRecord => getItem(STORAGE_KEYS.CASH_DRAWER, initialCashDrawer),
+  getCashDrawer: (): CashDrawerRecord => {
+    const raw = getItem<CashDrawerRecord>(STORAGE_KEYS.CASH_DRAWER, initialCashDrawer);
+    if (isMockCashDrawer(raw)) {
+      setItem(STORAGE_KEYS.CASH_DRAWER, initialCashDrawer, false);
+      return initialCashDrawer;
+    }
+    return raw || initialCashDrawer;
+  },
   saveCashDrawer: (drawer: CashDrawerRecord, triggerSync = true) => setItem(STORAGE_KEYS.CASH_DRAWER, drawer, triggerSync),
   recordCashTransaction: (type: string, amount: number, description: string) => {
     const drawer = StorageService.getCashDrawer();
@@ -2713,7 +2935,8 @@ export const StorageService = {
   // Notice Board Announcements
   // ==========================================
   getAnnouncements: (): Announcement[] => {
-    return getItem(STORAGE_KEYS.ANNOUNCEMENTS, initialAnnouncements);
+    const raw = getItem<Announcement[]>(STORAGE_KEYS.ANNOUNCEMENTS, []);
+    return (Array.isArray(raw) ? raw : []).filter(a => a && !isMockAnnouncement(a));
   },
   saveAnnouncements: (announcements: Announcement[], triggerSync = true) => {
     setItem(STORAGE_KEYS.ANNOUNCEMENTS, announcements, triggerSync);
@@ -4211,12 +4434,8 @@ export const StorageService = {
 
   // Stock Transfers (3-Way Handshake)
   getStockTransfers: (): StockTransfer[] => {
-    let transfers = getItem<StockTransfer[]>(STORAGE_KEYS.STOCK_TRANSFERS, []);
-    if (!transfers || transfers.length === 0) {
-      transfers = [...DEFAULT_TRANSFERS];
-      setItem(STORAGE_KEYS.STOCK_TRANSFERS, transfers, false);
-    }
-    return transfers;
+    const transfers = getItem<StockTransfer[]>(STORAGE_KEYS.STOCK_TRANSFERS, []);
+    return (Array.isArray(transfers) ? transfers : []).filter(t => t && !isMockStockTransfer(t));
   },
 
   saveStockTransfers: (transfers: StockTransfer[], triggerSync = true) => {

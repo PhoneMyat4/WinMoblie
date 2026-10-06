@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Receipt, 
   Search, 
@@ -254,6 +254,11 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
   const totalFilteredDiscounts = filteredSales
     .filter(s => s.status === 'completed')
     .reduce((acc, s) => acc + (s.discountTotal || 0), 0);
+
+  const mockSales = useMemo(() => {
+    const MOCK_IDS = new Set(['sale-1', 'sale-2', 'sale-3', 'sale-4', 'sale-5', 'sale-6']);
+    return sales.filter(s => MOCK_IDS.has(s.id) || s.soldBy?.includes('Ko Min Thu'));
+  }, [sales]);
 
   const handleExportCsv = () => {
     const headers = ['Invoice No', 'Date', 'Customer Name', 'Phone', 'Payment Method', 'Items Count', 'Subtotal', 'Discount', 'Grand Total', 'Status', 'Sold By'];
@@ -573,6 +578,27 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {mockSales.length > 0 && (
+              <button
+                type="button"
+                id="purge-mock-sales-btn"
+                onClick={() => {
+                  const mockIds = mockSales.map(s => s.id);
+                  if (onDeleteSales) {
+                    onDeleteSales(mockIds, { restockItems: false });
+                  } else {
+                    StorageService.deleteSales(mockIds, { restockItems: false });
+                  }
+                  showToast(`Successfully purged ${mockIds.length} demo/mock sale records.`);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                title="Purge all template demo sales from history"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Purge Demo Mock Sales ({mockSales.length})</span>
+              </button>
+            )}
+
             {filteredSales.filter(s => s.status === 'refunded').length > 0 && (
               <button
                 type="button"

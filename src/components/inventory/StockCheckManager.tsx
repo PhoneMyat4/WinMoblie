@@ -41,6 +41,7 @@ import {
   StaffUser,
   ProductCategory 
 } from '../../types';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 import { 
   formatCurrency, 
   formatDate, 
@@ -654,6 +655,37 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
     });
   }, [activeSession, statusFilter, searchQuery]);
 
+  // Interactive sorting for active physical audit items
+  const { sortField: auditSortField, sortDirection: auditSortDirection, handleSort: handleAuditSort, sortItems: sortAuditItems } = useTableSort<StockAuditItem>();
+
+  const sortedActiveItems = useMemo(() => {
+    return sortAuditItems(filteredActiveItems, {
+      product_name: (a, b) => (a.productName || '').localeCompare(b.productName || '', undefined, { numeric: true }),
+      unit_cost: (a, b) => (a.costPrice || 0) - (b.costPrice || 0),
+      book_stock: (a, b) => (a.bookStock || 0) - (b.bookStock || 0),
+      counted: (a, b) => (a.countedStock || 0) - (b.countedStock || 0),
+      variance: (a, b) => (a.variance || 0) - (b.variance || 0),
+      cost_discrepancy: (a, b) => ((a.variance || 0) * (a.costPrice || 0)) - ((b.variance || 0) * (b.costPrice || 0)),
+      status: (a, b) => (a.status || '').localeCompare(b.status || ''),
+    });
+  }, [filteredActiveItems, auditSortField, auditSortDirection]);
+
+  // Interactive sorting for viewed audit history items modal
+  const { sortField: historyItemSortField, sortDirection: historyItemSortDirection, handleSort: handleHistoryItemSort, sortItems: sortHistoryItems } = useTableSort<StockAuditItem>();
+
+  const sortedHistoryItems = useMemo(() => {
+    if (!selectedAuditToView?.items) return [];
+    return sortHistoryItems(selectedAuditToView.items, {
+      product_name: (a, b) => (a.productName || '').localeCompare(b.productName || '', undefined, { numeric: true }),
+      sku: (a, b) => (a.sku || '').localeCompare(b.sku || ''),
+      book_stock: (a, b) => (a.bookStock || 0) - (b.bookStock || 0),
+      counted: (a, b) => (a.countedStock || 0) - (b.countedStock || 0),
+      variance: (a, b) => (a.variance || 0) - (b.variance || 0),
+      cost_discrepancy: (a, b) => ((a.variance || 0) * (a.costPrice || 0)) - ((b.variance || 0) * (b.costPrice || 0)),
+      status: (a, b) => (a.status || '').localeCompare(b.status || ''),
+    });
+  }, [selectedAuditToView, historyItemSortField, historyItemSortDirection]);
+
   // Export audit discrepancy report to CSV
   const handleExportAuditCsv = (audit: StockAuditSession) => {
     const headers = [
@@ -1234,18 +1266,77 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
                   <table className="w-full text-left text-xs sm:text-sm border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold text-[11px] uppercase tracking-wider">
-                        <th className="py-3.5 px-4">Item & Model</th>
-                        <th className="py-3.5 px-3">Unit Cost</th>
-                        <th className="py-3.5 px-3 text-center">Book Stock</th>
-                        <th className="py-3.5 px-3 text-center">Counted (Physical)</th>
-                        <th className="py-3.5 px-3 text-center">Variance</th>
-                        <th className="py-3.5 px-3 text-right">Cost Discrepancy</th>
-                        <th className="py-3.5 px-3 text-center">Status</th>
-                        <th className="py-3.5 px-4 text-center">Quick Actions</th>
+                        <SortableHeader
+                          field="product_name"
+                          label="Item & Model"
+                          currentSortField={auditSortField}
+                          currentSortDirection={auditSortDirection}
+                          onSort={handleAuditSort}
+                          className="py-3.5 px-4"
+                        />
+                        <SortableHeader
+                          field="unit_cost"
+                          label="Unit Cost"
+                          numeric
+                          currentSortField={auditSortField}
+                          currentSortDirection={auditSortDirection}
+                          onSort={handleAuditSort}
+                          className="py-3.5 px-3"
+                        />
+                        <SortableHeader
+                          field="book_stock"
+                          label="Book Stock"
+                          numeric
+                          align="center"
+                          currentSortField={auditSortField}
+                          currentSortDirection={auditSortDirection}
+                          onSort={handleAuditSort}
+                          className="py-3.5 px-3"
+                        />
+                        <SortableHeader
+                          field="counted"
+                          label="Counted (Physical)"
+                          numeric
+                          align="center"
+                          currentSortField={auditSortField}
+                          currentSortDirection={auditSortDirection}
+                          onSort={handleAuditSort}
+                          className="py-3.5 px-3"
+                        />
+                        <SortableHeader
+                          field="variance"
+                          label="Variance"
+                          numeric
+                          align="center"
+                          currentSortField={auditSortField}
+                          currentSortDirection={auditSortDirection}
+                          onSort={handleAuditSort}
+                          className="py-3.5 px-3"
+                        />
+                        <SortableHeader
+                          field="cost_discrepancy"
+                          label="Cost Discrepancy"
+                          numeric
+                          align="right"
+                          currentSortField={auditSortField}
+                          currentSortDirection={auditSortDirection}
+                          onSort={handleAuditSort}
+                          className="py-3.5 px-3"
+                        />
+                        <SortableHeader
+                          field="status"
+                          label="Status"
+                          align="center"
+                          currentSortField={auditSortField}
+                          currentSortDirection={auditSortDirection}
+                          onSort={handleAuditSort}
+                          className="py-3.5 px-3"
+                        />
+                        <th className="py-3.5 px-4 text-center select-none">Quick Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-medium">
-                      {filteredActiveItems.map((item) => {
+                      {sortedActiveItems.map((item) => {
                         const originalProduct = products.find(p => p.id === item.productId);
                         const isPhone = isPhoneCategory(item.category) || (originalProduct && (Boolean(originalProduct.rom && originalProduct.rom !== '-') || Boolean(originalProduct.imeiPairs?.length) || Boolean(originalProduct.imeiList?.length)));
                         const isExpanded = expandedImeiProductId === item.productId;
@@ -1741,17 +1832,75 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
                 <table className="w-full text-left text-xs sm:text-sm">
                   <thead>
                     <tr className="bg-slate-100 text-slate-500 font-bold text-[11px] uppercase">
-                      <th className="py-2.5 px-3">Product Name</th>
-                      <th className="py-2.5 px-3">SKU</th>
-                      <th className="py-2.5 px-3 text-center">Book Qty</th>
-                      <th className="py-2.5 px-3 text-center">Counted</th>
-                      <th className="py-2.5 px-3 text-center">Variance</th>
-                      <th className="py-2.5 px-3 text-right">Cost Impact</th>
-                      <th className="py-2.5 px-3 text-center">Status</th>
+                      <SortableHeader
+                        field="product_name"
+                        label="Product Name"
+                        currentSortField={historyItemSortField}
+                        currentSortDirection={historyItemSortDirection}
+                        onSort={handleHistoryItemSort}
+                        className="py-2.5 px-3"
+                      />
+                      <SortableHeader
+                        field="sku"
+                        label="SKU"
+                        currentSortField={historyItemSortField}
+                        currentSortDirection={historyItemSortDirection}
+                        onSort={handleHistoryItemSort}
+                        className="py-2.5 px-3"
+                      />
+                      <SortableHeader
+                        field="book_stock"
+                        label="Book Qty"
+                        numeric
+                        align="center"
+                        currentSortField={historyItemSortField}
+                        currentSortDirection={historyItemSortDirection}
+                        onSort={handleHistoryItemSort}
+                        className="py-2.5 px-3"
+                      />
+                      <SortableHeader
+                        field="counted"
+                        label="Counted"
+                        numeric
+                        align="center"
+                        currentSortField={historyItemSortField}
+                        currentSortDirection={historyItemSortDirection}
+                        onSort={handleHistoryItemSort}
+                        className="py-2.5 px-3"
+                      />
+                      <SortableHeader
+                        field="variance"
+                        label="Variance"
+                        numeric
+                        align="center"
+                        currentSortField={historyItemSortField}
+                        currentSortDirection={historyItemSortDirection}
+                        onSort={handleHistoryItemSort}
+                        className="py-2.5 px-3"
+                      />
+                      <SortableHeader
+                        field="cost_discrepancy"
+                        label="Cost Impact"
+                        numeric
+                        align="right"
+                        currentSortField={historyItemSortField}
+                        currentSortDirection={historyItemSortDirection}
+                        onSort={handleHistoryItemSort}
+                        className="py-2.5 px-3"
+                      />
+                      <SortableHeader
+                        field="status"
+                        label="Status"
+                        align="center"
+                        currentSortField={historyItemSortField}
+                        currentSortDirection={historyItemSortDirection}
+                        onSort={handleHistoryItemSort}
+                        className="py-2.5 px-3"
+                      />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium">
-                    {selectedAuditToView.items.map((item, idx) => (
+                    {sortedHistoryItems.map((item, idx) => (
                       <tr key={idx} className="hover:bg-slate-50">
                         <td className="py-2.5 px-3 font-bold text-slate-900">{item.productName}</td>
                         <td className="py-2.5 px-3 font-mono text-slate-500">{item.sku}</td>

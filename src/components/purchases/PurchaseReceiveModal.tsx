@@ -33,7 +33,8 @@ import {
   ExternalLink,
   Lock,
   Package,
-  Gift
+  Gift,
+  AlertTriangle
 } from 'lucide-react';
 import { PurchaseRecord, PurchaseItem, Product, ShopSettings, StaffRole, ImeiPair, PreOrder } from '../../types';
 import { formatCurrency, formatDate, formatImei } from '../../utils/formatters';
@@ -197,8 +198,8 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
         ram: targetItem.ram !== undefined ? targetItem.ram : existing.ram,
         rom: targetItem.rom !== undefined ? targetItem.rom : existing.rom,
         color: targetItem.color !== undefined ? targetItem.color : existing.color,
-        costPrice: targetItem.unitCost > 0 ? targetItem.unitCost : existing.costPrice,
-        sellingPrice: targetItem.sellingPrice > 0 ? targetItem.sellingPrice : existing.sellingPrice,
+        costPrice: typeof targetItem.unitCost === 'number' && !isNaN(targetItem.unitCost) ? targetItem.unitCost : existing.costPrice,
+        sellingPrice: typeof targetItem.sellingPrice === 'number' && !isNaN(targetItem.sellingPrice) ? targetItem.sellingPrice : existing.sellingPrice,
         stock: existing.stock,
         warrantyMonths: targetItem.warrantyMonths !== undefined ? targetItem.warrantyMonths : (existing.warrantyMonths ?? 12),
         description: targetItem.description !== undefined ? targetItem.description : (existing.description || ''),
@@ -227,8 +228,8 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
       condition: targetItem.condition || 'brand_new',
       sku: targetItem.sku || '',
       barcode: targetItem.barcode || '',
-      costPrice: targetItem.unitCost || 0,
-      sellingPrice: targetItem.sellingPrice > 0 ? targetItem.sellingPrice : Math.round((targetItem.unitCost || 0) * 1.2),
+      costPrice: typeof targetItem.unitCost === 'number' && !isNaN(targetItem.unitCost) ? targetItem.unitCost : 0,
+      sellingPrice: typeof targetItem.sellingPrice === 'number' && !isNaN(targetItem.sellingPrice) ? targetItem.sellingPrice : 0,
       stock: targetItem.quantity || 1,
       minStockAlert: targetItem.minStockAlert !== undefined ? targetItem.minStockAlert : 0,
       warrantyMonths: targetItem.warrantyMonths ?? 12,
@@ -770,7 +771,7 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                             <div className="flex items-center space-x-2">
                               <label htmlFor={`stage3-retail-price-${idx}`} className="text-[11px] font-bold text-slate-800 flex items-center space-x-1">
                                 <Tag className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>Target Retail Price ({settings.currencySymbol}) *</span>
+                                <span>Target Retail Price ({settings.currencySymbol}) {item.sellingPrice <= 0 && !item.isFoc && <span className="text-rose-500 font-bold">(0 Ks)</span>}</span>
                               </label>
                               <input
                                 id={`stage3-retail-price-${idx}`}
@@ -795,9 +796,20 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                                     return next;
                                   });
                                 }}
-                                className="w-36 px-2.5 py-1 bg-white border border-emerald-400 focus:border-emerald-600 rounded-lg font-mono font-bold text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 outline-hidden shadow-2xs"
+                                className={`w-36 px-2.5 py-1 rounded-lg font-mono font-bold text-xs outline-hidden shadow-2xs transition-all ${
+                                  item.sellingPrice <= 0 && !item.isFoc
+                                    ? 'bg-rose-50 text-rose-950 border-2 border-rose-500 ring-2 ring-rose-400/40 focus:ring-rose-500'
+                                    : 'bg-white border border-emerald-400 focus:border-emerald-600 text-slate-900 focus:ring-2 focus:ring-emerald-500/20'
+                                }`}
                               />
                             </div>
+
+                            {item.sellingPrice <= 0 && !item.isFoc && (
+                              <span className="text-[10px] text-rose-600 font-bold flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 text-rose-500 shrink-0" />
+                                Price 0 Ks (unpriced warning)
+                              </span>
+                            )}
 
                             {item.sellingPrice > 0 && (
                               <div className="flex items-center space-x-2 text-[11px]">

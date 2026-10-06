@@ -35,6 +35,7 @@ import { exportReportToPdf } from '../../utils/pdfExportUtils';
 import { formatCurrency, formatDateTime, getCategoryLabel, getConditionLabel } from '../../utils/formatters';
 import { canonicalCategory, isPhoneCategory } from '../../data/categoryTaxonomy';
 import { ColumnVisibilityFilter, ColumnDefinition } from '../common/ColumnVisibilityFilter';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 const STOCK_REPORT_COLUMNS: ColumnDefinition[] = [
   { id: 'item_sku', label: 'Item & SKU', required: true },
@@ -224,6 +225,42 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
       );
     });
   }, [products, categoryFilter, accessorySubCategoryFilter, brandFilter, healthFilter, searchQuery]);
+
+  // Interactive Column Sorting for Valuation Table
+  const { sortField, sortDirection, handleSort, sortItems } = useTableSort<Product>();
+
+  const sortedProducts = useMemo(() => {
+    return sortItems(filteredProducts, {
+      item_sku: (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }),
+      category_brand: (a, b) => (a.category || '').localeCompare(b.category || ''),
+      stock_level: (a, b) => (a.stock || 0) - (b.stock || 0),
+      cost_price: (a, b) => (a.costPrice || 0) - (b.costPrice || 0),
+      selling_price: (a, b) => (a.sellingPrice || 0) - (b.sellingPrice || 0),
+      cost_valuation: (a, b) => ((a.stock || 0) * (a.costPrice || 0)) - ((b.stock || 0) * (b.costPrice || 0)),
+      retail_valuation: (a, b) => ((a.stock || 0) * (a.sellingPrice || 0)) - ((b.stock || 0) * (b.sellingPrice || 0)),
+      imei_info: (a, b) => (a.imeiList?.length || 0) - (b.imeiList?.length || 0),
+    });
+  }, [filteredProducts, sortField, sortDirection]);
+
+  // Interactive Column Sorting for Stock Adjustments Table
+  const { 
+    sortField: adjSortField, 
+    sortDirection: adjSortDirection, 
+    handleSort: handleAdjSort, 
+    sortItems: sortAdjItems 
+  } = useTableSort<StockAdjustment>();
+
+  const sortedAdjustments = useMemo(() => {
+    return sortAdjItems(stockAdjustments, {
+      date_time: (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime(),
+      product_name: (a, b) => (a.productName || '').localeCompare(b.productName || '', undefined, { numeric: true }),
+      adjustment_reason: (a, b) => (a.reason || '').localeCompare(b.reason || ''),
+      previous_stock: (a, b) => (a.previousStock || 0) - (b.previousStock || 0),
+      qty_change: (a, b) => (a.quantityChange || 0) - (b.quantityChange || 0),
+      new_stock: (a, b) => (a.newStock || 0) - (b.newStock || 0),
+      adjusted_by: (a, b) => (a.adjustedBy || '').localeCompare(b.adjustedBy || ''),
+    });
+  }, [stockAdjustments, adjSortField, adjSortDirection]);
 
   // Active Subcategory Valuation Totals
   const activeSubcategorySummary = useMemo(() => {
@@ -765,18 +802,94 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
               <table className="w-full text-left text-xs text-slate-600">
                 <thead className="bg-slate-100/75 text-slate-700 uppercase font-extrabold text-[11px] tracking-wider border-b border-slate-200">
                   <tr>
-                    {visibleColumns.item_sku !== false && <th className="py-3 px-4">Item & SKU</th>}
-                    {visibleColumns.category_brand !== false && <th className="py-3 px-4">Category & Brand</th>}
-                    {visibleColumns.stock_level !== false && <th className="py-3 px-4 text-center">Stock Level</th>}
-                    {visibleColumns.cost_price !== false && <th className="py-3 px-4 text-right">Cost Price</th>}
-                    {visibleColumns.selling_price !== false && <th className="py-3 px-4 text-right">Selling Price</th>}
-                    {visibleColumns.cost_valuation !== false && <th className="py-3 px-4 text-right">Cost Valuation</th>}
-                    {visibleColumns.retail_valuation !== false && <th className="py-3 px-4 text-right">Retail Valuation</th>}
-                    {visibleColumns.imei_info !== false && <th className="py-3 px-4 text-center">IMEI Info</th>}
+                    {visibleColumns.item_sku !== false && (
+                      <SortableHeader
+                        field="item_sku"
+                        label="Item & SKU"
+                        currentSortField={sortField}
+                        currentSortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    )}
+                    {visibleColumns.category_brand !== false && (
+                      <SortableHeader
+                        field="category_brand"
+                        label="Category & Brand"
+                        currentSortField={sortField}
+                        currentSortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    )}
+                    {visibleColumns.stock_level !== false && (
+                      <SortableHeader
+                        field="stock_level"
+                        label="Stock Level"
+                        align="center"
+                        numeric
+                        currentSortField={sortField}
+                        currentSortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    )}
+                    {visibleColumns.cost_price !== false && (
+                      <SortableHeader
+                        field="cost_price"
+                        label="Cost Price"
+                        align="right"
+                        numeric
+                        currentSortField={sortField}
+                        currentSortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    )}
+                    {visibleColumns.selling_price !== false && (
+                      <SortableHeader
+                        field="selling_price"
+                        label="Selling Price"
+                        align="right"
+                        numeric
+                        currentSortField={sortField}
+                        currentSortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    )}
+                    {visibleColumns.cost_valuation !== false && (
+                      <SortableHeader
+                        field="cost_valuation"
+                        label="Cost Valuation"
+                        align="right"
+                        numeric
+                        currentSortField={sortField}
+                        currentSortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    )}
+                    {visibleColumns.retail_valuation !== false && (
+                      <SortableHeader
+                        field="retail_valuation"
+                        label="Retail Valuation"
+                        align="right"
+                        numeric
+                        currentSortField={sortField}
+                        currentSortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    )}
+                    {visibleColumns.imei_info !== false && (
+                      <SortableHeader
+                        field="imei_info"
+                        label="IMEI Info"
+                        align="center"
+                        numeric
+                        currentSortField={sortField}
+                        currentSortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredProducts.length === 0 ? (
+                  {sortedProducts.length === 0 ? (
                     <tr>
                       <td colSpan={activeColumnCount || 8} className="py-12 text-center text-slate-400">
                         <Package className="w-8 h-8 mx-auto mb-2 text-slate-300" />
@@ -784,7 +897,7 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
                       </td>
                     </tr>
                   ) : (
-                    filteredProducts.map((p) => {
+                    sortedProducts.map((p) => {
                       const costVal = p.costPrice * p.stock;
                       const retailVal = p.sellingPrice * p.stock;
                       const isOutOfStock = p.stock <= 0;
@@ -852,14 +965,51 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
                           {/* Cost Price */}
                           {visibleColumns.cost_price !== false && (
                             <td className="py-3.5 px-4 text-right font-medium text-slate-700">
-                              {formatCurrency(p.costPrice, settings.currencySymbol)}
+                              {p.isGiftItem && p.costPrice === 0 ? (
+                                <span className="text-purple-700 font-bold text-xs">0 Ks (FOC)</span>
+                              ) : p.costPrice <= 0 ? (
+                                <span 
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border-2 border-rose-500 bg-rose-50/90 text-rose-700 font-black text-xs shadow-2xs"
+                                  title="Purchase cost is 0 Ks (unpriced warning)"
+                                >
+                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                                  {formatCurrency(0, settings.currencySymbol)}
+                                </span>
+                              ) : (
+                                formatCurrency(p.costPrice, settings.currencySymbol)
+                              )}
                             </td>
                           )}
 
                           {/* Selling Price */}
                           {visibleColumns.selling_price !== false && (
                             <td className="py-3.5 px-4 text-right font-bold text-slate-900">
-                              {formatCurrency(p.sellingPrice, settings.currencySymbol)}
+                              {p.isGiftItem && p.sellingPrice === 0 ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 text-xs font-black">
+                                  0 Ks (FOC)
+                                </span>
+                              ) : p.sellingPrice <= 0 ? (
+                                <span 
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border-2 border-rose-500 bg-rose-50/90 text-rose-700 font-black text-xs shadow-2xs"
+                                  title="Selling price is 0 Ks (unpriced item)"
+                                >
+                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                                  {formatCurrency(0, settings.currencySymbol)}
+                                </span>
+                              ) : p.costPrice > 0 && p.sellingPrice < p.costPrice ? (
+                                <div className="inline-flex flex-col items-end">
+                                  <span 
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border-2 border-rose-500 bg-rose-50/95 text-rose-700 font-black text-xs shadow-2xs"
+                                    title={`Warning: Selling price (${formatCurrency(p.sellingPrice, settings.currencySymbol)}) is registered lower than purchase cost (${formatCurrency(p.costPrice, settings.currencySymbol)})!`}
+                                  >
+                                    <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                                    {formatCurrency(p.sellingPrice, settings.currencySymbol)}
+                                  </span>
+                                  <span className="text-[9px] text-rose-600 font-extrabold mt-0.5 uppercase tracking-wide">Below Cost</span>
+                                </div>
+                              ) : (
+                                formatCurrency(p.sellingPrice, settings.currencySymbol)
+                              )}
                             </td>
                           )}
 
@@ -920,17 +1070,65 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
             <table className="w-full text-left text-xs text-slate-600">
               <thead className="bg-slate-100/75 text-slate-700 uppercase font-extrabold text-[11px] tracking-wider border-b border-slate-200">
                 <tr>
-                  <th className="py-3 px-4">Date & Time</th>
-                  <th className="py-3 px-4">Product Name</th>
-                  <th className="py-3 px-4">Adjustment Reason</th>
-                  <th className="py-3 px-4 text-center">Previous Stock</th>
-                  <th className="py-3 px-4 text-center">Qty Change</th>
-                  <th className="py-3 px-4 text-center">New Stock</th>
-                  <th className="py-3 px-4">Adjusted By</th>
+                  <SortableHeader
+                    field="date_time"
+                    label="Date & Time"
+                    currentSortField={adjSortField}
+                    currentSortDirection={adjSortDirection}
+                    onSort={handleAdjSort}
+                  />
+                  <SortableHeader
+                    field="product_name"
+                    label="Product Name"
+                    currentSortField={adjSortField}
+                    currentSortDirection={adjSortDirection}
+                    onSort={handleAdjSort}
+                  />
+                  <SortableHeader
+                    field="adjustment_reason"
+                    label="Adjustment Reason"
+                    currentSortField={adjSortField}
+                    currentSortDirection={adjSortDirection}
+                    onSort={handleAdjSort}
+                  />
+                  <SortableHeader
+                    field="previous_stock"
+                    label="Previous Stock"
+                    align="center"
+                    numeric
+                    currentSortField={adjSortField}
+                    currentSortDirection={adjSortDirection}
+                    onSort={handleAdjSort}
+                  />
+                  <SortableHeader
+                    field="qty_change"
+                    label="Qty Change"
+                    align="center"
+                    numeric
+                    currentSortField={adjSortField}
+                    currentSortDirection={adjSortDirection}
+                    onSort={handleAdjSort}
+                  />
+                  <SortableHeader
+                    field="new_stock"
+                    label="New Stock"
+                    align="center"
+                    numeric
+                    currentSortField={adjSortField}
+                    currentSortDirection={adjSortDirection}
+                    onSort={handleAdjSort}
+                  />
+                  <SortableHeader
+                    field="adjusted_by"
+                    label="Adjusted By"
+                    currentSortField={adjSortField}
+                    currentSortDirection={adjSortDirection}
+                    onSort={handleAdjSort}
+                  />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {stockAdjustments.length === 0 ? (
+                {sortedAdjustments.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-12 text-center text-slate-400">
                       <History className="w-8 h-8 mx-auto mb-2 text-slate-300" />
@@ -938,7 +1136,7 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  stockAdjustments.map((adj) => {
+                  sortedAdjustments.map((adj) => {
                     const isPositive = adj.quantityChange > 0;
                     return (
                       <tr key={adj.id} className="hover:bg-slate-50 transition-colors">

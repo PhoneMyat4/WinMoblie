@@ -19,6 +19,7 @@ import { formatCurrency } from '../../utils/formatters';
 import { exportToCsv } from '../../utils/reportUtils';
 import { exportReportToPdf } from '../../utils/pdfExportUtils';
 import { ColumnVisibilityFilter, ColumnDefinition } from '../common/ColumnVisibilityFilter';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 const CATEGORY_PROFIT_COLUMNS: ColumnDefinition[] = [
   { id: 'category', label: 'Category', required: true },
@@ -75,6 +76,22 @@ export const CategoryProfitabilityReport: React.FC<CategoryProfitabilityReportPr
   const profitabilityData = useMemo(() => {
     return calculateCategoryProfitability(sales, products);
   }, [sales, products]);
+
+  // Interactive Column Sorting
+  const { sortField, sortDirection, handleSort, sortItems } = useTableSort<CategoryProfitabilityRow>();
+
+  const sortedRows = useMemo(() => {
+    return sortItems(profitabilityData.rows, {
+      category: (a, b) => a.categoryLabel.localeCompare(b.categoryLabel),
+      units_sold: (a, b) => a.totalUnitsSold - b.totalUnitsSold,
+      invoices: (a, b) => a.invoicesCount - b.invoicesCount,
+      revenue: (a, b) => a.totalSalesRevenue - b.totalSalesRevenue,
+      cogs: (a, b) => a.totalCogs - b.totalCogs,
+      gross_profit: (a, b) => a.grossProfit - b.grossProfit,
+      margin_percent: (a, b) => a.grossMarginPercent - b.grossMarginPercent,
+      profit_contribution: (a, b) => a.profitContributionPercent - b.profitContributionPercent,
+    });
+  }, [profitabilityData.rows, sortField, sortDirection]);
 
   const getExportData = () => {
     const headers: string[] = [];
@@ -372,18 +389,96 @@ export const CategoryProfitabilityReport: React.FC<CategoryProfitabilityReportPr
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 text-[10px] font-black uppercase tracking-wider text-slate-500 border-b border-slate-200">
-                {visibleColumns.category !== false && <th className="py-3 px-4">Category</th>}
-                {visibleColumns.units_sold !== false && <th className="py-3 px-3 text-right">Units Sold</th>}
-                {visibleColumns.invoices !== false && <th className="py-3 px-3 text-right">Invoices</th>}
-                {visibleColumns.revenue !== false && <th className="py-3 px-3 text-right">Total Revenue</th>}
-                {visibleColumns.cogs !== false && <th className="py-3 px-3 text-right">Total COGS</th>}
-                {visibleColumns.gross_profit !== false && <th className="py-3 px-3 text-right">Gross Profit</th>}
-                {visibleColumns.margin_percent !== false && <th className="py-3 px-3 text-right">Margin %</th>}
-                {visibleColumns.profit_contribution !== false && <th className="py-3 px-4 text-right">Profit Contribution</th>}
+                {visibleColumns.category !== false && (
+                  <SortableHeader
+                    field="category"
+                    label="Category"
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.units_sold !== false && (
+                  <SortableHeader
+                    field="units_sold"
+                    label="Units Sold"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.invoices !== false && (
+                  <SortableHeader
+                    field="invoices"
+                    label="Invoices"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.revenue !== false && (
+                  <SortableHeader
+                    field="revenue"
+                    label="Total Revenue"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.cogs !== false && (
+                  <SortableHeader
+                    field="cogs"
+                    label="Total COGS"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.gross_profit !== false && (
+                  <SortableHeader
+                    field="gross_profit"
+                    label="Gross Profit"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.margin_percent !== false && (
+                  <SortableHeader
+                    field="margin_percent"
+                    label="Margin %"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.profit_contribution !== false && (
+                  <SortableHeader
+                    field="profit_contribution"
+                    label="Profit Contribution"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {profitabilityData.rows.map(row => (
+              {sortedRows.map(row => (
                 <tr key={row.category} className="hover:bg-slate-50/80 transition-colors">
                   {visibleColumns.category !== false && (
                     <td className="py-3.5 px-4 font-black text-slate-900">

@@ -42,7 +42,8 @@ import {
   Info,
   Building2, 
   ArrowRightLeft,
-  Gift
+  Gift,
+  Package
 } from 'lucide-react';
 import { 
   Product, 
@@ -253,18 +254,36 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
       ? products
       : products.filter(p => canonicalCategory(p.category) === selectedCategory);
 
-    const brandMap = new Map<string, number>();
+    const brandMap = new Map<string, { count: number; stock: number }>();
     targetProducts.forEach(p => {
       if (p.brand && p.brand.trim()) {
         const b = p.brand.trim();
-        brandMap.set(b, (brandMap.get(b) || 0) + 1);
+        const prev = brandMap.get(b) || { count: 0, stock: 0 };
+        brandMap.set(b, {
+          count: prev.count + 1,
+          stock: prev.stock + (Number(p.stock) || 0)
+        });
       }
     });
 
     return Array.from(brandMap.entries())
-      .map(([name, count]) => ({ name, count }))
+      .map(([name, data]) => ({ name, count: data.count, stock: data.stock }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [products, selectedCategory]);
+
+  // Active category & brand metrics (Total items/models count and total physical stock quantity)
+  const activeCategoryStats = React.useMemo(() => {
+    const targetProducts = products.filter(p => {
+      const matchCat = selectedCategory === 'all' || canonicalCategory(p.category) === selectedCategory;
+      const matchBrand = selectedBrand === 'all' || (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
+      return matchCat && matchBrand;
+    });
+
+    return {
+      modelCount: targetProducts.length,
+      totalQuantity: targetProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0),
+    };
+  }, [products, selectedCategory, selectedBrand]);
 
   // Available Subcategories in current category & brand
   const availableSubCategories = React.useMemo(() => {
@@ -1199,12 +1218,48 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
   const colorDropdownRef = useRef<HTMLDivElement>(null);
 
   const categories = useMemo(() => [
-    { id: 'all', label: 'All Items', icon: Layers, count: products.length },
-    { id: 'brand_new_phones', label: 'Brand new phones', icon: Smartphone, count: products.filter(p => canonicalCategory(p.category) === 'brand_new_phones').length },
-    { id: 'pre_owned_phones', label: 'Pre-owned Phones', icon: Smartphone, count: products.filter(p => canonicalCategory(p.category) === 'pre_owned_phones').length },
-    { id: 'accessories_gadgets', label: 'Accessories & Gadgets', icon: Sparkles, count: products.filter(p => canonicalCategory(p.category) === 'accessories_gadgets').length },
-    { id: 'cookware', label: 'Cookware', icon: Utensils, count: products.filter(p => canonicalCategory(p.category) === 'cookware').length },
-    { id: 'sim_cards', label: 'Sim Cards', icon: CreditCard, count: products.filter(p => canonicalCategory(p.category) === 'sim_cards').length },
+    { 
+      id: 'all', 
+      label: 'All Items', 
+      icon: Layers, 
+      count: products.length,
+      totalQty: products.reduce((s, p) => s + (Number(p.stock) || 0), 0)
+    },
+    { 
+      id: 'brand_new_phones', 
+      label: 'Brand new phones', 
+      icon: Smartphone, 
+      count: products.filter(p => canonicalCategory(p.category) === 'brand_new_phones').length,
+      totalQty: products.filter(p => canonicalCategory(p.category) === 'brand_new_phones').reduce((s, p) => s + (Number(p.stock) || 0), 0)
+    },
+    { 
+      id: 'pre_owned_phones', 
+      label: 'Pre-owned Phones', 
+      icon: Smartphone, 
+      count: products.filter(p => canonicalCategory(p.category) === 'pre_owned_phones').length,
+      totalQty: products.filter(p => canonicalCategory(p.category) === 'pre_owned_phones').reduce((s, p) => s + (Number(p.stock) || 0), 0)
+    },
+    { 
+      id: 'accessories_gadgets', 
+      label: 'Accessories & Gadgets', 
+      icon: Sparkles, 
+      count: products.filter(p => canonicalCategory(p.category) === 'accessories_gadgets').length,
+      totalQty: products.filter(p => canonicalCategory(p.category) === 'accessories_gadgets').reduce((s, p) => s + (Number(p.stock) || 0), 0)
+    },
+    { 
+      id: 'cookware', 
+      label: 'Cookware', 
+      icon: Utensils, 
+      count: products.filter(p => canonicalCategory(p.category) === 'cookware').length,
+      totalQty: products.filter(p => canonicalCategory(p.category) === 'cookware').reduce((s, p) => s + (Number(p.stock) || 0), 0)
+    },
+    { 
+      id: 'sim_cards', 
+      label: 'Sim Cards', 
+      icon: CreditCard, 
+      count: products.filter(p => canonicalCategory(p.category) === 'sim_cards').length,
+      totalQty: products.filter(p => canonicalCategory(p.category) === 'sim_cards').reduce((s, p) => s + (Number(p.stock) || 0), 0)
+    },
   ], [products]);
 
   const activeCategoryOption = useMemo(() => {
@@ -1591,12 +1646,12 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
         {/* Left Column: Category Pills, Filters & Product Catalog Grid */}
         <div className={`lg:col-span-7 space-y-3 ${mobileActiveView === 'cart' ? 'hidden lg:block' : 'block'}`}>
           
-          {/* Category Dropdown (Minimalist Design) */}
+          {/* Category Dropdown (Minimalist Design) & Quantity Summary Beside Its Box */}
           <div ref={categoryDropdownRef} className={`relative ${isCategoryDropdownOpen ? 'z-30' : 'z-10'}`}>
-            <div className="flex items-center justify-between gap-2.5 bg-white p-2 sm:p-2.5 rounded-2xl border border-slate-200/90 shadow-2xs">
+            <div className="flex items-center justify-between gap-2 sm:gap-2.5 bg-white p-2 sm:p-2.5 rounded-2xl border border-slate-200/90 shadow-2xs flex-wrap sm:flex-nowrap">
               
               {/* Dropdown Button */}
-              <div className="relative flex-1 min-w-0">
+              <div className="relative flex-1 min-w-[200px]">
                 <button
                   type="button"
                   id="pos-category-dropdown-trigger"
@@ -1613,7 +1668,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                         {activeCategoryOption.label}
                       </span>
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-200/70 text-slate-700 hidden sm:inline">
-                        {activeCategoryOption.count} items
+                        {activeCategoryOption.count} items • {activeCategoryOption.totalQty} qty
                       </span>
                     </div>
                   </div>
@@ -1655,9 +1710,9 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
                               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                                isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                                isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
                               }`}>
-                                {cat.count}
+                                {cat.count} items • {cat.totalQty} qty
                               </span>
                               {isSelected && <Check className="w-3.5 h-3.5 text-indigo-300 shrink-0" />}
                             </div>
@@ -1667,6 +1722,32 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Beside its box: Total items counts & quantity badges */}
+              <div 
+                id="pos-category-totals-pill"
+                className="inline-flex items-center gap-2 sm:gap-3 px-3 py-1.5 bg-slate-50 border border-slate-200/90 shadow-2xs rounded-xl text-xs shrink-0"
+                title={`${activeCategoryOption.label}: ${activeCategoryStats.modelCount} items/models • ${activeCategoryStats.totalQuantity} total in-stock units`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Package className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span className="text-[11px] font-medium text-slate-500 hidden xs:inline">Total Quantity:</span>
+                  <span className="font-mono font-black text-indigo-700 text-xs sm:text-sm">
+                    {activeCategoryStats.totalQuantity.toLocaleString()}
+                  </span>
+                  <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">qty</span>
+                </div>
+
+                <span className="text-slate-200">|</span>
+
+                <div className="flex items-center gap-1 text-[11px]">
+                  <span className="text-slate-500 font-medium hidden xs:inline">Total Items:</span>
+                  <span className="font-mono font-bold text-slate-800">
+                    {activeCategoryStats.modelCount}
+                  </span>
+                  <span className="text-slate-400 text-[10px]">items</span>
+                </div>
               </div>
 
               {/* Quick Reset or Stepper Buttons */}
@@ -1734,7 +1815,10 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                     </span>
                     {selectedBrand !== 'all' && (
                       <span className="px-1.5 py-0.2 rounded-md bg-indigo-200/60 text-indigo-900 text-[10px] font-mono font-bold">
-                        {availableBrands.find(b => b.name.toLowerCase() === selectedBrand.toLowerCase())?.count || ''}
+                        {(() => {
+                          const b = availableBrands.find(br => br.name.toLowerCase() === selectedBrand.toLowerCase());
+                          return b ? `${b.count} (${b.stock}u)` : '';
+                        })()}
                       </span>
                     )}
                   </div>
@@ -1763,7 +1847,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                         <span>All Brands</span>
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-mono text-slate-400">
-                            {availableBrands.reduce((s, b) => s + b.count, 0)}
+                            {availableBrands.reduce((s, b) => s + b.count, 0)} models • {availableBrands.reduce((s, b) => s + b.stock, 0)} qty
                           </span>
                           {selectedBrand === 'all' && <Check className="w-3.5 h-3.5 text-slate-900 shrink-0" />}
                         </div>
@@ -1787,9 +1871,9 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                             <span className="truncate">{b.name}</span>
                             <div className="flex items-center gap-1.5 shrink-0">
                               <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
-                                isSelected ? 'bg-indigo-100 text-indigo-800' : 'text-slate-400'
+                                isSelected ? 'bg-indigo-100 text-indigo-800 font-bold' : 'text-slate-500'
                               }`}>
-                                {b.count}
+                                {b.count} • {b.stock} qty
                               </span>
                               {isSelected && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
                             </div>

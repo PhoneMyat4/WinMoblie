@@ -346,6 +346,17 @@ export default function App() {
 
     // Initialize Firebase Auth & Realtime synchronization if authenticated
     FirebaseAuthService.init();
+
+    // Automatically purge ALL demonstration mock data (sales, purchases, expenses, announcements, staff, drawer, etc.)
+    StorageService.purgeAllMockData(true);
+    setSales(StorageService.getSales());
+    setPurchases(StorageService.getPurchases());
+    setExpenses(StorageService.getExpenses());
+    setCustomers(StorageService.getCustomers());
+    setSuppliers(StorageService.getSuppliers());
+    setStaffUsers(StorageService.getStaffUsers());
+    setCashDrawer(StorageService.getCashDrawer());
+
     const isInitiallyAuth = sessionStorage.getItem('mobileshop_session_auth') === 'true' || 
                             localStorage.getItem('mobileshop_auth_active') === 'true';
     if (isInitiallyAuth) {
@@ -633,6 +644,23 @@ export default function App() {
       true,
       `${params.reason} (Source: ${params.refundFundingSource === 'cash_drawer' ? 'Daily Cash Drawer' : 'Digital Cash Pool'}, Method: ${params.refundMethod}, Restock: ${params.restockItems ? 'Yes' : 'No'})`
     );
+  };
+
+  const handleDeleteSale = (saleId: string, options?: { restockItems?: boolean }) => {
+    StorageService.deleteSale(saleId, {
+      restockItems: options?.restockItems,
+      staffName: currentActiveUser?.name || 'Owner',
+    }, true);
+    setSales(prev => prev.filter(s => s.id !== saleId));
+  };
+
+  const handleDeleteSales = (saleIds: string[], options?: { restockItems?: boolean }) => {
+    StorageService.deleteSales(saleIds, {
+      restockItems: options?.restockItems,
+      staffName: currentActiveUser?.name || 'Owner',
+    }, true);
+    const idSet = new Set(saleIds);
+    setSales(prev => prev.filter(s => !idSet.has(s.id)));
   };
 
   const handleSaveCustomer = (cust: Customer) => {
@@ -1094,9 +1122,12 @@ export default function App() {
             <SaleHistoryManager
               sales={sales}
               settings={settings}
+              currentUser={currentActiveUser}
               onViewInvoice={(sale) => setSelectedInvoiceToView(sale)}
               onRefundSale={handleRefundSale}
               onProcessItemRefund={handleProcessItemRefund}
+              onDeleteSale={handleDeleteSale}
+              onDeleteSales={handleDeleteSales}
               onArchiveSalesComplete={(deletedIds) => {
                 const deletedSet = new Set(deletedIds);
                 setSales((prev) => prev.filter((s) => !deletedSet.has(s.id)));

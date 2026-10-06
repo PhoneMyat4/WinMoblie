@@ -57,6 +57,7 @@ import { QuarantineReportModal } from './QuarantineReportModal';
 import { QuarantineManagerModal } from './QuarantineManagerModal';
 import { WholeInventoryLogModal } from './WholeInventoryLogModal';
 import { ColumnVisibilityFilter, ColumnDefinition } from '../common/ColumnVisibilityFilter';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 import { canonicalCategory, isPhoneCategory, CANONICAL_CATEGORIES } from '../../data/categoryTaxonomy';
 
 const INVENTORY_COLUMNS: ColumnDefinition[] = [
@@ -302,22 +303,26 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   const focGiftProducts = useMemo(() => safeProducts.filter(p => Boolean(p.isGiftItem)), [safeProducts]);
   const focGiftUnits = useMemo(() => focGiftProducts.reduce((s, p) => s + (Number(p.stock) || 0), 0), [focGiftProducts]);
 
-  // Available Brands for current category selection
+  // Available Brands for current category selection (with model count & physical stock units)
   const availableBrands = useMemo(() => {
     const targetProducts = selectedCategory === 'all'
       ? safeProducts
       : safeProducts.filter(p => p && canonicalCategory(p.category) === selectedCategory);
 
-    const brandMap = new Map<string, number>();
+    const brandMap = new Map<string, { count: number; stock: number }>();
     targetProducts.forEach(p => {
       if (p && p.brand && p.brand.trim()) {
         const b = p.brand.trim();
-        brandMap.set(b, (brandMap.get(b) || 0) + 1);
+        const prev = brandMap.get(b) || { count: 0, stock: 0 };
+        brandMap.set(b, {
+          count: prev.count + 1,
+          stock: prev.stock + (Number(p.stock) || 0)
+        });
       }
     });
 
     return Array.from(brandMap.entries())
-      .map(([name, count]) => ({ name, count }))
+      .map(([name, data]) => ({ name, count: data.count, stock: data.stock }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [safeProducts, selectedCategory]);
 
@@ -436,12 +441,44 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [safeProducts, selectedCategory, selectedBrand]);
 
-  // Total count in currently active category
-  const currentCategoryCount = useMemo(() => {
-    return selectedCategory === 'all'
-      ? safeProducts.length
-      : safeProducts.filter(p => p && canonicalCategory(p.category) === selectedCategory).length;
+  // Total count & physical quantity metrics in currently active category
+  const categoryStats = useMemo(() => {
+    const targetProducts = selectedCategory === 'all'
+      ? safeProducts
+      : safeProducts.filter(p => p && canonicalCategory(p.category) === selectedCategory);
+
+    const modelCount = targetProducts.length;
+    const totalQuantity = targetProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+    const inStockCount = targetProducts.filter(p => (Number(p.stock) || 0) > 0).length;
+    const outOfStockCount = targetProducts.filter(p => (Number(p.stock) || 0) <= 0).length;
+
+    return {
+      modelCount,
+      totalQuantity,
+      inStockCount,
+      outOfStockCount,
+    };
   }, [safeProducts, selectedCategory]);
+
+  const currentCategoryCount = categoryStats.modelCount;
+
+  // Total count & physical quantity when brand filter is active
+  const activeBrandStats = useMemo(() => {
+    if (selectedBrand === 'all') return categoryStats;
+    const targetProducts = safeProducts.filter(p => {
+      if (!p) return false;
+      const matchCat = selectedCategory === 'all' || canonicalCategory(p.category) === selectedCategory;
+      const matchBrand = p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase();
+      return matchCat && matchBrand;
+    });
+
+    return {
+      modelCount: targetProducts.length,
+      totalQuantity: targetProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0),
+      inStockCount: targetProducts.filter(p => (Number(p.stock) || 0) > 0).length,
+      outOfStockCount: targetProducts.filter(p => (Number(p.stock) || 0) <= 0).length,
+    };
+  }, [safeProducts, selectedCategory, selectedBrand, categoryStats]);
 
   // Check whether current category or catalog involves phone products
   const isPhoneCategoryActive = selectedCategory === 'all' || isPhoneCategory(selectedCategory as ProductCategory);
@@ -518,6 +555,25 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       return tokens.every(token => searchableText.includes(token));
     });
   }, [products, selectedCategory, selectedSubCategory, selectedBrand, selectedRam, selectedRom, selectedColor, showLowStockOnly, focFilter, searchQuery]);
+
+  // Interactive Column Sorting
+  const { sortField, sortDirection, handleSort, sortItems } = useTableSort<Product>();
+
+  const sortedProducts = useMemo(() => {
+    return sortItems(filteredProducts, {
+      item_model: (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }),
+      category_condition: (a, b) => (a.category || '').localeCompare(b.category || ''),
+      cost_price: (a, b) => (a.costPrice || 0) - (b.costPrice || 0),
+      selling_price: (a, b) => (a.sellingPrice || 0) - (b.sellingPrice || 0),
+      margin: (a, b) => {
+        const marginA = a.sellingPrice ? ((a.sellingPrice - (a.costPrice || 0)) / a.sellingPrice) : 0;
+        const marginB = b.sellingPrice ? ((b.sellingPrice - (b.costPrice || 0)) / b.sellingPrice) : 0;
+        return marginA - marginB;
+      },
+      stock_level: (a, b) => (a.stock || 0) - (b.stock || 0),
+      imei_serials: (a, b) => (a.imeiList?.length || 0) - (b.imeiList?.length || 0),
+    });
+  }, [filteredProducts, sortField, sortDirection]);
 
   const categories: { id: string; label: string }[] = [
     { id: 'all', label: 'All Products' },
@@ -945,83 +1001,124 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         </div>
       )}
 
-      {/* Category Dropdown (Minimalist Design) */}
+      {/* Category Dropdown (Minimalist Design) & Quantity Summary Beside Its Box */}
       <div id="inventory-category-dropdown-container" className="flex items-center justify-between flex-wrap gap-2.5">
-        <div className="relative inline-block" ref={categoryDropdownRef}>
-          <button
-            id="inventory-category-select-btn"
-            type="button"
-            onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
-            className={`inline-flex items-center justify-between gap-3 px-3.5 py-2 bg-white hover:bg-slate-50/90 text-slate-800 text-xs rounded-xl border transition-all cursor-pointer min-w-[210px] shadow-2xs ${
-              isCategoryDropdownOpen ? 'border-indigo-400 ring-2 ring-indigo-50' : 'border-slate-200 hover:border-slate-300'
-            }`}
-            aria-haspopup="listbox"
-            aria-expanded={isCategoryDropdownOpen}
-          >
-            <div className="flex items-center gap-2 truncate">
-              <span className="text-slate-400 font-medium text-[11px]">Category:</span>
-              <span className="font-bold text-slate-900 truncate">
-                {categories.find(c => c.id === selectedCategory)?.label || 'All Products'}
-              </span>
-              <span className="px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 font-mono text-[10px] font-bold">
-                {selectedCategory === 'all' 
-                  ? safeProducts.length 
-                  : safeProducts.filter(p => p && canonicalCategory(p.category) === selectedCategory).length}
-              </span>
-            </div>
-            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 shrink-0 ${isCategoryDropdownOpen ? 'rotate-180 text-slate-700' : ''}`} />
-          </button>
-
-          {/* Dropdown Menu Popover */}
-          {isCategoryDropdownOpen && (
-            <div 
-              id="inventory-category-dropdown-menu"
-              className="absolute top-full left-0 mt-1.5 w-64 bg-white rounded-xl border border-slate-200 shadow-lg p-1 z-30 animate-in fade-in zoom-in-95 duration-150"
-              role="listbox"
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="relative inline-block" ref={categoryDropdownRef}>
+            <button
+              id="inventory-category-select-btn"
+              type="button"
+              onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
+              className={`inline-flex items-center justify-between gap-3 px-3.5 py-2 bg-white hover:bg-slate-50/90 text-slate-800 text-xs rounded-xl border transition-all cursor-pointer min-w-[210px] shadow-2xs ${
+                isCategoryDropdownOpen ? 'border-indigo-400 ring-2 ring-indigo-50' : 'border-slate-200 hover:border-slate-300'
+              }`}
+              aria-haspopup="listbox"
+              aria-expanded={isCategoryDropdownOpen}
+              title={`${categories.find(c => c.id === selectedCategory)?.label || 'All Products'}: ${categoryStats.modelCount} models, ${categoryStats.totalQuantity} total in-stock units`}
             >
-              <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Select Category
+              <div className="flex items-center gap-2 truncate">
+                <span className="text-slate-400 font-medium text-[11px]">Category:</span>
+                <span className="font-bold text-slate-900 truncate">
+                  {categories.find(c => c.id === selectedCategory)?.label || 'All Products'}
+                </span>
+                <span 
+                  className="px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 font-mono text-[10px] font-bold"
+                  title={`${categoryStats.modelCount} Product Models • ${categoryStats.totalQuantity} Total In-Stock Units`}
+                >
+                  {categoryStats.modelCount} items • {categoryStats.totalQuantity} qty
+                </span>
               </div>
-              <div className="space-y-0.5 max-h-72 overflow-y-auto">
-                {categories.map(cat => {
-                  const isSelected = selectedCategory === cat.id;
-                  const count = cat.id === 'all' 
-                    ? safeProducts.length 
-                    : safeProducts.filter(p => p && canonicalCategory(p.category) === cat.id).length;
+              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 shrink-0 ${isCategoryDropdownOpen ? 'rotate-180 text-slate-700' : ''}`} />
+            </button>
 
-                  return (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      onClick={() => {
-                        handleCategoryChange(cat.id);
-                        setIsCategoryDropdownOpen(false);
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs transition-colors cursor-pointer text-left ${
-                        isSelected 
-                          ? 'bg-slate-100 text-slate-900 font-bold' 
-                          : 'text-slate-700 hover:bg-slate-50 font-medium'
-                      }`}
-                      role="option"
-                      aria-selected={isSelected}
-                    >
-                      <span className="truncate">{cat.label}</span>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className={`text-[11px] font-mono px-1.5 py-0.5 rounded ${
-                          isSelected ? 'bg-slate-200 text-slate-800 font-bold' : 'text-slate-400'
-                        }`}>
-                          {count}
-                        </span>
-                        {isSelected && (
-                          <Check className="w-3.5 h-3.5 text-slate-900" />
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
+            {/* Dropdown Menu Popover */}
+            {isCategoryDropdownOpen && (
+              <div 
+                id="inventory-category-dropdown-menu"
+                className="absolute top-full left-0 mt-1.5 w-72 bg-white rounded-xl border border-slate-200 shadow-lg p-1 z-30 animate-in fade-in zoom-in-95 duration-150"
+                role="listbox"
+              >
+                <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Select Category
+                </div>
+                <div className="space-y-0.5 max-h-72 overflow-y-auto">
+                  {categories.map(cat => {
+                    const isSelected = selectedCategory === cat.id;
+                    const catProducts = cat.id === 'all' 
+                      ? safeProducts 
+                      : safeProducts.filter(p => p && canonicalCategory(p.category) === cat.id);
+                    const count = catProducts.length;
+                    const catStock = catProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => {
+                          handleCategoryChange(cat.id);
+                          setIsCategoryDropdownOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs transition-colors cursor-pointer text-left ${
+                          isSelected 
+                            ? 'bg-slate-100 text-slate-900 font-bold' 
+                            : 'text-slate-700 hover:bg-slate-50 font-medium'
+                        }`}
+                        role="option"
+                        aria-selected={isSelected}
+                      >
+                        <span className="truncate">{cat.label}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                            isSelected ? 'bg-slate-200 text-slate-800 font-bold' : 'text-slate-500 bg-slate-50'
+                          }`}>
+                            {count} models • {catStock} qty
+                          </span>
+                          {isSelected && (
+                            <Check className="w-3.5 h-3.5 text-slate-900 shrink-0" />
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
+            )}
+          </div>
+
+          {/* Beside its box: Total items counts & quantity badges */}
+          <div 
+            id="inventory-category-totals-pill"
+            className="inline-flex items-center gap-2 sm:gap-3 px-3 py-1.5 bg-white border border-slate-200 shadow-2xs rounded-xl text-xs"
+            title={`Current view summary: ${(selectedBrand !== 'all' ? activeBrandStats.totalQuantity : categoryStats.totalQuantity).toLocaleString()} total in-stock units across ${(selectedBrand !== 'all' ? activeBrandStats.modelCount : categoryStats.modelCount)} product models`}
+          >
+            <div className="flex items-center gap-1.5">
+              <Package className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <span className="text-[11px] font-medium text-slate-500">Total Quantity:</span>
+              <span className="font-mono font-black text-indigo-700 text-sm">
+                {(selectedBrand !== 'all' ? activeBrandStats.totalQuantity : categoryStats.totalQuantity).toLocaleString()}
+              </span>
+              <span className="text-slate-400 text-[10px] font-semibold uppercase tracking-wider">units</span>
             </div>
-          )}
+
+            <span className="text-slate-200">|</span>
+
+            <div className="flex items-center gap-1 text-[11px]">
+              <span className="text-slate-500 font-medium">Items / Models:</span>
+              <span className="font-mono font-bold text-slate-800">
+                {selectedBrand !== 'all' ? activeBrandStats.modelCount : categoryStats.modelCount}
+              </span>
+              <span className="text-slate-400 text-[10px]">models</span>
+            </div>
+
+            {selectedBrand !== 'all' && (
+              <>
+                <span className="text-slate-200">|</span>
+                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
+                  Brand: {selectedBrand}
+                </span>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Quick Reset Filter Shortcut if filtered */}
@@ -1057,8 +1154,12 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                   ? 'bg-indigo-600 text-white shadow-xs'
                   : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
               }`}
+              title={`All Brands: ${categoryStats.modelCount} models, ${categoryStats.totalQuantity} total in-stock units`}
             >
-              All Brands ({currentCategoryCount})
+              All Brands ({categoryStats.modelCount})
+              <span className={`ml-1 text-[10px] ${selectedBrand === 'all' ? 'text-indigo-200' : 'text-slate-500 font-normal'}`}>
+                • {categoryStats.totalQuantity} qty
+              </span>
             </button>
 
             {availableBrands.map(b => (
@@ -1071,6 +1172,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                     ? 'bg-indigo-600 text-white shadow-xs'
                     : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
                 }`}
+                title={`${b.name}: ${b.count} model${b.count === 1 ? '' : 's'} • ${b.stock} in-stock unit${b.stock === 1 ? '' : 's'}`}
               >
                 <span>{b.name}</span>
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
@@ -1078,7 +1180,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                     ? 'bg-indigo-700 text-indigo-100'
                     : 'bg-slate-100 text-slate-600'
                 }`}>
-                  {b.count}
+                  {b.count} <span className="opacity-75 font-normal">({b.stock}u)</span>
                 </span>
               </button>
             ))}
@@ -1092,10 +1194,12 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 onChange={(e) => setSelectedBrand(e.target.value)}
                 className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-medium focus:ring-2 focus:ring-indigo-600 focus:outline-hidden cursor-pointer"
               >
-                <option value="all">All Brands ({currentCategoryCount})</option>
+                <option value="all">
+                  All Brands ({categoryStats.modelCount} models • {categoryStats.totalQuantity} qty)
+                </option>
                 {availableBrands.map(b => (
                   <option key={b.name} value={b.name}>
-                    {b.name} ({b.count})
+                    {b.name} ({b.count} models • {b.stock} qty)
                   </option>
                 ))}
               </select>
@@ -1575,18 +1679,83 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider">
-                {visibleColumns.item_model !== false && <th className="py-3 px-4">Item & Model</th>}
-                {visibleColumns.category_condition !== false && <th className="py-3 px-4">Category / Condition</th>}
-                {visibleColumns.cost_price !== false && <th className="py-3 px-4 text-right">Cost Price</th>}
-                {visibleColumns.selling_price !== false && <th className="py-3 px-4 text-right">Selling Price</th>}
-                {visibleColumns.margin !== false && <th className="py-3 px-4 text-right">Margin %</th>}
-                {visibleColumns.stock_level !== false && <th className="py-3 px-4 text-center">Stock Level</th>}
-                {visibleColumns.imei_serials !== false && <th className="py-3 px-4">IMEI Serial Numbers</th>}
-                {visibleColumns.actions !== false && <th className="py-3 px-4 text-center">Actions</th>}
+                {visibleColumns.item_model !== false && (
+                  <SortableHeader
+                    field="item_model"
+                    label="Item & Model"
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.category_condition !== false && (
+                  <SortableHeader
+                    field="category_condition"
+                    label="Category / Condition"
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.cost_price !== false && (
+                  <SortableHeader
+                    field="cost_price"
+                    label="Cost Price"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.selling_price !== false && (
+                  <SortableHeader
+                    field="selling_price"
+                    label="Selling Price"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.margin !== false && (
+                  <SortableHeader
+                    field="margin"
+                    label="Margin %"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.stock_level !== false && (
+                  <SortableHeader
+                    field="stock_level"
+                    label="Stock Level"
+                    align="center"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.imei_serials !== false && (
+                  <SortableHeader
+                    field="imei_serials"
+                    label="IMEI Serial Numbers"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.actions !== false && <th className="py-3 px-4 text-center select-none">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredProducts.length === 0 ? (
+              {sortedProducts.length === 0 ? (
                 <tr>
                   <td colSpan={activeColumnCount || 8} className="py-12 text-center text-slate-400">
                     <Package className="w-8 h-8 mx-auto mb-2 opacity-30" />
@@ -1623,7 +1792,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredProducts.map(product => {
+                sortedProducts.map(product => {
                   const isPhone = isPhoneCategory(product.category) || Boolean(product.rom && product.rom !== '-') || Boolean(product.imeiPairs?.length) || Boolean(product.imeiList?.length);
                   const cond = getConditionLabel(product.condition);
                   const marginPct = product.sellingPrice > 0 
@@ -1838,6 +2007,14 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                                 {product.focType === 'shop_funded_expensed' ? 'Pre-expensed' : 'Bonus (Free)'}
                               </span>
                             </div>
+                          ) : product.costPrice <= 0 ? (
+                            <span 
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border-2 border-rose-500 bg-rose-50/90 text-rose-700 font-black text-xs shadow-2xs"
+                              title="Purchase cost is 0 Ks (unpriced warning)"
+                            >
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                              {formatCurrency(0, settings.currencySymbol)}
+                            </span>
                           ) : (
                             formatCurrency(product.costPrice, settings.currencySymbol)
                           )}
@@ -1857,6 +2034,25 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                               <span>{formatCurrency(product.sellingPrice, settings.currencySymbol)}</span>
                               <span className="block text-[9px] text-purple-600 font-semibold">Ref Value</span>
                             </div>
+                          ) : product.sellingPrice <= 0 ? (
+                            <span 
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border-2 border-rose-500 bg-rose-50/90 text-rose-700 font-black text-xs shadow-2xs"
+                              title="Selling price is 0 Ks (unpriced item)"
+                            >
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                              {formatCurrency(0, settings.currencySymbol)}
+                            </span>
+                          ) : product.costPrice > 0 && product.sellingPrice < product.costPrice ? (
+                            <div className="inline-flex flex-col items-end">
+                              <span 
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border-2 border-rose-500 bg-rose-50/95 text-rose-700 font-black text-xs shadow-2xs"
+                                title={`Warning: Selling price (${formatCurrency(product.sellingPrice, settings.currencySymbol)}) is registered lower than purchase cost (${formatCurrency(product.costPrice, settings.currencySymbol)})!`}
+                              >
+                                <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                                {formatCurrency(product.sellingPrice, settings.currencySymbol)}
+                              </span>
+                              <span className="text-[9px] text-rose-600 font-extrabold mt-0.5 uppercase tracking-wide">Below Cost</span>
+                            </div>
                           ) : (
                             formatCurrency(product.sellingPrice, settings.currencySymbol)
                           )}
@@ -1870,8 +2066,20 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                             <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
                               🎁 Promo FOC
                             </span>
+                          ) : product.costPrice > 0 && product.sellingPrice > 0 && product.sellingPrice < product.costPrice ? (
+                            <span 
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border-2 border-rose-500 bg-rose-50 text-rose-700 font-black text-xs shadow-2xs"
+                              title={`Negative margin: loss of ${formatCurrency(product.costPrice - product.sellingPrice, settings.currencySymbol)} per unit`}
+                            >
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                              {marginPct}% Loss
+                            </span>
+                          ) : product.sellingPrice <= 0 ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-rose-300 bg-rose-50 text-rose-600 font-bold text-xs" title="No selling price set">
+                              0%
+                            </span>
                           ) : (
-                            <span className={`font-bold ${marginPct >= 20 ? 'text-emerald-700' : 'text-slate-600'}`}>
+                            <span className={`font-bold ${marginPct >= 20 ? 'text-emerald-700' : marginPct < 0 ? 'text-rose-600' : 'text-slate-600'}`}>
                               {marginPct}%
                             </span>
                           )}

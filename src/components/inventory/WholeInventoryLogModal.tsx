@@ -67,22 +67,22 @@ export const WholeInventoryLogModal: React.FC<WholeInventoryLogModalProps> = ({
   onClose,
   products,
   settings,
-  sales: initialSales,
-  purchases: initialPurchases,
-  stockAdjustments: initialAdjustments,
-  stockAudits: initialAudits,
-  priceChanges: initialPriceChanges,
-  damageLogs: initialDamageLogs,
+  sales: propSales,
+  purchases: propPurchases,
+  stockAdjustments: propAdjustments,
+  stockAudits: propAudits,
+  priceChanges: propPriceChanges,
+  damageLogs: propDamageLogs,
   staffUsers = [],
   onOpenProductHistory,
 }) => {
   // Pull live state from StorageService or props
-  const sales = useMemo(() => initialSales && initialSales.length > 0 ? initialSales : StorageService.getSales(), [initialSales]);
-  const purchases = useMemo(() => initialPurchases && initialPurchases.length > 0 ? initialPurchases : StorageService.getPurchases(), [initialPurchases]);
-  const stockAdjustments = useMemo(() => initialAdjustments && initialAdjustments.length > 0 ? initialAdjustments : StorageService.getStockAdjustments(), [initialAdjustments]);
-  const stockAudits = useMemo(() => initialAudits && initialAudits.length > 0 ? initialAudits : StorageService.getStockAudits(), [initialAudits]);
-  const priceChanges = useMemo(() => initialPriceChanges && initialPriceChanges.length > 0 ? initialPriceChanges : StorageService.getPriceChanges(), [initialPriceChanges]);
-  const damageLogs = useMemo(() => initialDamageLogs && initialDamageLogs.length > 0 ? initialDamageLogs : StorageService.getDamageLogs(), [initialDamageLogs]);
+  const sales = useMemo(() => Array.isArray(propSales) ? propSales : StorageService.getSales(), [propSales]);
+  const purchases = useMemo(() => Array.isArray(propPurchases) ? propPurchases : StorageService.getPurchases(), [propPurchases]);
+  const stockAdjustments = useMemo(() => Array.isArray(propAdjustments) ? propAdjustments : StorageService.getStockAdjustments(), [propAdjustments]);
+  const stockAudits = useMemo(() => Array.isArray(propAudits) ? propAudits : StorageService.getStockAudits(), [propAudits]);
+  const priceChanges = useMemo(() => Array.isArray(propPriceChanges) ? propPriceChanges : StorageService.getPriceChanges(), [propPriceChanges]);
+  const damageLogs = useMemo(() => Array.isArray(propDamageLogs) ? propDamageLogs : StorageService.getDamageLogs(), [propDamageLogs]);
 
   // Filtering states
   const [selectedEventType, setSelectedEventType] = useState<string>('all');

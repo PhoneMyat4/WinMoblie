@@ -710,8 +710,8 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || (!isGiftItem && sellingPrice <= 0)) {
-      alert('Please provide a valid product name and selling price.');
+    if (!name || !name.trim()) {
+      alert('Please provide a valid product name.');
       return;
     }
 
@@ -788,8 +788,8 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
         name: fullProductName,
         brand: trimmedBrand,
         model: cleanModel || name,
-        costPrice: costPrice > 0 ? costPrice : matchedExactVariant.costPrice,
-        sellingPrice: sellingPrice > 0 ? sellingPrice : matchedExactVariant.sellingPrice,
+        costPrice: costPrice !== undefined && costPrice !== null && !isNaN(costPrice) ? costPrice : matchedExactVariant.costPrice,
+        sellingPrice: sellingPrice !== undefined && sellingPrice !== null && !isNaN(sellingPrice) ? sellingPrice : matchedExactVariant.sellingPrice,
         stock: isPhone && mergedPairs.length > 0 ? mergedPairs.length : matchedExactVariant.stock + stock,
         minStockAlert: finalMinStockAlert,
         imeiPairs: isPhone ? mergedPairs : undefined,
@@ -1869,7 +1869,6 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                   inputMode="decimal"
                   min="0"
                   step="any"
-                  required={!isGiftItem}
                   placeholder="0"
                   value={costPrice === 0 ? (isGiftItem ? 0 : '') : costPrice}
                   onFocus={(e) => e.target.select()}
@@ -1883,17 +1882,28 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                     const val = e.target.value;
                     setCostPrice(val === '' ? 0 : Math.max(0, parseFloat(val) || 0));
                   }}
-                  className="h-9 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500"
+                  className={`h-9 w-full px-3 py-2 border rounded-lg text-xs font-bold text-slate-900 bg-white focus:ring-2 transition-all ${
+                    costPrice <= 0 && !isGiftItem
+                      ? 'border-2 border-rose-500 focus:border-rose-600 focus:ring-rose-200 ring-1 ring-rose-400/50 bg-rose-50/20'
+                      : 'border-slate-300 focus:ring-indigo-500'
+                  }`}
                 />
-                <span className="text-[10px] text-slate-400 mt-1 block truncate">
-                  {isGiftItem ? 'Stock cost asset valuation' : 'Base purchase cost'}
-                </span>
+                {costPrice <= 0 && !isGiftItem ? (
+                  <span className="text-[10px] text-rose-600 font-semibold mt-1 flex items-center gap-1">
+                    <AlertTriangle className="w-2.5 h-2.5 shrink-0 text-rose-500" />
+                    Cost 0 Ks (unpriced warning)
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-slate-400 mt-1 block truncate">
+                    {isGiftItem ? 'Stock cost asset valuation' : 'Base purchase cost'}
+                  </span>
+                )}
               </div>
 
               <div>
                 <div className="h-6 mb-1.5 flex items-center justify-between gap-1 min-w-0">
                   <label className="text-xs font-bold text-slate-700 truncate min-w-0 flex-1" title={`Selling Price / Retail Price (${settings.currencySymbol})`}>
-                    Selling Price ({settings.currencySymbol}) {isGiftItem ? <span className="text-purple-700 font-bold">(Free)</span> : '*'}
+                    Selling Price ({settings.currencySymbol}) {isGiftItem ? <span className="text-purple-700 font-bold">(Free)</span> : (sellingPrice <= 0 ? <span className="text-rose-500 font-bold">* (0 Ks)</span> : '*')}
                   </label>
                   {!isGiftItem ? (
                     <button
@@ -1923,7 +1933,6 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                   inputMode="decimal"
                   min="0"
                   step="any"
-                  required={!isGiftItem}
                   placeholder={isGiftItem ? "0 (Free Gift)" : "0"}
                   value={sellingPrice === 0 ? (isGiftItem ? 0 : '') : sellingPrice}
                   onFocus={(e) => e.target.select()}
@@ -1937,15 +1946,24 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                     const val = e.target.value;
                     setSellingPrice(val === '' ? 0 : Math.max(0, parseFloat(val) || 0));
                   }}
-                  className={`h-9 w-full px-3 py-2 border rounded-lg text-xs font-black bg-white focus:ring-2 ${
+                  className={`h-9 w-full px-3 py-2 border rounded-lg text-xs font-black bg-white focus:ring-2 transition-all ${
                     isGiftItem 
                       ? 'border-purple-300 text-purple-900 focus:ring-purple-500' 
-                      : 'border-slate-300 text-emerald-700 focus:ring-emerald-500'
+                      : (sellingPrice <= 0 
+                          ? 'border-2 border-rose-500 focus:border-rose-600 focus:ring-rose-200 ring-1 ring-rose-400/50 bg-rose-50/20 text-rose-900' 
+                          : 'border-slate-300 text-emerald-700 focus:ring-emerald-500')
                   }`}
                 />
-                <span className="text-[10px] text-slate-400 mt-1 block truncate">
-                  {isGiftItem ? '0 Ks for free gift (or ref price)' : 'Manual or formula-generated'}
-                </span>
+                {!isGiftItem && sellingPrice <= 0 ? (
+                  <span className="text-[10px] text-rose-600 font-semibold mt-1 flex items-center gap-1">
+                    <AlertTriangle className="w-2.5 h-2.5 shrink-0 text-rose-500" />
+                    Price 0 Ks (unpriced warning)
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-slate-400 mt-1 block truncate">
+                    {isGiftItem ? '0 Ks for free gift (or ref price)' : 'Manual or formula-generated'}
+                  </span>
+                )}
               </div>
 
               <div>

@@ -15,7 +15,21 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { FirebaseAuthService } from './firebaseAuthService';
-import { StorageService, STORAGE_KEYS, isMockProduct, isMockStaffUser, MOCK_STAFF_IDS } from '../utils/storage';
+import { 
+  StorageService, 
+  STORAGE_KEYS, 
+  isMockProduct, 
+  isMockStaffUser, 
+  MOCK_STAFF_IDS,
+  isMockPurchase,
+  isMockExpense,
+  isMockCustomer,
+  isMockSupplier,
+  isMockAnnouncement,
+  isMockStockTransfer,
+  isMockCashDrawer,
+  isMockAuditLog
+} from '../utils/storage';
 import { 
   Product, 
   Sale, 
@@ -457,8 +471,8 @@ export class FirestoreSyncService {
         this.markCollectionHydrated('staffUsers');
       }, 2500);
 
-      // Purge any residual mock staff from Firestore in the background
-      this.purgeMockStaffUsersFromFirestore().catch(() => {});
+      // Purge any residual mock data (purchases, expenses, announcements, staff, etc.) from Firestore in the background
+      this.purgeAllRemoteMockData().catch(() => {});
 
       // 1. Settings Listener
       const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snap) => {
@@ -601,12 +615,32 @@ export class FirestoreSyncService {
           }
 
           const remoteSales: Sale[] = [];
+          const mockIdsToDelete: string[] = [];
+          const MOCK_IDS = new Set(['sale-1', 'sale-2', 'sale-3', 'sale-4', 'sale-5', 'sale-6']);
+
           snap.forEach(d => {
             const data = d.data() as Sale;
             if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
-              remoteSales.push({ ...data, id: data.id || d.id });
+              const saleId = data.id || d.id;
+              const isMock = MOCK_IDS.has(saleId) ||
+                MOCK_IDS.has(d.id) ||
+                (data.soldBy && data.soldBy.includes('Ko Min Thu') && (saleId.startsWith('sale-') || d.id.startsWith('sale-')));
+              
+              if (isMock) {
+                mockIdsToDelete.push(d.id);
+                if (data.id && data.id !== d.id) mockIdsToDelete.push(data.id);
+              } else {
+                remoteSales.push({ ...data, id: saleId });
+              }
             }
           });
+
+          // Automatically purge any detected mock sales from the cloud database
+          if (mockIdsToDelete.length > 0) {
+            this.deleteSales(mockIdsToDelete).catch((err) => {
+              console.warn('[FirestoreSync] Failed to purge mock sales from cloud:', err);
+            });
+          }
 
           remoteSales.sort((a, b) => {
             const timeA = new Date(a.date || (a as any).createdAt || 0).getTime();
@@ -679,8 +713,9 @@ export class FirestoreSyncService {
 
           if (snap.empty) {
             const currentLocal = StorageService.getPurchases();
-            if (currentLocal.length > 0 && !StorageService.isFreshDatabase()) {
-              this.syncPurchases(currentLocal).catch(() => {});
+            const cleanLocal = currentLocal.filter(p => !isMockPurchase(p));
+            if (cleanLocal.length > 0 && !StorageService.isFreshDatabase()) {
+              this.syncPurchases(cleanLocal).catch(() => {});
             } else {
               StorageService.savePurchases([], false);
             }
@@ -689,12 +724,21 @@ export class FirestoreSyncService {
           }
 
           const remotePurchases: PurchaseRecord[] = [];
+          const mockPurchaseDocsToDelete: string[] = [];
+
           snap.forEach(d => {
             const data = d.data() as PurchaseRecord;
-            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
-              remotePurchases.push({ ...data, id: data.id || d.id });
+            const poId = data?.id || d.id;
+            if (data && (isMockPurchase(data) || isMockPurchase({ id: d.id, ...data }))) {
+              mockPurchaseDocsToDelete.push(d.id);
+            } else if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remotePurchases.push({ ...data, id: poId });
             }
           });
+
+          if (mockPurchaseDocsToDelete.length > 0) {
+            mockPurchaseDocsToDelete.forEach(id => deleteDoc(doc(db, 'purchases', id)).catch(() => {}));
+          }
 
           StorageService.savePurchases(remotePurchases, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
@@ -720,21 +764,27 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            const currentLocal = StorageService.getCustomers();
-            if (currentLocal.length === 0 || StorageService.isFreshDatabase()) {
-              StorageService.saveCustomers([], false);
-            }
+            StorageService.saveCustomers([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
 
           const remoteCustomers: Customer[] = [];
+          const mockCustDocsToDelete: string[] = [];
+
           snap.forEach(d => {
             const data = d.data() as Customer;
-            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
-              remoteCustomers.push({ ...data, id: data.id || d.id });
+            const custId = data?.id || d.id;
+            if (data && (isMockCustomer(data) || isMockCustomer({ id: d.id, ...data }))) {
+              mockCustDocsToDelete.push(d.id);
+            } else if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteCustomers.push({ ...data, id: custId });
             }
           });
+
+          if (mockCustDocsToDelete.length > 0) {
+            mockCustDocsToDelete.forEach(id => deleteDoc(doc(db, 'customers', id)).catch(() => {}));
+          }
 
           StorageService.saveCustomers(remoteCustomers, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
@@ -761,7 +811,10 @@ export class FirestoreSyncService {
 
           if (snap.empty) {
             const currentLocal = StorageService.getExpenses();
-            if (currentLocal.length === 0 || StorageService.isFreshDatabase()) {
+            const cleanLocal = currentLocal.filter(e => !isMockExpense(e));
+            if (cleanLocal.length > 0 && !StorageService.isFreshDatabase()) {
+              this.syncExpenses(cleanLocal).catch(() => {});
+            } else {
               StorageService.saveExpenses([], false);
             }
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
@@ -769,12 +822,21 @@ export class FirestoreSyncService {
           }
 
           const remoteExpenses: ExpenseRecord[] = [];
+          const mockExpenseDocsToDelete: string[] = [];
+
           snap.forEach(d => {
             const data = d.data() as ExpenseRecord;
-            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
-              remoteExpenses.push({ ...data, id: data.id || d.id });
+            const expId = data?.id || d.id;
+            if (data && (isMockExpense(data) || isMockExpense({ id: d.id, ...data }))) {
+              mockExpenseDocsToDelete.push(d.id);
+            } else if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteExpenses.push({ ...data, id: expId });
             }
           });
+
+          if (mockExpenseDocsToDelete.length > 0) {
+            mockExpenseDocsToDelete.forEach(id => deleteDoc(doc(db, 'expenses', id)).catch(() => {}));
+          }
 
           StorageService.saveExpenses(remoteExpenses, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
@@ -817,21 +879,27 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            const currentLocal = StorageService.getSuppliers();
-            if (currentLocal.length === 0 || StorageService.isFreshDatabase()) {
-              StorageService.saveSuppliers([], false);
-            }
+            StorageService.saveSuppliers([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
 
           const remoteSuppliers: Supplier[] = [];
+          const mockSupplierDocsToDelete: string[] = [];
+
           snap.forEach(d => {
             const data = d.data() as Supplier;
-            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
-              remoteSuppliers.push({ ...data, id: data.id || d.id });
+            const supId = data?.id || d.id;
+            if (data && (isMockSupplier(data) || isMockSupplier({ id: d.id, ...data }))) {
+              mockSupplierDocsToDelete.push(d.id);
+            } else if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+              remoteSuppliers.push({ ...data, id: supId });
             }
           });
+
+          if (mockSupplierDocsToDelete.length > 0) {
+            mockSupplierDocsToDelete.forEach(id => deleteDoc(doc(db, 'suppliers', id)).catch(() => {}));
+          }
 
           StorageService.saveSuppliers(remoteSuppliers, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
@@ -906,7 +974,10 @@ export class FirestoreSyncService {
       const unsubCashDrawer = onSnapshot(doc(db, 'cashDrawer', 'current'), (snap) => {
         if (snap.exists()) {
           const remoteDrawer = snap.data() as CashDrawerRecord;
-          if (remoteDrawer && (remoteDrawer.openingFloat !== undefined || remoteDrawer.status !== undefined)) {
+          if (isMockCashDrawer(remoteDrawer)) {
+            const cleanDrawer = StorageService.getCashDrawer();
+            setDoc(doc(db, 'cashDrawer', 'current'), cleanDrawer).catch(() => {});
+          } else if (remoteDrawer && (remoteDrawer.openingFloat !== undefined || remoteDrawer.status !== undefined)) {
             this.isProcessingRemoteSnapshot = true;
             try {
               StorageService.saveCashDrawer(remoteDrawer, false);
@@ -1127,12 +1198,20 @@ export class FirestoreSyncService {
           }
 
           const remoteAnnounce: Announcement[] = [];
+          const mockAnnounceToDelete: string[] = [];
+
           snap.forEach(d => {
             const data = d.data() as Announcement;
-            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+            if (data && (isMockAnnouncement(data) || isMockAnnouncement({ id: d.id, ...data }))) {
+              mockAnnounceToDelete.push(d.id);
+            } else if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
               remoteAnnounce.push({ ...data, id: data.id || d.id });
             }
           });
+
+          if (mockAnnounceToDelete.length > 0) {
+            mockAnnounceToDelete.forEach(id => deleteDoc(doc(db, 'announcements', id)).catch(() => {}));
+          }
 
           StorageService.saveAnnouncements(remoteAnnounce, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
@@ -1201,12 +1280,20 @@ export class FirestoreSyncService {
           }
 
           const remoteLogs: AuditLogEntry[] = [];
+          const mockAuditLogsToDelete: string[] = [];
+
           snap.forEach(d => {
             const data = d.data() as AuditLogEntry;
-            if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
+            if (data && (isMockAuditLog(data) || isMockAuditLog({ id: d.id, ...data }))) {
+              mockAuditLogsToDelete.push(d.id);
+            } else if (data && !removedIds.has(d.id) && !removedIds.has(data.id)) {
               remoteLogs.push({ ...data, id: data.id || d.id });
             }
           });
+
+          if (mockAuditLogsToDelete.length > 0) {
+            mockAuditLogsToDelete.forEach(id => deleteDoc(doc(db, 'auditLogs', id)).catch(() => {}));
+          }
 
           StorageService.saveAuditLogs(remoteLogs, false);
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
@@ -1284,9 +1371,16 @@ export class FirestoreSyncService {
             const remoteTransfers: StockTransfer[] = [];
             snap.forEach(d => {
               const data = d.data() as StockTransfer;
-              if (data) remoteTransfers.push({ ...data, id: data.id || d.id });
+              if (data && (isMockStockTransfer(data) || isMockStockTransfer({ id: d.id, ...data }))) {
+                deleteDoc(d.ref).catch(() => {});
+              } else if (data) {
+                remoteTransfers.push({ ...data, id: data.id || d.id });
+              }
             });
             StorageService.saveStockTransfers(remoteTransfers, false);
+            this.updateStatus({ lastSyncedAt: new Date(), error: null });
+          } else {
+            StorageService.saveStockTransfers([], false);
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
           }
         } catch (err: any) {
@@ -1876,7 +1970,9 @@ export class FirestoreSyncService {
   }
 
   public async syncSales(sales: Sale[]): Promise<void> {
-    await this.batchWriteCollection('sales', sales, s => s.id);
+    const MOCK_IDS = new Set(['sale-1', 'sale-2', 'sale-3', 'sale-4', 'sale-5', 'sale-6']);
+    const cleanSales = sales.filter(s => !MOCK_IDS.has(s.id) && !s.soldBy?.includes('Ko Min Thu'));
+    await this.batchWriteCollection('sales', cleanSales, s => s.id);
   }
 
   public async deleteSale(id: string): Promise<void> {
@@ -2220,6 +2316,90 @@ export class FirestoreSyncService {
       }
     } catch (err: any) {
       console.warn('[FirestoreSync] Error purging mock staff from Firestore:', err?.message || err);
+    }
+  }
+
+  public async purgeAllRemoteMockData(): Promise<void> {
+    try {
+      await this.purgeMockStaffUsersFromFirestore();
+
+      // 1. Purge purchases
+      const pSnap = await getDocs(collection(db, 'purchases'));
+      for (const d of pSnap.docs) {
+        if (isMockPurchase({ id: d.id, ...d.data() })) {
+          await deleteDoc(d.ref).catch(() => {});
+        }
+      }
+
+      // 2. Purge expenses
+      const eSnap = await getDocs(collection(db, 'expenses'));
+      for (const d of eSnap.docs) {
+        if (isMockExpense({ id: d.id, ...d.data() })) {
+          await deleteDoc(d.ref).catch(() => {});
+        }
+      }
+
+      // 3. Purge announcements
+      const aSnap = await getDocs(collection(db, 'announcements'));
+      for (const d of aSnap.docs) {
+        if (isMockAnnouncement({ id: d.id, ...d.data() })) {
+          await deleteDoc(d.ref).catch(() => {});
+        }
+      }
+
+      // 4. Purge stock transfers
+      const tSnap = await getDocs(collection(db, 'stock_transfers'));
+      for (const d of tSnap.docs) {
+        if (isMockStockTransfer({ id: d.id, ...d.data() })) {
+          await deleteDoc(d.ref).catch(() => {});
+        }
+      }
+
+      // 5. Purge mock sales
+      const sSnap = await getDocs(collection(db, 'sales'));
+      const MOCK_SALE_IDS = new Set(['sale-1', 'sale-2', 'sale-3', 'sale-4', 'sale-5', 'sale-6']);
+      for (const d of sSnap.docs) {
+        const s = d.data() as Sale;
+        if (MOCK_SALE_IDS.has(d.id) || MOCK_SALE_IDS.has(s?.id) || s?.soldBy?.includes('Ko Min Thu')) {
+          await deleteDoc(d.ref).catch(() => {});
+        }
+      }
+
+      // 6. Purge mock customers & suppliers
+      const cSnap = await getDocs(collection(db, 'customers'));
+      for (const d of cSnap.docs) {
+        if (isMockCustomer({ id: d.id, ...d.data() })) {
+          await deleteDoc(d.ref).catch(() => {});
+        }
+      }
+      const supSnap = await getDocs(collection(db, 'suppliers'));
+      for (const d of supSnap.docs) {
+        if (isMockSupplier({ id: d.id, ...d.data() })) {
+          await deleteDoc(d.ref).catch(() => {});
+        }
+      }
+
+      // 7. Cash Drawer
+      const drawerSnap = await getDoc(doc(db, 'cashDrawer', 'current'));
+      if (drawerSnap.exists() && isMockCashDrawer(drawerSnap.data() as CashDrawerRecord)) {
+        await setDoc(doc(db, 'cashDrawer', 'current'), StorageService.getCashDrawer()).catch(() => {});
+      }
+
+      // 8. Audit logs & Activity logs
+      const auditSnap = await getDocs(collection(db, 'auditLogs'));
+      for (const d of auditSnap.docs) {
+        if (isMockAuditLog({ id: d.id, ...d.data() })) {
+          await deleteDoc(d.ref).catch(() => {});
+        }
+      }
+      const actSnap = await getDocs(collection(db, 'activityLogs'));
+      for (const d of actSnap.docs) {
+        if (isMockAuditLog({ id: d.id, ...d.data() })) {
+          await deleteDoc(d.ref).catch(() => {});
+        }
+      }
+    } catch (err: any) {
+      console.warn('[FirestoreSync] purgeAllRemoteMockData error:', err?.message || err);
     }
   }
 

@@ -39,6 +39,7 @@ import { Sale, ShopSettings, PaymentMethod } from '../../types';
 import { formatCurrency, formatDateTime, getPaymentMethodInfo, getCategoryLabel } from '../../utils/formatters';
 import { canonicalCategory } from '../../data/categoryTaxonomy';
 import { exportReportToPdf } from '../../utils/pdfExportUtils';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 interface DailySaleReportProps {
   sales: Sale[];
@@ -139,6 +140,22 @@ export const DailySaleReport: React.FC<DailySaleReportProps> = ({
       return matchesSearch && matchesPayment && matchesStatus;
     });
   }, [dailySales, searchQuery, paymentFilter, statusFilter]);
+
+  // Interactive Column Sorting for Daily Sales
+  const { sortField, sortDirection, handleSort, sortItems } = useTableSort<Sale>();
+
+  const sortedDailySales = useMemo(() => {
+    return sortItems(filteredDailySales, {
+      invoice_number: (a, b) => (a.invoiceNumber || '').localeCompare(b.invoiceNumber || '', undefined, { numeric: true }),
+      time: (a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime(),
+      customer: (a, b) => (a.customerName || '').localeCompare(b.customerName || ''),
+      purchased_items: (a, b) => (a.items?.length || 0) - (b.items?.length || 0),
+      payment: (a, b) => (a.paymentMethod || '').localeCompare(b.paymentMethod || ''),
+      cashier: (a, b) => (a.soldBy || a.cashierName || '').localeCompare(b.soldBy || b.cashierName || ''),
+      status: (a, b) => (a.status || '').localeCompare(b.status || ''),
+      grand_total: (a, b) => (a.grandTotal || 0) - (b.grandTotal || 0),
+    });
+  }, [filteredDailySales, sortField, sortDirection]);
 
   // Key KPI metrics for the selected day
   const metrics = useMemo(() => {
@@ -672,19 +689,71 @@ export const DailySaleReport: React.FC<DailySaleReportProps> = ({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider">
-                <th className="py-3 px-4">Invoice #</th>
-                <th className="py-3 px-4">Time</th>
-                <th className="py-3 px-4">Customer</th>
-                <th className="py-3 px-4">Purchased Items & IMEIs</th>
-                <th className="py-3 px-4">Payment</th>
-                <th className="py-3 px-4">Cashier</th>
-                <th className="py-3 px-4 text-center">Status</th>
-                <th className="py-3 px-4 text-right">Grand Total</th>
-                {onViewInvoice && <th className="py-3 px-4 text-center">Voucher</th>}
+                <SortableHeader
+                  field="invoice_number"
+                  label="Invoice #"
+                  currentSortField={sortField}
+                  currentSortDirection={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  field="time"
+                  label="Time"
+                  currentSortField={sortField}
+                  currentSortDirection={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  field="customer"
+                  label="Customer"
+                  currentSortField={sortField}
+                  currentSortDirection={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  field="purchased_items"
+                  label="Purchased Items & IMEIs"
+                  numeric
+                  currentSortField={sortField}
+                  currentSortDirection={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  field="payment"
+                  label="Payment"
+                  currentSortField={sortField}
+                  currentSortDirection={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  field="cashier"
+                  label="Cashier"
+                  currentSortField={sortField}
+                  currentSortDirection={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  field="status"
+                  label="Status"
+                  align="center"
+                  currentSortField={sortField}
+                  currentSortDirection={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  field="grand_total"
+                  label="Grand Total"
+                  align="right"
+                  numeric
+                  currentSortField={sortField}
+                  currentSortDirection={sortDirection}
+                  onSort={handleSort}
+                />
+                {onViewInvoice && <th className="py-3 px-4 text-center select-none">Voucher</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredDailySales.length === 0 ? (
+              {sortedDailySales.length === 0 ? (
                 <tr>
                   <td colSpan={onViewInvoice ? 9 : 8} className="py-12 text-center text-slate-400">
                     <Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />
@@ -693,7 +762,7 @@ export const DailySaleReport: React.FC<DailySaleReportProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredDailySales.map((sale) => {
+                sortedDailySales.map((sale) => {
                   const payInfo = getPaymentMethodInfo(sale.paymentMethod);
                   const isRefunded = sale.status === 'refunded';
                   const timeOnly = formatDateTime(sale.date).split(' ')[1] || formatDateTime(sale.date);

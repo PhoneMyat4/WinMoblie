@@ -33,6 +33,7 @@ import { exportToCsv } from '../../utils/reportUtils';
 import { exportReportToPdf } from '../../utils/pdfExportUtils';
 import { formatCurrency, formatDateTime, getPaymentMethodInfo, formatSalePaymentBreakdown } from '../../utils/formatters';
 import { ColumnVisibilityFilter, ColumnDefinition } from '../common/ColumnVisibilityFilter';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 const SALES_LEDGER_COLUMNS: ColumnDefinition[] = [
   { id: 'invoice_date', label: 'Invoice # & Date', required: true },
@@ -125,6 +126,26 @@ export const SalesLedgerReport: React.FC<SalesLedgerReportProps> = ({
       return matchInvoice || matchCustomer || matchRef || matchItem;
     });
   }, [sales, paymentFilter, statusFilter, cashierFilter, searchQuery]);
+
+  // Interactive Column Sorting for Sales Ledger
+  const { sortField, sortDirection, handleSort, sortItems } = useTableSort<Sale>();
+
+  const sortedSales = useMemo(() => {
+    return sortItems(filteredSales, {
+      invoice_date: (a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime(),
+      customer: (a, b) => (a.customerName || '').localeCompare(b.customerName || ''),
+      items: (a, b) => {
+        const totalA = a.items.reduce((acc, i) => acc + i.quantity, 0);
+        const totalB = b.items.reduce((acc, i) => acc + i.quantity, 0);
+        return totalA - totalB;
+      },
+      payment_method: (a, b) => (a.paymentMethod || '').localeCompare(b.paymentMethod || ''),
+      subtotal: (a, b) => (a.subtotal || 0) - (b.subtotal || 0),
+      discount: (a, b) => (a.discountTotal || 0) - (b.discountTotal || 0),
+      grand_total: (a, b) => (a.grandTotal || 0) - (b.grandTotal || 0),
+      status: (a, b) => (a.status || '').localeCompare(b.status || ''),
+    });
+  }, [filteredSales, sortField, sortDirection]);
 
   // Executive Financial Metrics
   const stats = useMemo(() => {
@@ -613,19 +634,91 @@ export const SalesLedgerReport: React.FC<SalesLedgerReportProps> = ({
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-100/75 text-slate-700 uppercase font-extrabold text-[11px] tracking-wider border-b border-slate-200">
               <tr>
-                {visibleColumns.invoice_date !== false && <th className="py-3 px-4">Invoice # & Date</th>}
-                {visibleColumns.customer !== false && <th className="py-3 px-4">Customer Details</th>}
-                {visibleColumns.items !== false && <th className="py-3 px-4">Purchased Items</th>}
-                {visibleColumns.payment_method !== false && <th className="py-3 px-4">Payment Method</th>}
-                {visibleColumns.subtotal !== false && <th className="py-3 px-4 text-right">Subtotal</th>}
-                {visibleColumns.discount !== false && <th className="py-3 px-4 text-right">Discount</th>}
-                {visibleColumns.grand_total !== false && <th className="py-3 px-4 text-right">Grand Total</th>}
-                {visibleColumns.status !== false && <th className="py-3 px-4 text-center">Status</th>}
-                {visibleColumns.action !== false && <th className="py-3 px-4 text-center">Action</th>}
+                {visibleColumns.invoice_date !== false && (
+                  <SortableHeader
+                    field="invoice_date"
+                    label="Invoice # & Date"
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.customer !== false && (
+                  <SortableHeader
+                    field="customer"
+                    label="Customer Details"
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.items !== false && (
+                  <SortableHeader
+                    field="items"
+                    label="Purchased Items"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.payment_method !== false && (
+                  <SortableHeader
+                    field="payment_method"
+                    label="Payment Method"
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.subtotal !== false && (
+                  <SortableHeader
+                    field="subtotal"
+                    label="Subtotal"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.discount !== false && (
+                  <SortableHeader
+                    field="discount"
+                    label="Discount"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.grand_total !== false && (
+                  <SortableHeader
+                    field="grand_total"
+                    label="Grand Total"
+                    align="right"
+                    numeric
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.status !== false && (
+                  <SortableHeader
+                    field="status"
+                    label="Status"
+                    align="center"
+                    currentSortField={sortField}
+                    currentSortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                )}
+                {visibleColumns.action !== false && <th className="py-3 px-4 text-center select-none">Action</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredSales.length === 0 ? (
+              {sortedSales.length === 0 ? (
                 <tr>
                   <td colSpan={activeColumnCount || 9} className="py-12 text-center text-slate-400">
                     <Receipt className="w-8 h-8 mx-auto mb-2 text-slate-300" />
@@ -633,7 +726,7 @@ export const SalesLedgerReport: React.FC<SalesLedgerReportProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredSales.map((sale) => {
+                sortedSales.map((sale) => {
                   const payInfo = getPaymentMethodInfo(sale.paymentMethod);
                   const isRefunded = sale.status === 'refunded';
                   const totalUnits = sale.items.reduce((acc, i) => acc + i.quantity, 0);
