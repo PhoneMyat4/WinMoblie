@@ -79,15 +79,94 @@ input::placeholder, textarea::placeholder {
   body:has(#invoice-print-modal-overlay) nav,
   body:has(#invoice-print-modal-overlay) header,
   body:has(#invoice-print-modal-overlay) main,
+  body:has(#invoice-print-modal-overlay) aside,
   body:has(#purchase-workflow-detail-modal) nav,
   body:has(#purchase-workflow-detail-modal) header,
+  body:has(#purchase-workflow-detail-modal) aside,
+  body:has(#invoice-customizer-screen) nav,
+  body:has(#invoice-customizer-screen) header,
+  body:has(#invoice-customizer-screen) aside,
   body.printing-modal-active nav,
   body.printing-modal-active header,
   body.printing-modal-active main,
+  body.printing-modal-active aside,
   body.printing-po-active nav,
-  body.printing-po-active header {
+  body.printing-po-active header,
+  body.printing-po-active aside,
+  body.printing-customizer-active nav,
+  body.printing-customizer-active header,
+  body.printing-customizer-active aside {
     display: none !important;
     visibility: hidden !important;
+  }
+
+  /* Universal print hiding rules with maximum priority */
+  .print\:hidden,
+  [data-print-hidden="true"],
+  .no-print,
+  #invoice-customizer-banner,
+  #invoice-customizer-form,
+  #invoice-customizer-preview-header,
+  #invoice-customizer-screen .print\:hidden,
+  #invoice-customizer-screen form,
+  #invoice-print-modal-overlay .print\:hidden,
+  #purchase-workflow-detail-modal .print\:hidden {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    overflow: hidden !important;
+    opacity: 0 !important;
+  }
+
+  body:has(#invoice-customizer-screen) main,
+  body.printing-customizer-active main {
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  #invoice-customizer-screen {
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+  }
+
+  #invoice-customizer-screen .grid {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  #invoice-customizer-screen .lg\:col-span-7,
+  #invoice-customizer-form {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  #invoice-customizer-screen .lg\:col-span-5 {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  #invoice-customizer-screen .sticky {
+    position: static !important;
+    top: auto !important;
   }
 
   body.printing-po-active main {
@@ -157,17 +236,34 @@ input::placeholder, textarea::placeholder {
     margin: 0 !important;
   }
 
-  #printable-a5-invoice {
+  #printable-a5-invoice,
+  .a5-voucher-sheet {
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;
     margin: 0 auto !important;
-    padding: 8mm 10mm !important;
+    padding: 6mm 8mm !important;
     max-width: 100% !important;
     width: 100% !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
     background: #ffffff !important;
+  }
+
+  /* Multi-sheet voucher page breaks */
+  .a5-voucher-sheet {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  #printable-a5-invoice:only-child,
+  #printable-a5-invoice:last-child,
+  #printable-a5-invoice:last-of-type,
+  .a5-voucher-sheet:last-of-type,
+  .a5-voucher-sheet:last-child,
+  .a5-voucher-sheet:only-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
   }
 
   #printable-thermal-receipt {

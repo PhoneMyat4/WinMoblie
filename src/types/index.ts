@@ -923,6 +923,7 @@ export interface InvoiceCustomization {
   // Paper formatting
   paperWidth: '80mm' | '58mm' | 'a5';
   fontSize: 'compact' | 'standard' | 'large';
+  maxItemsPerA5Page?: number; // Maximum items per A5 voucher slip before pagination (e.g. 3, default: 3)
 
   // Custom text
   footerThankYouMessage: string;

@@ -91,6 +91,7 @@ export const initialSettings: ShopSettings = {
     showBarcode: true,
     paperWidth: '80mm',
     fontSize: 'standard',
+    maxItemsPerA5Page: 3,
     footerThankYouMessage: 'ဝယ်ယူအားပေးမှုကို ကျေးဇူးတင်ပါသည်။ ပစ္စည်းလဲလှယ်လိုပါက ဘောက်ချာယူဆောင်လာပါရန်။',
     warrantyPolicyText: 'အာမခံရယူရန် ဤဘောက်ချာပြသပေးပါရန်။ (Show this receipt for warranty claim)',
   },

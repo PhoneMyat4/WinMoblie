@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { 
   FileText, 
   Settings, 
@@ -62,6 +62,7 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
     showSignatures: true,
     paperWidth: '80mm',
     fontSize: 'standard',
+    maxItemsPerA5Page: settings.invoiceCustomization?.maxItemsPerA5Page || 3,
     footerThankYouMessage: 'ဝယ်ယူအားပေးမှုကို ကျေးဇူးတင်ပါသည်။ ပစ္စည်းလဲလှယ်လိုပါက ဘောက်ချာယူဆောင်လာပါရန်။',
     warrantyPolicyText: 'အာမခံရယူရန် ဤဘောက်ချာပြသပေးပါရန်။ (Show this receipt for warranty claim)',
     ...(settings.invoiceCustomization || {}),
@@ -74,6 +75,66 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
   const [isLogoAdjusterOpen, setIsLogoAdjusterOpen] = useState(false);
   const qrFileInputRef = useRef<HTMLInputElement>(null);
   const logoFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sample items for realistic preview and multi-sheet A5 voucher testing
+  const [sampleItemCount, setSampleItemCount] = useState<number>(6);
+
+  const sampleItemsList = [
+    {
+      name: 'Apple iPhone 15 Pro Max (256GB Natural Titanium)',
+      imei: '35829 10482 91045',
+      imei2: '35829 10482 91046',
+      warranty: '1 Year Brand Official Warranty',
+      qty: 1,
+      price: 4250000,
+    },
+    {
+      name: 'Anker 30W Nano Fast Charger Type-C',
+      warranty: '18 Months Replacement Warranty',
+      qty: 1,
+      price: 65000,
+    },
+    {
+      name: 'Spigen Ultra Hybrid Clear Case (iPhone 15)',
+      warranty: '6 Months Case Warranty',
+      qty: 1,
+      price: 45000,
+    },
+    {
+      name: 'Samsung Galaxy S24 Ultra (512GB Titanium Black)',
+      imei: '35914 88204 11290',
+      imei2: '35914 88204 11291',
+      warranty: '1 Year Brand Official Warranty',
+      qty: 1,
+      price: 4650000,
+    },
+    {
+      name: 'Baseus 20000mAh 65W Fast Power Bank',
+      warranty: '1 Year Replacement Warranty',
+      qty: 1,
+      price: 115000,
+    },
+    {
+      name: 'Remax King Kong 9D Screen Protector Glass',
+      warranty: 'Official Application Warranty',
+      qty: 2,
+      price: 25000,
+    },
+  ];
+
+  const maxItemsPerPage = customization.maxItemsPerA5Page || 3;
+  const activeSampleItems = sampleItemsList.slice(0, sampleItemCount);
+
+  const a5Pages = useMemo(() => {
+    if (customization.paperWidth !== 'a5' || activeSampleItems.length === 0) {
+      return [activeSampleItems];
+    }
+    const chunks: typeof activeSampleItems[] = [];
+    for (let i = 0; i < activeSampleItems.length; i += maxItemsPerPage) {
+      chunks.push(activeSampleItems.slice(i, i + maxItemsPerPage));
+    }
+    return chunks;
+  }, [customization.paperWidth, activeSampleItems, maxItemsPerPage]);
 
   // Helper to compress and convert image to lightweight Data URL via centralized imageCompression
   const processImageFile = async (file: File, callback: (dataUrl: string) => void) => {
@@ -228,7 +289,11 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
     <div id="invoice-customizer-screen" className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
       
       {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs">
+      <div 
+        id="invoice-customizer-banner"
+        data-print-hidden="true"
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs print:hidden"
+      >
         <div>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
@@ -244,7 +309,7 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 print:hidden">
+        <div className="flex items-center gap-2 print:hidden" data-print-hidden="true">
           {isSavedToast && (
             <span className="text-xs font-bold text-emerald-600 flex items-center gap-1 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200 animate-in fade-in">
               <Check className="w-4 h-4" /> Settings Saved!
@@ -255,9 +320,11 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
             onClick={() => {
               const originalTitle = document.title;
               document.title = ' ';
+              document.body.classList.add('printing-customizer-active');
               window.print();
               setTimeout(() => {
                 document.title = originalTitle;
+                document.body.classList.remove('printing-customizer-active');
               }, 500);
             }}
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition-all cursor-pointer"
@@ -280,7 +347,12 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
         {/* Left Form: Customization Controls (7 cols) */}
-        <form onSubmit={handleSave} className="lg:col-span-7 space-y-6 print:hidden">
+        <form 
+          id="invoice-customizer-form"
+          data-print-hidden="true"
+          onSubmit={handleSave} 
+          className="lg:col-span-7 space-y-6 print:hidden"
+        >
           
           {/* Section 1: Paper Format & Size Selection */}
           <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-4">
@@ -394,6 +466,41 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
                 </label>
               </div>
             </div>
+
+            {/* A5 Multi-Page Pagination Setting */}
+            {customization.paperWidth === 'a5' && (
+              <div className="pt-3 border-t border-slate-100 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                    A5 Multi-Page Slip Pagination
+                  </label>
+                  <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-200">
+                    Max {customization.maxItemsPerA5Page || 3} items per voucher slip
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  When a customer purchases many items, the POS automatically divides them into consecutive A5 voucher slips (Sheet 1 of 2, Sheet 2 of 2) while keeping the exact same customer information, date, cashier, and invoice number.
+                </p>
+                <div className="grid grid-cols-5 gap-2">
+                  {[2, 3, 4, 5, 6].map((cnt) => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      onClick={() => setCustomization({ ...customization, maxItemsPerA5Page: cnt })}
+                      className={`py-2 px-1 rounded-xl border text-center text-xs font-bold transition-all cursor-pointer ${
+                        (customization.maxItemsPerA5Page || 3) === cnt
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div>{cnt} Items</div>
+                      <div className="text-[9px] font-normal opacity-80">{cnt === 3 ? 'Standard' : cnt === 2 ? 'Spacious' : 'Compact'}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Section 2: Banking Payment QR Photo Upload (KEY REQUEST) */}
@@ -887,190 +994,272 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
         </form>
 
         {/* Right Form: Live Interactive Preview (5 cols) */}
-        <div className="lg:col-span-5 flex flex-col items-center">
-          <div className="sticky top-20 w-full">
+        <div className="lg:col-span-5 flex flex-col items-center print:w-full print:block print:max-w-none">
+          <div className="sticky top-20 w-full print:static print:w-full">
             
             {/* Preview Top Control Bar */}
-            <div className="bg-slate-900 text-white px-4 py-3 rounded-t-3xl flex items-center justify-between text-xs shadow-md">
-              <span className="font-bold flex items-center gap-2">
+            <div 
+              id="invoice-customizer-preview-header"
+              data-print-hidden="true"
+              className="bg-slate-900 text-white px-4 py-3 rounded-t-3xl flex flex-wrap items-center justify-between gap-2 text-xs shadow-md print:hidden"
+            >
+              <div className="flex items-center gap-2">
                 <Eye className="w-4 h-4 text-emerald-400" />
-                Live Preview ({customization.paperWidth === 'a5' ? 'A5 Voucher Slip' : `${customization.paperWidth} Thermal`})
-              </span>
-              <span className="text-[10px] text-slate-400 font-mono">Sample INV-2026-001</span>
+                <span className="font-bold">
+                  Live Preview ({customization.paperWidth === 'a5' ? 'A5 Voucher Slip' : `${customization.paperWidth} Thermal`})
+                </span>
+                {customization.paperWidth === 'a5' && a5Pages.length > 1 && (
+                  <span className="px-2 py-0.5 rounded-full bg-indigo-500 text-white text-[10px] font-bold">
+                    {a5Pages.length} Voucher Sheets
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {customization.paperWidth === 'a5' && (
+                  <div className="flex items-center bg-slate-800 rounded-xl p-0.5 border border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setSampleItemCount(2)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all ${
+                        sampleItemCount === 2 ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      2 Items (Single)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSampleItemCount(6)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all ${
+                        sampleItemCount === 6 ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      6 Items (Multi-Sheet)
+                    </button>
+                  </div>
+                )}
+                <span className="text-[10px] text-slate-400 font-mono">INV-2026-001</span>
+              </div>
             </div>
 
             {/* DYNAMIC PREVIEW CONTAINER */}
             {customization.paperWidth === 'a5' ? (
-              /* ================== A5 INVOICE PREVIEW ================== */
-              <div className="bg-white p-5 sm:p-6 rounded-b-3xl border border-slate-300 shadow-xl text-slate-900 font-sans text-xs space-y-4">
-                
-                {/* Header */}
-                <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4">
-                  <div className="space-y-1">
-                    {customization.shopLogoUrl && (
-                      <img
-                        src={customization.shopLogoUrl}
-                        alt="Logo"
-                        style={{ height: `${customization.invoiceLogoSize || 44}px` }}
-                        className="object-contain mb-1 bg-transparent transition-all"
-                        referrerPolicy="no-referrer"
-                      />
-                    )}
-                    <h4 className="text-base sm:text-lg font-black uppercase tracking-tight text-slate-900">
-                      {customization.headerTitle}
-                    </h4>
-                    {customization.subHeader && (
-                      <p className="text-[11px] font-semibold text-slate-600">{customization.subHeader}</p>
-                    )}
-                    <p className="text-[10px] text-slate-500">
-                      {customization.addressLine1}, {customization.city}
-                    </p>
-                  </div>
+              /* ================== A5 INVOICE PREVIEW (MULTI-SHEET SPLIT SUPPORT) ================== */
+              <div className="space-y-4 print:space-y-0 w-full">
+                {a5Pages.map((pageItems, pageIdx) => {
+                  const totalPages = a5Pages.length;
+                  const pageNumber = pageIdx + 1;
+                  const isFinalPage = pageNumber === totalPages;
+                  const pageSubtotal = pageItems.reduce((acc, i) => acc + (i.price * i.qty), 0);
+                  const grandTotal = activeSampleItems.reduce((acc, i) => acc + (i.price * i.qty), 0);
 
-                  <div className="text-right space-y-0.5 text-[10px] text-slate-600">
-                    <p className="font-mono font-bold text-slate-900">INV-2026-001</p>
-                    <p>{formatDateTime(new Date().toISOString())}</p>
-                    <p className="font-bold text-slate-800">Hotline: {customization.phone1}</p>
-                    {customization.viberNumber && <p>Viber: {customization.viberNumber}</p>}
-                  </div>
-                </div>
-
-                {/* Customer & Cashier Info */}
-                <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[11px]">
-                  <div>
-                    <span className="text-slate-400 font-bold text-[9px] uppercase">Customer Information:</span>
-                    <div className="font-bold text-slate-900">U Thura Min</div>
-                    <div className="text-slate-600">09-771234567 • Kyauktada, Yangon</div>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-slate-400 font-bold text-[9px] uppercase">Transaction Details:</span>
-                    <div className="font-bold text-slate-900">Operator: {settings.currentStaffName}</div>
-                    <div className="text-slate-700 font-medium">Payment: <span className="font-semibold text-slate-900">KBZPay</span></div>
-                  </div>
-                </div>
-
-                {/* Table */}
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-left text-[11px]">
-                    <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] border-b border-slate-200">
-                      <tr>
-                        <th className="py-2 px-3">Item Description</th>
-                        <th className="py-2 px-2 text-center">Qty</th>
-                        <th className="py-2 px-2 text-right">Price</th>
-                        <th className="py-2 px-3 text-right">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      <tr>
-                        <td className="py-2 px-3">
-                          <div className="font-bold text-slate-900">Apple iPhone 15 Pro Max (256GB)</div>
-                          {customization.showImeiDetails && (
-                            <div className="text-[10px] text-blue-800 font-mono font-semibold">
-                              IMEI1: 35829 10482 91045
-                            </div>
-                          )}
-                          {customization.showWarrantyDetails && (
-                            <div className="text-[9px] text-emerald-700">🛡️ 1 Year Brand Official Warranty</div>
-                          )}
-                        </td>
-                        <td className="py-2 px-2 text-center font-bold">1</td>
-                        <td className="py-2 px-2 text-right font-mono">4,250,000 Ks</td>
-                        <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">4,250,000 Ks</td>
-                      </tr>
-                      <tr>
-                        <td className="py-2 px-3">
-                          <div className="font-bold text-slate-900">Anker 30W Nano Fast Charger</div>
-                          {customization.showWarrantyDetails && (
-                            <div className="text-[9px] text-emerald-700">🛡️ 18 Months Replacement Warranty</div>
-                          )}
-                        </td>
-                        <td className="py-2 px-2 text-center font-bold">1</td>
-                        <td className="py-2 px-2 text-right font-mono">65,000 Ks</td>
-                        <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">65,000 Ks</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Bottom Row: QR & Policy (Left) + Totals (Right) */}
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
-                  
-                  {/* Left: Banking QR & Terms */}
-                  <div className="sm:col-span-7 space-y-2">
-                    {customization.showQrCode && (
-                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-3">
-                        <div className="w-16 h-16 bg-white p-1 rounded-lg border border-slate-300 flex items-center justify-center shrink-0">
-                          {customization.qrImageUrl ? (
-                            <img src={customization.qrImageUrl} alt="QR" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
-                          ) : (
-                            <QrCode className="w-12 h-12 text-slate-900" />
-                          )}
+                  return (
+                    <React.Fragment key={pageIdx}>
+                      {pageIdx > 0 && (
+                        <div className="flex items-center justify-center gap-3 py-1 print:hidden" data-print-hidden="true">
+                          <div className="h-px bg-slate-300 flex-1"></div>
+                          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider bg-slate-200 px-3 py-0.5 rounded-full shadow-2xs">
+                            Sheet {pageNumber} of {totalPages} (Page Break)
+                          </span>
+                          <div className="h-px bg-slate-300 flex-1"></div>
                         </div>
-                        <div className="min-w-0">
-                          <div className="font-bold text-[10px] text-slate-900 uppercase">
-                            {customization.qrCustomText || 'Scan to Pay with KPay / Wave'}
+                      )}
+                      <div 
+                        id={pageIdx === 0 ? "printable-a5-invoice" : undefined}
+                        className="a5-voucher-sheet bg-white p-5 sm:p-6 rounded-b-3xl sm:rounded-3xl border border-slate-300 shadow-xl text-slate-900 font-sans text-xs space-y-4 print:border-none print:shadow-none print:p-0 print:rounded-none"
+                      >
+                        {/* Header */}
+                        <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4">
+                          <div className="space-y-1">
+                            {customization.shopLogoUrl && (
+                              <img
+                                src={customization.shopLogoUrl}
+                                alt="Logo"
+                                style={{ height: `${customization.invoiceLogoSize || 44}px` }}
+                                className="object-contain mb-1 bg-transparent transition-all"
+                                referrerPolicy="no-referrer"
+                              />
+                            )}
+                            <h4 className="text-base sm:text-lg font-black uppercase tracking-tight text-slate-900">
+                              {customization.headerTitle}
+                            </h4>
+                            {customization.subHeader && (
+                              <p className="text-[11px] font-semibold text-slate-600">{customization.subHeader}</p>
+                            )}
+                            <p className="text-[10px] text-slate-500">
+                              {customization.addressLine1}, {customization.city}
+                            </p>
                           </div>
-                          <div className="text-[10px] text-slate-600 truncate">{customization.qrAccountName}</div>
-                          <div className="text-[10px] font-mono font-bold text-purple-700">{customization.qrAccountNumber}</div>
+
+                          <div className="text-right space-y-0.5 text-[10px] text-slate-600">
+                            <div className="font-mono font-bold text-slate-900 text-xs flex items-center justify-end gap-1.5">
+                              <span>INV-2026-001</span>
+                              {totalPages > 1 && (
+                                <span className="text-[9px] bg-slate-900 text-white px-2 py-0.5 rounded font-sans font-bold">
+                                  Page {pageNumber} of {totalPages}
+                                </span>
+                              )}
+                            </div>
+                            <p>{formatDateTime(new Date().toISOString())}</p>
+                            <p className="font-bold text-slate-800">Hotline: {customization.phone1}</p>
+                            {customization.viberNumber && <p>Viber: {customization.viberNumber}</p>}
+                          </div>
                         </div>
+
+                        {/* Customer & Cashier Info */}
+                        <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[11px]">
+                          <div>
+                            <span className="text-slate-400 font-bold text-[9px] uppercase">Customer Information:</span>
+                            <div className="font-bold text-slate-900">U Thura Min</div>
+                            <div className="text-slate-600">09-771234567 • Kyauktada, Yangon</div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-slate-400 font-bold text-[9px] uppercase">Transaction Details:</span>
+                            <div className="font-bold text-slate-900">Operator: {settings.currentStaffName}</div>
+                            <div className="text-slate-700 font-medium">Payment: <span className="font-semibold text-slate-900">KBZPay</span></div>
+                          </div>
+                        </div>
+
+                        {/* Table */}
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <table className="w-full text-left text-[11px]">
+                            <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] border-b border-slate-200">
+                              <tr>
+                                <th className="py-2 px-3">Item Description</th>
+                                <th className="py-2 px-2 text-center w-12">Qty</th>
+                                <th className="py-2 px-2 text-right">Price</th>
+                                <th className="py-2 px-3 text-right">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {pageItems.map((item, idx) => (
+                                <tr key={idx}>
+                                  <td className="py-2 px-3">
+                                    <div className="font-bold text-slate-900">{item.name}</div>
+                                    {customization.showImeiDetails && item.imei && (
+                                      <div className="text-[10px] text-blue-800 font-mono font-semibold flex flex-wrap gap-2">
+                                        <span>IMEI1: {item.imei}</span>
+                                        {item.imei2 && <span>| IMEI2: {item.imei2}</span>}
+                                      </div>
+                                    )}
+                                    {customization.showWarrantyDetails && item.warranty && (
+                                      <div className="text-[9px] text-emerald-700 flex items-center gap-1">
+                                        <ShieldCheck className="w-3 h-3 text-emerald-600 inline" />
+                                        <span>{item.warranty}</span>
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="py-2 px-2 text-center font-bold">{item.qty}</td>
+                                  <td className="py-2 px-2 text-right font-mono">{formatCurrency(item.price, 'Ks')}</td>
+                                  <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">{formatCurrency(item.price * item.qty, 'Ks')}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Non-final page continuation banner */}
+                        {!isFinalPage && (
+                          <div className="space-y-2 pt-1">
+                            <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[11px]">
+                              <div className="flex items-center gap-2">
+                                <span className="text-slate-500 font-bold uppercase text-[10px]">Page {pageNumber} Subtotal:</span>
+                                <span className="font-mono font-bold text-slate-900">{formatCurrency(pageSubtotal, 'Ks')}</span>
+                              </div>
+                              <div className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-lg">
+                                Continued on Page {pageNumber + 1} of {totalPages} ➔
+                              </div>
+                            </div>
+                            <div className="text-center text-[10px] text-slate-400 italic">
+                              * This is Sheet {pageNumber} of {totalPages}. Total balance, payment QR, and signatures are on Sheet {totalPages}.
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Final page: Full financial summary, QR code, signatures, and footer */}
+                        {isFinalPage && (
+                          <>
+                            {/* Bottom Row: QR & Policy (Left) + Totals (Right) */}
+                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
+                              {/* Left: Banking QR & Terms */}
+                              <div className="sm:col-span-7 space-y-2">
+                                {customization.showQrCode && (
+                                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-3">
+                                    <div className="w-16 h-16 bg-white p-1 rounded-lg border border-slate-300 flex items-center justify-center shrink-0">
+                                      {customization.qrImageUrl ? (
+                                        <img src={customization.qrImageUrl} alt="QR" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                                      ) : (
+                                        <QrCode className="w-12 h-12 text-slate-900" />
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="font-bold text-[10px] text-slate-900 uppercase">
+                                        {customization.qrCustomText || 'Scan to Pay with KPay / Wave'}
+                                      </div>
+                                      <div className="text-[10px] text-slate-600 truncate">{customization.qrAccountName}</div>
+                                      <div className="text-[10px] font-mono font-bold text-purple-700">{customization.qrAccountNumber}</div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                <div className="text-[9px] text-slate-500 space-y-0.5">
+                                  <p className="font-bold text-slate-700">Warranty & Exchange Terms:</p>
+                                  <p>{customization.warrantyPolicyText}</p>
+                                </div>
+                              </div>
+
+                              {/* Right: Totals */}
+                              <div className="sm:col-span-5 bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1 text-[11px]">
+                                <div className="flex justify-between text-slate-600">
+                                  <span>Subtotal:</span>
+                                  <span>{formatCurrency(grandTotal, 'Ks')}</span>
+                                </div>
+                                <div className="flex justify-between text-slate-600">
+                                  <span>Discount:</span>
+                                  <span>0 Ks</span>
+                                </div>
+                                <div className="flex justify-between font-black text-sm text-slate-900 border-t border-slate-300 pt-1">
+                                  <span>NET TOTAL:</span>
+                                  <span className="text-emerald-700">{formatCurrency(grandTotal, 'Ks')}</span>
+                                </div>
+                                <div className="flex justify-between text-slate-700 pt-0.5 text-[10px]">
+                                  <span>Amount Paid:</span>
+                                  <span className="font-bold">{formatCurrency(grandTotal, 'Ks')}</span>
+                                </div>
+                                <div className="flex justify-between text-slate-500 text-[10px]">
+                                  <span>Balance Due:</span>
+                                  <span>0 Ks</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Signatures */}
+                            {customization.showSignatures && (
+                              <div className="grid grid-cols-2 gap-6 pt-6 border-t border-slate-200 text-center text-[10px]">
+                                <div>
+                                  <div className="border-b border-slate-400 pb-1 mb-1 font-mono text-slate-400">................................................</div>
+                                  <span className="font-bold text-slate-700">Customer's Signature</span>
+                                </div>
+                                <div>
+                                  <div className="border-b border-slate-400 pb-1 mb-1 font-mono text-slate-400">................................................</div>
+                                  <span className="font-bold text-slate-700">Authorized Store Signature & Stamp</span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Thank You Note */}
+                            <div className="text-center pt-2 text-[10px] font-bold text-slate-700">
+                              {customization.footerThankYouMessage}
+                            </div>
+                          </>
+                        )}
                       </div>
-                    )}
-
-                    <div className="text-[9px] text-slate-500 space-y-0.5">
-                      <p className="font-bold text-slate-700">Warranty & Exchange Terms:</p>
-                      <p>{customization.warrantyPolicyText}</p>
-                    </div>
-                  </div>
-
-                  {/* Right: Totals */}
-                  <div className="sm:col-span-5 bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1 text-[11px]">
-                    <div className="flex justify-between text-slate-600">
-                      <span>Subtotal:</span>
-                      <span>4,315,000 Ks</span>
-                    </div>
-                    <div className="flex justify-between text-slate-600">
-                      <span>Discount:</span>
-                      <span>0 Ks</span>
-                    </div>
-                    <div className="flex justify-between font-black text-sm text-slate-900 border-t border-slate-300 pt-1">
-                      <span>NET TOTAL:</span>
-                      <span className="text-emerald-700">4,315,000 Ks</span>
-                    </div>
-                    <div className="flex justify-between text-slate-700 pt-0.5 text-[10px]">
-                      <span>Amount Paid:</span>
-                      <span className="font-bold">4,315,000 Ks</span>
-                    </div>
-                    <div className="flex justify-between text-slate-500 text-[10px]">
-                      <span>Balance Due:</span>
-                      <span>0 Ks</span>
-                    </div>
-                  </div>
-
-                </div>
-
-                {/* Signatures */}
-                {customization.showSignatures && (
-                  <div className="grid grid-cols-2 gap-6 pt-6 border-t border-slate-200 text-center text-[10px]">
-                    <div>
-                      <div className="border-b border-slate-400 pb-1 mb-1 font-mono text-slate-400">................................................</div>
-                      <span className="font-bold text-slate-700">Customer's Signature</span>
-                    </div>
-                    <div>
-                      <div className="border-b border-slate-400 pb-1 mb-1 font-mono text-slate-400">................................................</div>
-                      <span className="font-bold text-slate-700">Authorized Store Signature & Stamp</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Thank You Note */}
-                <div className="text-center pt-2 text-[10px] font-bold text-slate-700">
-                  {customization.footerThankYouMessage}
-                </div>
-
+                    </React.Fragment>
+                  );
+                })}
               </div>
             ) : (
               /* ================== THERMAL ROLL (80mm / 58mm) ================== */
-              <div className="bg-white p-5 rounded-b-3xl border border-slate-300 shadow-xl text-slate-900 font-mono text-[11px] leading-tight space-y-3 max-w-sm mx-auto">
+              <div id="printable-thermal-receipt" className="bg-white p-5 rounded-b-3xl sm:rounded-3xl border border-slate-300 shadow-xl text-slate-900 font-mono text-[11px] leading-tight space-y-3 max-w-sm mx-auto print:border-none print:shadow-none print:p-0 print:rounded-none">
                 
                 {/* Header */}
                 <div className="text-center space-y-1 border-b border-dashed border-slate-300 pb-3">
