@@ -207,8 +207,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     if (!isScannerActive || isModalOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!e || typeof e.key !== 'string') return;
+
       // If user is typing in an input element other than search, let them type
-      const target = e.target as HTMLElement;
+      const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
         if (target.id !== 'inventory-search-input') {
           return;
@@ -221,8 +223,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
       // Hardware scanners type very rapidly (< 55ms between keys)
       if (e.key === 'Enter') {
-        const scanned = barcodeBufferRef.current.trim();
-        if (scanned.length >= 3) {
+        const scanned = (barcodeBufferRef.current || '').trim();
+        if (scanned && scanned.length >= 3) {
           e.preventDefault();
           // Apply scanned barcode/IMEI directly to search filter
           setSearchQuery(scanned);
@@ -234,14 +236,19 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           setSelectedColor('all');
           playScanBeep();
 
-          // Calculate matches
+          // Calculate matches safely
           const q = scanned.toLowerCase();
-          const matches = products.filter(p => 
-            p.barcode.toLowerCase() === q ||
-            p.sku.toLowerCase() === q ||
-            p.name.toLowerCase().includes(q) ||
-            (p.imeiList && p.imeiList.some(im => im.toLowerCase() === q))
-          );
+          const matches = (products || []).filter(p => {
+            if (!p) return false;
+            const barcode = (p.barcode || '').toLowerCase();
+            const sku = (p.sku || '').toLowerCase();
+            const name = (p.name || '').toLowerCase();
+            const hasImei = Array.isArray(p.imeiList) && p.imeiList.some(im => (im || '').toLowerCase() === q);
+            const hasImeiPair = Array.isArray(p.imeiPairs) && p.imeiPairs.some(pair =>
+              (pair?.imei1 || '').toLowerCase() === q || (pair?.imei2 || '').toLowerCase() === q
+            );
+            return barcode === q || sku === q || name.includes(q) || hasImei || hasImeiPair;
+          });
 
           setScannedFeedback({
             code: scanned,
@@ -259,14 +266,14 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         return;
       }
 
-      // Ignore modifier keys
-      if (e.key.length !== 1) return;
+      // Ignore modifier keys or non-single characters
+      if (!e.key || e.key.length !== 1) return;
 
       // If keys come with long delay (> 80ms) and user is not in search input, reset buffer
-      if (timeDiff > 80 && target.id !== 'inventory-search-input') {
+      if (timeDiff > 80 && (!target || target.id !== 'inventory-search-input')) {
         barcodeBufferRef.current = e.key;
       } else {
-        barcodeBufferRef.current += e.key;
+        barcodeBufferRef.current = (barcodeBufferRef.current || '') + e.key;
       }
     };
 

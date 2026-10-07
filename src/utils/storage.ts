@@ -260,6 +260,9 @@ export interface StorageChangeHandler {
   onBranchInventoryBatch?: (inventory: BranchInventory[]) => void;
   onBranchInventoryUpsert?: (entry: BranchInventory) => void;
   onStockTransfersBatch?: (transfers: StockTransfer[]) => void;
+  onStockAdjustmentUpsert?: (adjustment: StockAdjustment) => void;
+  onStockAdjustmentsBatch?: (adjustments: StockAdjustment[]) => void;
+  onStockAdjustmentDelete?: (id: string) => void;
 }
 
 let activeStorageSyncHandler: StorageChangeHandler | null = null;
@@ -942,17 +945,30 @@ export const StorageService = {
 
   // Stock Adjustments (Flexible Quantity Adjust logging)
   getStockAdjustments: (): StockAdjustment[] => getItem(STORAGE_KEYS.STOCK_ADJUSTMENTS, initialStockAdjustments),
-  saveStockAdjustments: (adjustments: StockAdjustment[], triggerSync = true) => setItem(STORAGE_KEYS.STOCK_ADJUSTMENTS, adjustments, triggerSync),
-  recordStockAdjustment: (adjustment: StockAdjustment) => {
+  saveStockAdjustments: (adjustments: StockAdjustment[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.STOCK_ADJUSTMENTS, adjustments, true);
+    if (triggerSync && activeStorageSyncHandler?.onStockAdjustmentsBatch) {
+      activeStorageSyncHandler.onStockAdjustmentsBatch(adjustments);
+    }
+  },
+  recordStockAdjustment: (adjustment: StockAdjustment, triggerSync = true) => {
     const adjustments = StorageService.getStockAdjustments();
-    adjustments.unshift(adjustment);
+    const existingIdx = adjustments.findIndex(a => a.id === adjustment.id);
+    if (existingIdx >= 0) {
+      adjustments[existingIdx] = adjustment;
+    } else {
+      adjustments.unshift(adjustment);
+    }
     if (adjustments.length > 1000) {
       adjustments.length = 1000;
     }
-    StorageService.saveStockAdjustments(adjustments);
+    StorageService.saveStockAdjustments(adjustments, false);
+    if (triggerSync && activeStorageSyncHandler?.onStockAdjustmentUpsert) {
+      activeStorageSyncHandler.onStockAdjustmentUpsert(adjustment);
+    }
   },
-  adjustStock: (adjustment: StockAdjustment) => {
-    StorageService.recordStockAdjustment(adjustment);
+  adjustStock: (adjustment: StockAdjustment, triggerSync = true) => {
+    StorageService.recordStockAdjustment(adjustment, triggerSync);
     const products = StorageService.getProducts();
     const prod = products.find(p => p.id === adjustment.productId);
     if (prod) {

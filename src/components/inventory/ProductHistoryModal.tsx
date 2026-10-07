@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, 
   History, 
@@ -60,6 +60,7 @@ import {
 } from '../../utils/formatters';
 import { exportToCsv } from '../../utils/reportUtils';
 import { StorageService } from '../../utils/storage';
+import { AuditLogger } from '../../utils/auditLogger';
 import { StockAdjustmentModal } from '../modals/StockAdjustmentModal';
 import { PriceChangeModal } from '../modals/PriceChangeModal';
 import { QuarantineReportModal } from './QuarantineReportModal';
@@ -105,6 +106,27 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
   const [localDamageLogs, setLocalDamageLogs] = useState<DamageLog[]>(
     initialDamageLogs && initialDamageLogs.length > 0 ? initialDamageLogs : StorageService.getDamageLogs()
   );
+
+  // Sync state reactively when props update or remote Firestore snapshots arrive
+  useEffect(() => {
+    if (initialStockAdjustments && initialStockAdjustments.length > 0) {
+      setLocalAdjustments(initialStockAdjustments);
+    }
+  }, [initialStockAdjustments]);
+
+  useEffect(() => {
+    const handleRemoteUpdate = () => {
+      setLocalAdjustments(StorageService.getStockAdjustments());
+      setLocalPriceChanges(StorageService.getPriceChanges());
+      setLocalDamageLogs(StorageService.getDamageLogs());
+      const freshProd = StorageService.getProducts().find(p => p.id === currentProduct.id);
+      if (freshProd) {
+        setCurrentProduct(freshProd);
+      }
+    };
+    window.addEventListener('mobileshop_data_updated', handleRemoteUpdate);
+    return () => window.removeEventListener('mobileshop_data_updated', handleRemoteUpdate);
+  }, [currentProduct.id]);
 
   const [selectedEventType, setSelectedEventType] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -211,6 +233,23 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
   // Handle Confirmed Stock Adjustment
   const handleConfirmStockAdjustment = (adjustment: StockAdjustment) => {
     StorageService.adjustStock(adjustment);
+
+    // Record in whole store activity log & broadcast across all devices via Firestore
+    AuditLogger.logInventory(
+      'STOCK_ADJUSTED',
+      `Stock adjusted for ${currentProduct.name}: ${adjustment.quantityChange > 0 ? '+' : ''}${adjustment.quantityChange} (${adjustment.reason})`,
+      currentStaffUser || null,
+      {
+        targetId: currentProduct.id,
+        targetName: currentProduct.name,
+        previousValue: adjustment.previousStock,
+        newValue: adjustment.newStock,
+        quantityChange: adjustment.quantityChange,
+        reason: adjustment.reason,
+        notes: adjustment.reasonNotes,
+      }
+    );
+
     const updatedProducts = StorageService.getProducts();
     const updatedProd = updatedProducts.find(p => p.id === currentProduct.id) || {
       ...currentProduct,

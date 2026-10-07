@@ -98,6 +98,7 @@ export class FirestoreSyncService {
   private salesSyncTimeout: any = null;
   private purchasesSyncTimeout: any = null;
   private staffUsersSyncTimeout: any = null;
+  private adjustmentsSyncTimeout: any = null;
   private isFlushingLogs: boolean = false;
   private hasHydrated: boolean = false;
   private hydrationListeners: Set<(isHydrated: boolean) => void> = new Set();
@@ -310,6 +311,19 @@ export class FirestoreSyncService {
           this.stockTransfersSyncTimeout = setTimeout(() => {
             this.syncStockTransfers(transfers);
           }, 1500);
+        }
+      },
+      onStockAdjustmentUpsert: (adjustment) => {
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.syncStockAdjustment(adjustment);
+        }
+      },
+      onStockAdjustmentsBatch: (adjustments) => {
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          if (this.adjustmentsSyncTimeout) clearTimeout(this.adjustmentsSyncTimeout);
+          this.adjustmentsSyncTimeout = setTimeout(() => {
+            this.syncStockAdjustments(adjustments);
+          }, 1200);
         }
       },
     });
@@ -1044,7 +1058,12 @@ export class FirestoreSyncService {
           });
 
           if (snap.empty) {
-            StorageService.saveStockAdjustments([], false);
+            const currentLocal = StorageService.getStockAdjustments();
+            if (currentLocal.length > 0) {
+              this.syncStockAdjustments(currentLocal).catch(() => {});
+            } else {
+              StorageService.saveStockAdjustments([], false);
+            }
             this.updateStatus({ lastSyncedAt: new Date(), error: null });
             return;
           }
@@ -1057,7 +1076,29 @@ export class FirestoreSyncService {
             }
           });
 
-          StorageService.saveStockAdjustments(remoteAdjs, false);
+          // Smart merge: preserve any local adjustments that haven't pushed yet
+          const currentLocal = StorageService.getStockAdjustments();
+          const mergedMap = new Map<string, StockAdjustment>();
+          remoteAdjs.forEach(adj => mergedMap.set(adj.id, adj));
+          currentLocal.forEach(adj => {
+            if (!removedIds.has(adj.id) && !mergedMap.has(adj.id)) {
+              mergedMap.set(adj.id, adj);
+              this.syncStockAdjustment(adj).catch(() => {});
+            }
+          });
+
+          const finalAdjs = Array.from(mergedMap.values()).sort((a, b) => {
+            const timeA = new Date(a.timestamp || (a as any).createdAt || 0).getTime();
+            const timeB = new Date(b.timestamp || (b as any).createdAt || 0).getTime();
+            return timeB - timeA;
+          });
+
+          StorageService.saveStockAdjustments(finalAdjs, false);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('mobileshop_data_updated', {
+              detail: { key: 'STOCK_ADJUSTMENTS', timestamp: Date.now() }
+            }));
+          }
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Stock adjustments listener error:', err?.message || err);
@@ -1296,6 +1337,11 @@ export class FirestoreSyncService {
           }
 
           StorageService.saveAuditLogs(remoteLogs, false);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('mobileshop_data_updated', {
+              detail: { key: 'AUDIT_LOGS', timestamp: Date.now() }
+            }));
+          }
           this.updateStatus({ lastSyncedAt: new Date(), error: null });
         } catch (err: any) {
           console.warn('[FirestoreSync] Audit logs listener error:', err?.message || err);
@@ -2454,6 +2500,19 @@ export class FirestoreSyncService {
 
   public async syncPreOrders(preOrders: PreOrder[]): Promise<void> {
     await this.batchWriteCollection('preOrders', preOrders, po => po.id);
+  }
+
+  public async syncStockAdjustment(adj: StockAdjustment): Promise<void> {
+    try {
+      const docRef = doc(db, 'stockAdjustments', adj.id);
+      await setDoc(docRef, sanitizeForFirestore({
+        ...adj,
+        updatedAt: new Date().toISOString(),
+      }), { merge: true });
+      this.updateStatus({ lastSyncedAt: new Date(), error: null });
+    } catch (err: any) {
+      console.warn('[FirestoreSync] Error syncing stock adjustment:', err?.message || err);
+    }
   }
 
   public async syncStockAdjustments(adjs: StockAdjustment[]): Promise<void> {

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   X,
   Search,
@@ -77,12 +77,22 @@ export const WholeInventoryLogModal: React.FC<WholeInventoryLogModalProps> = ({
   onOpenProductHistory,
 }) => {
   // Pull live state from StorageService or props
-  const sales = useMemo(() => Array.isArray(propSales) ? propSales : StorageService.getSales(), [propSales]);
-  const purchases = useMemo(() => Array.isArray(propPurchases) ? propPurchases : StorageService.getPurchases(), [propPurchases]);
-  const stockAdjustments = useMemo(() => Array.isArray(propAdjustments) ? propAdjustments : StorageService.getStockAdjustments(), [propAdjustments]);
-  const stockAudits = useMemo(() => Array.isArray(propAudits) ? propAudits : StorageService.getStockAudits(), [propAudits]);
-  const priceChanges = useMemo(() => Array.isArray(propPriceChanges) ? propPriceChanges : StorageService.getPriceChanges(), [propPriceChanges]);
-  const damageLogs = useMemo(() => Array.isArray(propDamageLogs) ? propDamageLogs : StorageService.getDamageLogs(), [propDamageLogs]);
+  const [refreshKey, setRefreshKey] = useState<number>(0);
+  const sales = useMemo(() => Array.isArray(propSales) && propSales.length > 0 ? propSales : StorageService.getSales(), [propSales, refreshKey]);
+  const purchases = useMemo(() => Array.isArray(propPurchases) && propPurchases.length > 0 ? propPurchases : StorageService.getPurchases(), [propPurchases, refreshKey]);
+  const stockAdjustments = useMemo(() => Array.isArray(propAdjustments) && propAdjustments.length > 0 ? propAdjustments : StorageService.getStockAdjustments(), [propAdjustments, refreshKey]);
+  const stockAudits = useMemo(() => Array.isArray(propAudits) && propAudits.length > 0 ? propAudits : StorageService.getStockAudits(), [propAudits, refreshKey]);
+  const priceChanges = useMemo(() => Array.isArray(propPriceChanges) && propPriceChanges.length > 0 ? propPriceChanges : StorageService.getPriceChanges(), [propPriceChanges, refreshKey]);
+  const damageLogs = useMemo(() => Array.isArray(propDamageLogs) && propDamageLogs.length > 0 ? propDamageLogs : StorageService.getDamageLogs(), [propDamageLogs, refreshKey]);
+
+  // Listen for storage & cross-device sync updates
+  useEffect(() => {
+    const handleRemoteUpdate = () => {
+      setRefreshKey(prev => prev + 1);
+    };
+    window.addEventListener('mobileshop_data_updated', handleRemoteUpdate);
+    return () => window.removeEventListener('mobileshop_data_updated', handleRemoteUpdate);
+  }, []);
 
   // Filtering states
   const [selectedEventType, setSelectedEventType] = useState<string>('all');
@@ -94,7 +104,6 @@ export const WholeInventoryLogModal: React.FC<WholeInventoryLogModalProps> = ({
   const [datePreset, setDatePreset] = useState<string>('all');
   const [pageSize, setPageSize] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [refreshKey, setRefreshKey] = useState<number>(0);
 
   // Generate master chronological inventory timeline
   const fullTimeline = useMemo(() => {
