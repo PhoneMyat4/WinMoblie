@@ -886,6 +886,15 @@ export interface CashDrawerRecord {
   closingNotes?: string;
 }
 
+export interface InvoicePaymentQrItem {
+  id: string;
+  name: string; // e.g. "KBZPay", "WavePay", "AYA Bank", "CB Bank"
+  qrImageUrl?: string; // Uploaded Banking Payment QR Photo (Base64 data URI or image URL)
+  accountName?: string;
+  accountNumber?: string;
+  isActive?: boolean;
+}
+
 export interface InvoiceCustomization {
   headerTitle: string; // e.g. "MYANMAR MOBILE ZONE"
   subHeader: string; // e.g. "Retail & Wholesales Smartphone Center"
@@ -910,6 +919,11 @@ export interface InvoiceCustomization {
   qrAccountNumber?: string;
   qrCustomText?: string;
   qrImageUrl?: string; // Uploaded Banking Payment QR Photo (Base64 data URI or image URL)
+  
+  // Multiple QR Payment support with minimalist layout
+  paymentQrs?: InvoicePaymentQrItem[];
+  qrLayoutMode?: 'minimalist' | 'detailed'; // default: 'minimalist' (only QR and bank name below)
+  showQrAccountDetails?: boolean; // optional extra line under bank name
 
   // Invoice display toggles
   showImeiDetails: boolean;

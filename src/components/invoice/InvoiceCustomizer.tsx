@@ -21,12 +21,15 @@ import {
   FileSpreadsheet, 
   Layers,
   HelpCircle,
-  Sliders
+  Sliders,
+  Plus,
+  CreditCard
 } from 'lucide-react';
-import { InvoiceCustomization, ShopSettings } from '../../types';
+import { InvoiceCustomization, InvoicePaymentQrItem, ShopSettings } from '../../types';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { compressImageToBase64, processLogoImage } from '../../utils/imageCompression';
 import { LogoSizeAdjusterModal } from '../settings/LogoSizeAdjusterModal';
+import { generateSampleQrSvg, getActivePaymentQrs } from '../../utils/qrUtils';
 
 interface InvoiceCustomizerProps {
   settings: ShopSettings;
@@ -67,14 +70,26 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
     warrantyPolicyText: 'အာမခံရယူရန် ဤဘောက်ချာပြသပေးပါရန်။ (Show this receipt for warranty claim)',
     ...(settings.invoiceCustomization || {}),
     qrType: settings.invoiceCustomization?.qrType || 'kpay',
+    paymentQrs: (settings.invoiceCustomization?.paymentQrs && settings.invoiceCustomization.paymentQrs.length > 0)
+      ? settings.invoiceCustomization.paymentQrs
+      : getActivePaymentQrs(settings.invoiceCustomization || {}, settings.shopName, settings.phone),
+    qrLayoutMode: settings.invoiceCustomization?.qrLayoutMode || 'minimalist',
+    showQrAccountDetails: settings.invoiceCustomization?.showQrAccountDetails ?? false,
   }));
 
   const [isSavedToast, setIsSavedToast] = useState(false);
   const [isDraggingQr, setIsDraggingQr] = useState(false);
   const [isDraggingLogo, setIsDraggingLogo] = useState(false);
   const [isLogoAdjusterOpen, setIsLogoAdjusterOpen] = useState(false);
+  const [activeUploadQrId, setActiveUploadQrId] = useState<string | null>(null);
   const qrFileInputRef = useRef<HTMLInputElement>(null);
   const logoFileInputRef = useRef<HTMLInputElement>(null);
+  const multiQrFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Active payment QRs for preview and printing
+  const activePaymentQrs = useMemo(() => {
+    return getActivePaymentQrs(customization, settings.shopName, settings.phone);
+  }, [customization, settings.shopName, settings.phone]);
 
   // Sample items for realistic preview and multi-sheet A5 voucher testing
   const [sampleItemCount, setSampleItemCount] = useState<number>(6);
@@ -201,71 +216,72 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
     if (logoFileInputRef.current) logoFileInputRef.current.value = '';
   };
 
-  // Sample Myanmar QR presets for quick demo
-  const applySampleKPayQr = () => {
-    // Generates a mock KPay SVG Data URL
-    const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-      <rect width="200" height="200" fill="#0c4a6e" rx="16"/>
-      <rect x="20" y="20" width="160" height="160" fill="#ffffff" rx="12"/>
-      <rect x="35" y="35" width="40" height="40" fill="#0284c7" rx="4"/>
-      <rect x="43" y="43" width="24" height="24" fill="#ffffff"/>
-      <rect x="49" y="49" width="12" height="12" fill="#0284c7"/>
-      <rect x="125" y="35" width="40" height="40" fill="#0284c7" rx="4"/>
-      <rect x="133" y="43" width="24" height="24" fill="#ffffff"/>
-      <rect x="139" y="49" width="12" height="12" fill="#0284c7"/>
-      <rect x="35" y="125" width="40" height="40" fill="#0284c7" rx="4"/>
-      <rect x="43" y="133" width="24" height="24" fill="#ffffff"/>
-      <rect x="49" y="139" width="12" height="12" fill="#0284c7"/>
-      <rect x="85" y="35" width="10" height="30" fill="#0f172a"/>
-      <rect x="100" y="55" width="15" height="15" fill="#0f172a"/>
-      <rect x="85" y="85" width="30" height="30" fill="#0284c7" rx="6"/>
-      <text x="100" y="105" fill="#ffffff" font-family="Arial, sans-serif" font-weight="900" font-size="16" text-anchor="middle">K</text>
-      <rect x="125" y="90" width="40" height="10" fill="#0f172a"/>
-      <rect x="140" y="110" width="25" height="20" fill="#0f172a"/>
-      <rect x="90" y="125" width="20" height="40" fill="#0f172a"/>
-      <rect x="125" y="145" width="40" height="20" fill="#0f172a"/>
-    </svg>`;
-    const dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(svgString)}`;
+  // Handlers for Multiple Banking Payment QRs (Minimalist Design)
+  const handleAddPaymentQr = (type: 'kpay' | 'wave' | 'aya' | 'cb' | 'yoma' | 'custom' = 'custom') => {
+    const defaultNames: Record<string, string> = {
+      kpay: 'KBZPay',
+      wave: 'WavePay',
+      aya: 'AYA Bank',
+      cb: 'CB Bank',
+      yoma: 'Yoma Bank',
+      custom: 'Bank Pay',
+    };
+    const name = defaultNames[type] || 'Bank Pay';
+    const newQr: InvoicePaymentQrItem = {
+      id: `qr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name,
+      qrImageUrl: type !== 'custom' ? generateSampleQrSvg(type) : undefined,
+      accountName: `${settings.shopName || 'Shop Account'} (${name})`,
+      accountNumber: settings.phone || '09-798123456',
+      isActive: true,
+    };
     setCustomization(prev => ({
       ...prev,
-      qrImageUrl: dataUri,
-      qrType: 'kpay',
-      qrAccountName: `${settings.shopName || 'Win Mobile'} (KPay Merchant)`,
-      qrAccountNumber: '09-798123456',
-      qrCustomText: 'Scan to Pay with KBZPay (KPay)',
       showQrCode: true,
+      paymentQrs: [...(prev.paymentQrs || []), newQr],
     }));
   };
 
-  const applySampleWaveQr = () => {
-    const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-      <rect width="200" height="200" fill="#facc15" rx="16"/>
-      <rect x="20" y="20" width="160" height="160" fill="#ffffff" rx="12"/>
-      <rect x="35" y="35" width="40" height="40" fill="#ca8a04" rx="4"/>
-      <rect x="43" y="43" width="24" height="24" fill="#ffffff"/>
-      <rect x="49" y="49" width="12" height="12" fill="#ca8a04"/>
-      <rect x="125" y="35" width="40" height="40" fill="#ca8a04" rx="4"/>
-      <rect x="133" y="43" width="24" height="24" fill="#ffffff"/>
-      <rect x="139" y="49" width="12" height="12" fill="#ca8a04"/>
-      <rect x="35" y="125" width="40" height="40" fill="#ca8a04" rx="4"/>
-      <rect x="43" y="133" width="24" height="24" fill="#ffffff"/>
-      <rect x="49" y="139" width="12" height="12" fill="#ca8a04"/>
-      <rect x="85" y="85" width="30" height="30" fill="#eab308" rx="6"/>
-      <text x="100" y="105" fill="#000000" font-family="Arial, sans-serif" font-weight="900" font-size="14" text-anchor="middle">WAVE</text>
-      <rect x="85" y="35" width="10" height="30" fill="#1e293b"/>
-      <rect x="125" y="90" width="40" height="10" fill="#1e293b"/>
-      <rect x="90" y="125" width="20" height="40" fill="#1e293b"/>
-      <rect x="125" y="145" width="40" height="20" fill="#1e293b"/>
-    </svg>`;
-    const dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(svgString)}`;
+  const handleTogglePaymentQr = (id: string) => {
     setCustomization(prev => ({
       ...prev,
-      qrImageUrl: dataUri,
-      qrType: 'wave',
-      qrAccountName: `${settings.shopName || 'Win Mobile'} (Wave Money)`,
-      qrAccountNumber: '09-974567890',
-      qrCustomText: 'Scan to Pay with WavePay',
-      showQrCode: true,
+      paymentQrs: (prev.paymentQrs || []).map(q => q.id === id ? { ...q, isActive: q.isActive === false ? true : false } : q),
+    }));
+  };
+
+  const handleRemovePaymentQr = (id: string) => {
+    setCustomization(prev => ({
+      ...prev,
+      paymentQrs: (prev.paymentQrs || []).filter(q => q.id !== id),
+    }));
+  };
+
+  const handleUpdatePaymentQr = (id: string, updates: Partial<InvoicePaymentQrItem>) => {
+    setCustomization(prev => ({
+      ...prev,
+      paymentQrs: (prev.paymentQrs || []).map(q => q.id === id ? { ...q, ...updates } : q),
+    }));
+  };
+
+  const handleMultiQrUpload = (qrId: string, file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload a valid image file (PNG, JPG, WEBP).');
+      return;
+    }
+    processImageFile(file, (dataUrl) => {
+      setCustomization(prev => ({
+        ...prev,
+        showQrCode: true,
+        paymentQrs: (prev.paymentQrs || []).map(q => q.id === qrId ? { ...q, qrImageUrl: dataUrl } : q),
+      }));
+    });
+  };
+
+  const handleSetSampleQrForId = (qrId: string, typeName: string) => {
+    const sampleDataUri = generateSampleQrSvg(typeName);
+    setCustomization(prev => ({
+      ...prev,
+      paymentQrs: (prev.paymentQrs || []).map(q => q.id === qrId ? { ...q, qrImageUrl: sampleDataUri } : q),
     }));
   };
 
@@ -503,16 +519,16 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
             )}
           </div>
 
-          {/* Section 2: Banking Payment QR Photo Upload (KEY REQUEST) */}
+          {/* Section 2: Banking Payment QRs (Multiple with Minimalist Design) */}
           <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-2">
                   <QrCode className="w-4 h-4 text-purple-600" />
-                  2. Banking Payment QR Photo & Details
+                  2. Multiple Banking Payment QRs (Minimalist Design)
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Upload your KBZPay, WavePay, or Bank QR photo for customers to scan directly on invoices
+                  Configure multiple banking payment QRs (e.g. KBZPay, WavePay, AYA, CB). Invoices display a clean minimalist layout: only QR and bank name below.
                 </p>
               </div>
               <input
@@ -526,174 +542,257 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
 
             {customization.showQrCode && (
               <div className="space-y-4 pt-1">
-                
-                {/* Upload Photo Dropzone */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Banking QR Photo Upload (PNG, JPG, WEBP)
-                  </label>
+                {/* Minimalist Design Style Banner */}
+                <div className="p-3 bg-purple-50/60 rounded-2xl border border-purple-200/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-purple-600"></span>
+                      <span className="text-xs font-bold text-purple-950">Invoice Layout Style</span>
+                    </div>
+                    <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-purple-200/90 text-purple-800">
+                      Minimalist Design (Active)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-purple-900/80">
+                    Displays clean compact QR code squares with the bank/payment channel name in bold text directly below.
+                  </p>
+                  
+                  <div className="pt-2 border-t border-purple-200/60 flex items-center justify-between">
+                    <label htmlFor="showQrAccountDetailsToggle" className="text-xs font-semibold text-slate-700 cursor-pointer">
+                      Show Account Number under Bank Name (Optional)
+                    </label>
+                    <input
+                      type="checkbox"
+                      id="showQrAccountDetailsToggle"
+                      checked={customization.showQrAccountDetails ?? false}
+                      onChange={(e) => setCustomization({ ...customization, showQrAccountDetails: e.target.checked })}
+                      className="w-4 h-4 rounded text-purple-600 cursor-pointer"
+                    />
+                  </div>
+                </div>
 
-                  {customization.qrImageUrl ? (
-                    /* Uploaded QR Preview Card */
-                    <div className="flex items-center gap-4 p-3 bg-purple-50/60 border-2 border-purple-200 rounded-2xl">
-                      <div className="w-24 h-24 bg-white p-1 rounded-xl border border-purple-200 shadow-xs flex items-center justify-center shrink-0 overflow-hidden">
-                        <img 
-                          src={customization.qrImageUrl} 
-                          alt="Banking Payment QR" 
-                          className="w-full h-full object-contain"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
+                {/* Multiple Payment QRs List */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      Configured Payment QRs ({customization.paymentQrs?.length || 0})
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Check box to show/hide on invoice
+                    </span>
+                  </div>
 
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 text-purple-900 font-bold text-xs">
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>QR Photo Active & Ready</span>
-                        </div>
-                        <p className="text-[11px] text-slate-600 mt-0.5 truncate">
-                          Channel: {(customization.qrType || 'kpay').toUpperCase()} • {customization.qrAccountName || 'Shop Pay'}
-                        </p>
-                        <p className="text-[10px] text-slate-400 mt-0.5">
-                          Will be displayed clearly on 80mm, 58mm, and A5 printed invoices.
-                        </p>
-
-                        <div className="flex items-center gap-2 mt-2">
-                          <button
-                            type="button"
-                            onClick={() => qrFileInputRef.current?.click()}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-bold rounded-lg border border-slate-200 shadow-2xs transition-colors cursor-pointer"
-                          >
-                            <Upload className="w-3 h-3 text-purple-600" />
-                            Replace Photo
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleRemoveQrImage}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-bold rounded-lg border border-rose-200 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            Remove
-                          </button>
-                        </div>
+                  {(!customization.paymentQrs || customization.paymentQrs.length === 0) ? (
+                    <div className="text-center py-6 px-4 bg-slate-50 border border-dashed border-slate-300 rounded-2xl space-y-2">
+                      <QrCode className="w-8 h-8 text-slate-400 mx-auto" />
+                      <p className="text-xs font-bold text-slate-600">No Payment QRs added yet</p>
+                      <p className="text-[11px] text-slate-400">Add common Myanmar payment QRs with 1 click below:</p>
+                      <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handleAddPaymentQr('kpay')}
+                          className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl border border-blue-200 cursor-pointer transition-colors"
+                        >
+                          + Add KBZPay
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddPaymentQr('wave')}
+                          className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold rounded-xl border border-amber-200 cursor-pointer transition-colors"
+                        >
+                          + Add WavePay
+                        </button>
                       </div>
                     </div>
                   ) : (
-                    /* Empty Upload Dropzone */
-                    <div
-                      onDragOver={(e) => { e.preventDefault(); setIsDraggingQr(true); }}
-                      onDragLeave={() => setIsDraggingQr(false)}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        setIsDraggingQr(false);
-                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                          handleQrUpload(e.dataTransfer.files[0]);
-                        }
-                      }}
-                      onClick={() => qrFileInputRef.current?.click()}
-                      className={`border-2 border-dashed rounded-2xl p-4 sm:p-5 text-center cursor-pointer transition-all ${
-                        isDraggingQr
-                          ? 'border-purple-500 bg-purple-50/50 scale-[1.01]'
-                          : 'border-slate-300 hover:border-purple-400 bg-slate-50/60 hover:bg-purple-50/20'
-                      }`}
-                    >
-                      <div className="w-10 h-10 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center mx-auto mb-2">
-                        <Upload className="w-5 h-5" />
-                      </div>
-                      <p className="text-xs font-bold text-slate-800">
-                        Click to browse or drag & drop Banking Payment QR photo
-                      </p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Supports KPay Merchant QR screenshot, WavePay QR photo, KBZ/AYA/CB Bank QR code
-                      </p>
+                    <div className="space-y-3">
+                      {customization.paymentQrs.map((qr, index) => {
+                        const isActive = qr.isActive !== false;
+                        return (
+                          <div
+                            key={qr.id || index}
+                            className={`p-3.5 rounded-2xl border transition-all ${
+                              isActive
+                                ? 'bg-white border-slate-200 shadow-2xs'
+                                : 'bg-slate-50 border-slate-200/60 opacity-60'
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              {/* QR Code Preview Thumbnail */}
+                              <div className="relative group shrink-0">
+                                <div className="w-16 h-16 sm:w-20 sm:h-20 bg-white p-1 rounded-xl border border-slate-300 shadow-2xs flex items-center justify-center overflow-hidden">
+                                  {qr.qrImageUrl ? (
+                                    <img
+                                      src={qr.qrImageUrl}
+                                      alt={qr.name}
+                                      className="w-full h-full object-contain"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  ) : (
+                                    <QrCode className="w-10 h-10 text-slate-300" />
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveUploadQrId(qr.id);
+                                    multiQrFileInputRef.current?.click();
+                                  }}
+                                  className="absolute inset-0 bg-slate-900/70 text-white opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center rounded-xl text-[9px] font-bold transition-opacity cursor-pointer p-1 text-center"
+                                >
+                                  <Upload className="w-3.5 h-3.5 mb-0.5" />
+                                  Upload Photo
+                                </button>
+                              </div>
+
+                              {/* Form Fields for this QR */}
+                              <div className="flex-1 min-w-0 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={isActive}
+                                      onChange={() => handleTogglePaymentQr(qr.id)}
+                                      className="w-4 h-4 rounded text-blue-600 cursor-pointer"
+                                      title={isActive ? 'Enabled on invoice' : 'Disabled on invoice'}
+                                    />
+                                    <span className="text-[11px] font-bold text-slate-900">
+                                      {isActive ? 'Active on Invoice' : 'Disabled (Hidden)'}
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemovePaymentQr(qr.id)}
+                                    className="text-rose-500 hover:text-rose-700 p-1 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                                    title="Delete this QR"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                                      Bank / Provider Name
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={qr.name}
+                                      onChange={(e) => handleUpdatePaymentQr(qr.id, { name: e.target.value })}
+                                      placeholder="e.g. KBZPay, WavePay, AYA Bank"
+                                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">
+                                      Account / Phone (Optional)
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={qr.accountNumber || ''}
+                                      onChange={(e) => handleUpdatePaymentQr(qr.id, { accountNumber: e.target.value })}
+                                      placeholder="e.g. 09-798123456"
+                                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800"
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* QR Photo Action Buttons */}
+                                <div className="flex items-center gap-2 pt-1 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveUploadQrId(qr.id);
+                                      multiQrFileInputRef.current?.click();
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg border border-slate-200 transition-colors cursor-pointer"
+                                  >
+                                    <Upload className="w-3 h-3 text-purple-600" />
+                                    {qr.qrImageUrl ? 'Replace Photo' : 'Upload QR Photo'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetSampleQrForId(qr.id, qr.name)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-[10px] font-bold rounded-lg border border-purple-200 transition-colors cursor-pointer"
+                                  >
+                                    <Sparkles className="w-3 h-3" />
+                                    Generate Sample QR
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
 
-                  <input
-                    ref={qrFileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        handleQrUpload(e.target.files[0]);
-                      }
-                    }}
-                  />
-
-                  {/* Sample QR Quick Presets */}
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className="text-[10px] font-bold text-slate-400">Quick Test Samples:</span>
-                    <button
-                      type="button"
-                      onClick={applySampleKPayQr}
-                      className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-800 text-[10px] font-bold rounded-lg border border-sky-200 transition-colors cursor-pointer"
-                    >
-                      Use Sample KPay QR
-                    </button>
-                    <button
-                      type="button"
-                      onClick={applySampleWaveQr}
-                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 text-[10px] font-bold rounded-lg border border-amber-200 transition-colors cursor-pointer"
-                    >
-                      Use Sample Wave QR
-                    </button>
+                  {/* Add New QR Buttons & Presets */}
+                  <div className="pt-2 border-t border-slate-100">
+                    <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                      + Add Banking QR Code:
+                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => handleAddPaymentQr('kpay')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-800 text-xs font-bold rounded-xl border border-sky-200 cursor-pointer transition-colors shadow-2xs"
+                      >
+                        <Plus className="w-3 h-3" /> KBZPay
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddPaymentQr('wave')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold rounded-xl border border-amber-200 cursor-pointer transition-colors shadow-2xs"
+                      >
+                        <Plus className="w-3 h-3" /> WavePay
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddPaymentQr('aya')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 text-xs font-bold rounded-xl border border-rose-200 cursor-pointer transition-colors shadow-2xs"
+                      >
+                        <Plus className="w-3 h-3" /> AYA Bank
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddPaymentQr('cb')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-800 text-xs font-bold rounded-xl border border-orange-200 cursor-pointer transition-colors shadow-2xs"
+                      >
+                        <Plus className="w-3 h-3" /> CB Bank
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddPaymentQr('yoma')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-800 text-xs font-bold rounded-xl border border-red-200 cursor-pointer transition-colors shadow-2xs"
+                      >
+                        <Plus className="w-3 h-3" /> Yoma Bank
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddPaymentQr('custom')}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 cursor-pointer transition-colors shadow-2xs"
+                      >
+                        <Plus className="w-3 h-3" /> Custom Bank
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Account Details */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-2">
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Payment Provider / Channel</label>
-                    <select
-                      value={customization.qrType}
-                      onChange={(e) => setCustomization({ ...customization, qrType: e.target.value as any })}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-slate-900"
-                    >
-                      <option value="kpay">KBZPay (KPay)</option>
-                      <option value="wave">WavePay (Wave Money)</option>
-                      <option value="kbz">KBZ Bank</option>
-                      <option value="aya">AYA Pay / AYA Bank</option>
-                      <option value="cb">CB Pay / CB Bank</option>
-                      <option value="yoma">Yoma Bank / Next</option>
-                      <option value="upload">Custom Banking QR Photo</option>
-                      <option value="custom">Other / General</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Account Number / Phone</label>
-                    <input
-                      type="text"
-                      value={customization.qrAccountNumber || ''}
-                      onChange={(e) => setCustomization({ ...customization, qrAccountNumber: e.target.value })}
-                      placeholder="e.g. 09-798123456"
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Account Holder Name</label>
-                    <input
-                      type="text"
-                      value={customization.qrAccountName || ''}
-                      onChange={(e) => setCustomization({ ...customization, qrAccountName: e.target.value })}
-                      placeholder="e.g. Store Account Name"
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Scan Instruction Text</label>
-                    <input
-                      type="text"
-                      value={customization.qrCustomText || ''}
-                      onChange={(e) => setCustomization({ ...customization, qrCustomText: e.target.value })}
-                      placeholder="e.g. Scan with KPay / Wave to pay"
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
-                    />
-                  </div>
-                </div>
-
+                {/* Hidden File Input for Multiple QR Image Upload */}
+                <input
+                  ref={multiQrFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0] && activeUploadQrId) {
+                      handleMultiQrUpload(activeUploadQrId, e.target.files[0]);
+                      e.target.value = '';
+                    }
+                  }}
+                />
               </div>
             )}
           </div>
@@ -1182,21 +1281,38 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
                             <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
                               {/* Left: Banking QR & Terms */}
                               <div className="sm:col-span-7 space-y-2">
-                                {customization.showQrCode && (
-                                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-3">
-                                    <div className="w-16 h-16 bg-white p-1 rounded-lg border border-slate-300 flex items-center justify-center shrink-0">
-                                      {customization.qrImageUrl ? (
-                                        <img src={customization.qrImageUrl} alt="QR" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
-                                      ) : (
-                                        <QrCode className="w-12 h-12 text-slate-900" />
-                                      )}
+                                {/* Multiple Minimalist Banking QRs */}
+                                {customization.showQrCode && activePaymentQrs.length > 0 && (
+                                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                                    <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                                      <QrCode className="w-3 h-3 text-slate-700" />
+                                      <span>Scan to Pay (Banking QR)</span>
                                     </div>
-                                    <div className="min-w-0">
-                                      <div className="font-bold text-[10px] text-slate-900 uppercase">
-                                        {customization.qrCustomText || 'Scan to Pay with KPay / Wave'}
-                                      </div>
-                                      <div className="text-[10px] text-slate-600 truncate">{customization.qrAccountName}</div>
-                                      <div className="text-[10px] font-mono font-bold text-purple-700">{customization.qrAccountNumber}</div>
+                                    <div className="flex items-start gap-4 flex-wrap">
+                                      {activePaymentQrs.map((qr) => (
+                                        <div key={qr.id} className="flex flex-col items-center text-center">
+                                          <div className="w-16 h-16 sm:w-18 sm:h-18 bg-white p-1 rounded-xl border border-slate-300 shadow-2xs flex items-center justify-center shrink-0 overflow-hidden">
+                                            {qr.qrImageUrl ? (
+                                              <img 
+                                                src={qr.qrImageUrl} 
+                                                alt={qr.name} 
+                                                className="w-full h-full object-contain"
+                                                referrerPolicy="no-referrer"
+                                              />
+                                            ) : (
+                                              <QrCode className="w-12 h-12 text-slate-900" />
+                                            )}
+                                          </div>
+                                          <span className="text-[10px] font-black uppercase text-slate-900 tracking-wide mt-1 font-sans">
+                                            {qr.name}
+                                          </span>
+                                          {customization.showQrAccountDetails && qr.accountNumber && (
+                                            <span className="text-[9px] font-mono font-bold text-slate-600">
+                                              {qr.accountNumber}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ))}
                                     </div>
                                   </div>
                                 )}
@@ -1365,23 +1481,36 @@ export const InvoiceCustomizer: React.FC<InvoiceCustomizerProps> = ({
                   </div>
                 )}
 
-                {/* QR Code Section (Uploaded Photo or Generated) */}
-                {customization.showQrCode && (
-                  <div className="text-center p-2.5 border border-slate-200 rounded-xl space-y-1 bg-slate-50/50">
-                    <div className="w-20 h-20 bg-white p-1 border border-slate-300 flex items-center justify-center mx-auto rounded-lg overflow-hidden">
-                      {customization.qrImageUrl ? (
-                        <img 
-                          src={customization.qrImageUrl} 
-                          alt="Banking QR Photo" 
-                          className="w-full h-full object-contain"
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <QrCode className="w-14 h-14 text-slate-900" />
-                      )}
+                {/* Multiple Minimalist QR Codes Section */}
+                {customization.showQrCode && activePaymentQrs.length > 0 && (
+                  <div className="py-2.5 text-center border-b border-dashed border-slate-400 space-y-1.5">
+                    <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Scan to Pay (QR)</p>
+                    <div className="flex items-center justify-center gap-3 flex-wrap">
+                      {activePaymentQrs.map((qr) => (
+                        <div key={qr.id} className="flex flex-col items-center text-center">
+                          <div className="w-16 h-16 bg-white p-1 border border-slate-300 flex items-center justify-center rounded overflow-hidden">
+                            {qr.qrImageUrl ? (
+                              <img 
+                                src={qr.qrImageUrl} 
+                                alt={qr.name} 
+                                className="w-full h-full object-contain"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <QrCode className="w-12 h-12 text-slate-900" />
+                            )}
+                          </div>
+                          <span className="text-[9px] font-black uppercase text-slate-900 mt-0.5">
+                            {qr.name}
+                          </span>
+                          {customization.showQrAccountDetails && qr.accountNumber && (
+                            <span className="text-[8px] font-mono text-slate-600">
+                              {qr.accountNumber}
+                            </span>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                    <p className="text-[10px] font-bold uppercase">{customization.qrCustomText || 'Scan to Pay'}</p>
-                    <p className="text-[9px] text-slate-600">{customization.qrAccountName} ({customization.qrAccountNumber})</p>
                   </div>
                 )}
 

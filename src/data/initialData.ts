@@ -83,6 +83,24 @@ export const initialSettings: ShopSettings = {
     qrAccountName: 'Shop Account (Win Mobile)',
     qrAccountNumber: '09-798123456',
     qrCustomText: 'Scan to Pay via KPay / Wave',
+    paymentQrs: [
+      {
+        id: 'kpay-default',
+        name: 'KBZPay',
+        accountName: 'Shop Account (Win Mobile)',
+        accountNumber: '09-798123456',
+        isActive: true,
+      },
+      {
+        id: 'wave-default',
+        name: 'WavePay',
+        accountName: 'Shop Account (Win Mobile)',
+        accountNumber: '09-974567890',
+        isActive: true,
+      }
+    ],
+    qrLayoutMode: 'minimalist',
+    showQrAccountDetails: false,
     showImeiDetails: true,
     showWarrantyDetails: true,
     showCashierName: true,

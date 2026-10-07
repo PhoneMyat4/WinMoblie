@@ -22,6 +22,7 @@ import { formatCurrency, formatDateTime, formatImei, getPaymentMethodInfo, forma
 import { generateWhatsAppSaleMessage, openWhatsAppChat } from '../../utils/whatsapp';
 import { RefundModal } from './RefundModal';
 import { StorageService } from '../../utils/storage';
+import { getActivePaymentQrs } from '../../utils/qrUtils';
 
 interface InvoicePrintModalProps {
   sale: Sale | null;
@@ -140,6 +141,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
     }
     return chunks;
   }, [paperWidth, sale.items, maxItemsPerPage]);
+
+  const paymentQrs = useMemo(() => {
+    return getActivePaymentQrs(custom, settings.shopName, settings.phone);
+  }, [custom, settings.shopName, settings.phone]);
 
   const payInfo = getPaymentMethodInfo(sale.paymentMethod);
   const totalGiftSaved = sale.items
@@ -476,34 +481,38 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                           <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 pt-1">
                             {/* Left Column: Banking QR & Policies */}
                             <div className="sm:col-span-7 space-y-2.5">
-                              {/* Banking Payment QR Box */}
-                              {custom.showQrCode && (
-                                <div className="p-3 bg-purple-50/50 border border-purple-200/80 rounded-xl flex items-center gap-3">
-                                  <div className="w-20 h-20 bg-white p-1 rounded-lg border border-purple-200 shadow-2xs flex items-center justify-center shrink-0 overflow-hidden">
-                                    {custom.qrImageUrl ? (
-                                      <img 
-                                        src={custom.qrImageUrl} 
-                                        alt="Banking Payment QR" 
-                                        className="w-full h-full object-contain"
-                                        referrerPolicy="no-referrer"
-                                      />
-                                    ) : (
-                                      <QrCode className="w-14 h-14 text-slate-900" />
-                                    )}
+                              {/* Multiple Minimalist Banking QRs */}
+                              {paymentQrs.length > 0 && (
+                                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                                  <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                                    <QrCode className="w-3 h-3 text-slate-700" />
+                                    <span>Scan to Pay (Banking QR)</span>
                                   </div>
-                                  <div className="min-w-0">
-                                    <div className="font-bold text-[10px] uppercase text-purple-950 tracking-wide">
-                                      {custom.qrCustomText || 'Scan to Pay with KPay / Wave'}
-                                    </div>
-                                    <div className="text-[11px] text-slate-700 truncate font-semibold mt-0.5">
-                                      {custom.qrAccountName || settings.shopName || 'Win Mobile'}
-                                    </div>
-                                    <div className="text-[11px] font-mono font-bold text-purple-700 mt-0.5">
-                                      {custom.qrAccountNumber || settings.phone}
-                                    </div>
-                                    <span className="inline-block mt-1 text-[9px] bg-purple-100 text-purple-800 px-1.5 py-0.2 rounded font-bold uppercase">
-                                      {custom.qrType || 'KBZPAY'}
-                                    </span>
+                                  <div className="flex items-start gap-4 flex-wrap">
+                                    {paymentQrs.map((qr) => (
+                                      <div key={qr.id} className="flex flex-col items-center text-center">
+                                        <div className="w-16 h-16 sm:w-18 sm:h-18 bg-white p-1 rounded-xl border border-slate-300 shadow-2xs flex items-center justify-center shrink-0 overflow-hidden">
+                                          {qr.qrImageUrl ? (
+                                            <img 
+                                              src={qr.qrImageUrl} 
+                                              alt={qr.name} 
+                                              className="w-full h-full object-contain"
+                                              referrerPolicy="no-referrer"
+                                            />
+                                          ) : (
+                                            <QrCode className="w-12 h-12 text-slate-900" />
+                                          )}
+                                        </div>
+                                        <span className="text-[10px] font-black uppercase text-slate-900 tracking-wide mt-1 font-sans">
+                                          {qr.name}
+                                        </span>
+                                        {custom.showQrAccountDetails && qr.accountNumber && (
+                                          <span className="text-[9px] font-mono font-bold text-slate-600">
+                                            {qr.accountNumber}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ))}
                                   </div>
                                 </div>
                               )}
@@ -786,25 +795,36 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                 </div>
               )}
 
-              {/* QR Payment Code on Receipt */}
-              {custom.showQrCode && (
-                <div className="py-2.5 text-center border-b border-dashed border-slate-400 space-y-1">
-                  <div className="w-20 h-20 bg-white p-1 border border-slate-300 flex items-center justify-center mx-auto rounded overflow-hidden">
-                    {custom.qrImageUrl ? (
-                      <img 
-                        src={custom.qrImageUrl} 
-                        alt="Banking QR" 
-                        className="w-full h-full object-contain"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-slate-900 flex items-center justify-center rounded">
-                        <QrCode className="w-14 h-14 text-white" />
+              {/* QR Payment Codes on Receipt (Minimalist) */}
+              {paymentQrs.length > 0 && (
+                <div className="py-2.5 text-center border-b border-dashed border-slate-400 space-y-1.5">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Scan to Pay (QR)</p>
+                  <div className="flex items-center justify-center gap-3 flex-wrap">
+                    {paymentQrs.map((qr) => (
+                      <div key={qr.id} className="flex flex-col items-center text-center">
+                        <div className="w-16 h-16 bg-white p-1 border border-slate-300 flex items-center justify-center rounded overflow-hidden">
+                          {qr.qrImageUrl ? (
+                            <img 
+                              src={qr.qrImageUrl} 
+                              alt={qr.name} 
+                              className="w-full h-full object-contain"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <QrCode className="w-12 h-12 text-slate-900" />
+                          )}
+                        </div>
+                        <span className="text-[9px] font-black uppercase text-slate-900 mt-0.5">
+                          {qr.name}
+                        </span>
+                        {custom.showQrAccountDetails && qr.accountNumber && (
+                          <span className="text-[8px] font-mono text-slate-600">
+                            {qr.accountNumber}
+                          </span>
+                        )}
                       </div>
-                    )}
+                    ))}
                   </div>
-                  <p className="text-[9px] font-bold uppercase">{custom.qrCustomText || 'Scan to Pay via KPay / Wave'}</p>
-                  <p className="text-[9px] text-slate-600">{custom.qrAccountName} ({custom.qrAccountNumber})</p>
                 </div>
               )}
 
