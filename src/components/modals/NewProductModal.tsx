@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Package, X, Plus, Trash2, Check, Barcode, Smartphone, Layers, Sparkles, RefreshCw, Camera, ChevronRight, Calculator, TrendingUp, Globe, ExternalLink, AlertTriangle, Gift, Calendar, Store, Zap } from 'lucide-react';
+import { Package, X, Plus, Trash2, Check, Barcode, Smartphone, Layers, Sparkles, RefreshCw, Camera, ChevronRight, Calculator, TrendingUp, Globe, ExternalLink, AlertTriangle, Gift, Calendar, Store, Zap, Facebook } from 'lucide-react';
 import { Product, ProductCategory, DeviceCondition, ShopSettings, ImeiPair } from '../../types';
 import { formatImei } from '../../utils/formatters';
 import { 
@@ -150,12 +150,14 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
   // Google Search Grounding Specs & Live Market Price State (gemini-3.8-flash with googleSearch tool)
   const [isSearchingGroundedSpecs, setIsSearchingGroundedSpecs] = useState<boolean>(false);
+  const [searchSourceFocus, setSearchSourceFocus] = useState<'facebook_only' | 'all'>('facebook_only');
   const [groundedSpecsData, setGroundedSpecsData] = useState<{
     brand?: string;
     model?: string;
     officialName?: string;
     releaseYear?: string;
     dataObservationDate?: string;
+    sourcePlatform?: string;
     display?: string;
     processor?: string;
     ramOptions?: string[];
@@ -200,7 +202,12 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       const res = await authenticatedFetch('/api/products/search-grounded-specs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: targetQuery, brand, model }),
+        body: JSON.stringify({ 
+          query: targetQuery, 
+          brand, 
+          model,
+          sourceFocus: searchSourceFocus,
+        }),
       });
       const data = await res.json();
       if (data.success && data.data) {
@@ -939,7 +946,37 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                {/* Source Focus Toggle: Facebook Only vs All Web */}
+                <div className="inline-flex items-center p-0.5 bg-white border border-blue-200 rounded-xl text-[11px] font-bold shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setSearchSourceFocus('facebook_only')}
+                    className={`px-2.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                      searchSourceFocus === 'facebook_only'
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                    title="Narrow down Google search strictly to official Facebook page posts of Myanmar mobile retailers (Anycall Mobile, Linn IT, INNWA IT, etc.)"
+                  >
+                    <Facebook className="w-3.5 h-3.5 text-blue-100" />
+                    <span>Facebook Posts Only</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSearchSourceFocus('all')}
+                    className={`px-2.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                      searchSourceFocus === 'all'
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                    title="Search across all web sources including GSMArena and global portals"
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>All Web</span>
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => handleSearchGoogleSpecs()}
@@ -949,12 +986,12 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                   {isSearchingGroundedSpecs ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Researching Google...</span>
+                      <span>{searchSourceFocus === 'facebook_only' ? 'Searching Facebook...' : 'Researching Google...'}</span>
                     </>
                   ) : (
                     <>
-                      <Globe className="w-4 h-4" />
-                      <span>Search Google Specs</span>
+                      {searchSourceFocus === 'facebook_only' ? <Facebook className="w-4 h-4" /> : <Globe className="w-4 h-4" />}
+                      <span>{searchSourceFocus === 'facebook_only' ? 'Search Facebook Prices' : 'Search Google Specs'}</span>
                     </>
                   )}
                 </button>
@@ -973,11 +1010,17 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
               <div className="p-3.5 bg-white border border-blue-200 rounded-xl shadow-xs space-y-3 animate-in fade-in duration-200">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
                   <div>
-                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                       <span>{groundedSpecsData.officialName || `${groundedSpecsData.brand} ${groundedSpecsData.model}`}</span>
                       {groundedSpecsData.releaseYear && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold">
                           {groundedSpecsData.releaseYear}
+                        </span>
+                      )}
+                      {groundedSpecsData.sourcePlatform && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold flex items-center gap-1 border border-blue-200">
+                          {groundedSpecsData.sourcePlatform.includes('Facebook') ? <Facebook className="w-2.5 h-2.5 text-blue-600" /> : <Globe className="w-2.5 h-2.5 text-blue-600" />}
+                          <span>{groundedSpecsData.sourcePlatform}</span>
                         </span>
                       )}
                     </h5>

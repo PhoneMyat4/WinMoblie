@@ -1837,8 +1837,9 @@ Output a JSON response with:
   // Google Search Grounded Specs & Live Myanmar Market Price (gemini-3.5-flash with googleSearch tool)
   app.post('/api/products/search-grounded-specs', async (req, res) => {
     try {
-      const { query, brand, model } = req.body;
+      const { query, brand, model, sourceFocus } = req.body;
       const targetQuery = (query || `${brand || ''} ${model || ''}`).trim();
+      const isFacebookOnly = sourceFocus === 'facebook_only';
       if (!targetQuery) {
         return res.status(400).json({ success: false, error: 'Product name, brand, or model is required.' });
       }
@@ -1853,7 +1854,67 @@ Output a JSON response with:
 
       const ai = getGenAI();
       const currentDateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-      const prompt = `You are a real-time mobile tech market analyst with live Google Search access.
+      const prompt = isFacebookOnly 
+        ? `You are a real-time mobile tech market analyst with live Google Search access specializing in Myanmar retail shop pricing.
+Current Date: ${currentDateStr} (Year 2026).
+TARGET DEVICE: "${targetQuery}"
+
+STRICT SOURCE RESTRICTION: FACEBOOK DATA ONLY:
+You must STRICTLY narrow down your Google search queries and data extraction EXCLUSIVELY to Facebook data (site:facebook.com).
+In Myanmar, retail mobile shops publish their active retail street prices, promotions, and arrival announcements directly to their official Facebook pages.
+Major trusted Myanmar retailers on Facebook include:
+- Anycall Mobile (facebook.com/anycallmobile / Anycall store pages)
+- Linn IT Mart (facebook.com/linnitmart)
+- INNWA IT (facebook.com/innwait)
+- Unique Mobile (facebook.com/uniquemobile)
+- Win Mobile World (facebook.com/winmobileworld)
+- Mobile King, KMD Computer & Mobile, etc.
+
+SEARCH INSTRUCTIONS:
+- You MUST formulate your Google Search queries strictly targeting Facebook posts, such as:
+  • "site:facebook.com ${targetQuery} Anycall Mobile Myanmar"
+  • "site:facebook.com ${targetQuery} Linn IT price MMK"
+  • "site:facebook.com ${targetQuery} INNWA IT Myanmar Kyats"
+  • "site:facebook.com ${targetQuery} price Myanmar"
+- Extract prices, RAM/ROM configurations, factory colors, and post dates EXCLUSIVELY from verified Myanmar mobile shop Facebook posts.
+- For every price sighting, provide the exact Facebook post date (e.g. "Oct 1, 2026", "Sep 28, 2026") and the shop's Facebook page name.
+- Only cite facebook.com URLs in sources.
+
+Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
+\`\`\`json
+{
+  "brand": "Brand Name",
+  "model": "Model Name",
+  "officialName": "Full Official Title",
+  "releaseYear": "e.g. 2025 / 2026",
+  "dataObservationDate": "e.g. Oct 1, 2026 (from Anycall Mobile Facebook page post)",
+  "sourcePlatform": "Facebook Pages (Myanmar Retailers)",
+  "display": "Screen size, panel type, refresh rate",
+  "processor": "Chipset name",
+  "ramOptions": ["4GB", "8GB"],
+  "romOptions": ["64GB", "128GB"],
+  "colors": ["Official Color 1", "Official Color 2"],
+  "camera": "Main camera specs, front camera specs",
+  "battery": "Battery capacity in mAh and charging watts",
+  "recommendedSellingPriceMmk": 589900,
+  "marketPriceRangeMmk": {
+    "min": 559900,
+    "max": 649900
+  },
+  "priceSightings": [
+    {
+      "store": "Anycall Mobile",
+      "date": "Oct 1, 2026",
+      "priceMmk": 589900,
+      "variant": "4GB/64GB",
+      "sourceNote": "Official Facebook Page post"
+    }
+  ],
+  "myanmarMarketSummary": "Detailed market summary in Burmese and English describing Myanmar retail pricing as published on official mobile shop Facebook pages, with explicit Facebook post dates and shop names (e.g., 'Oct 1st post on Anycall Mobile Facebook page...')."
+}
+\`\`\`
+Ensure all pricing values are valid numbers (MMK).`
+        : `You are a real-time mobile tech market analyst with live Google Search access.
 Current Date: ${currentDateStr} (Year 2026).
 Research the official technical specifications and up-to-date Myanmar retail market pricing for: "${targetQuery}".
 
@@ -1873,6 +1934,7 @@ Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
   "officialName": "Full Official Title",
   "releaseYear": "e.g. 2025 / 2026",
   "dataObservationDate": "e.g. Oct 1, 2026 at Anycall Mobile & Yangon Retailers",
+  "sourcePlatform": "All Web Sources",
   "display": "Screen size, panel type, refresh rate (e.g. 6.8-inch Dynamic AMOLED 2X, 120Hz)",
   "processor": "Chipset name (e.g. Snapdragon 8 Elite / Apple A18 Pro / Dimensity 9400)",
   "ramOptions": ["8GB", "12GB", "16GB"],
