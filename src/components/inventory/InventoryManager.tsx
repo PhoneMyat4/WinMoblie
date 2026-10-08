@@ -127,6 +127,26 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState<boolean>(false);
   const categoryDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Valuation display mode ('retail' = selling price value, 'cost' = stock purchase cost value)
+  const [valuationMode, setValuationMode] = useState<'retail' | 'cost'>(() => {
+    try {
+      const saved = localStorage.getItem('inventory_valuation_mode');
+      if (saved === 'retail' || saved === 'cost') return saved;
+    } catch {
+      // fallback
+    }
+    return 'retail';
+  });
+
+  const handleValuationModeChange = (mode: 'retail' | 'cost') => {
+    setValuationMode(mode);
+    try {
+      localStorage.setItem('inventory_valuation_mode', mode);
+    } catch {
+      // ignore
+    }
+  };
+
   // Quarantine & Damage Management States (3-Phase System)
   const [isQuarantineReportOpen, setIsQuarantineReportOpen] = useState<boolean>(false);
   const [selectedProductForQuarantine, setSelectedProductForQuarantine] = useState<Product | null>(null);
@@ -681,6 +701,39 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     });
   }, [products, selectedCategory, selectedSubCategory, selectedBrand, selectedRam, selectedRom, selectedColor, showLowStockOnly, focFilter, searchQuery]);
 
+  // Financial metrics for filtered / catalog listed items
+  const filteredUnits = useMemo(() => {
+    return filteredProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+  }, [filteredProducts]);
+
+  const filteredRetailAmount = useMemo(() => {
+    return filteredProducts.reduce((sum, p) => sum + ((Number(p.sellingPrice) || 0) * (Number(p.stock) || 0)), 0);
+  }, [filteredProducts]);
+
+  const filteredCostAmount = useMemo(() => {
+    return filteredProducts.reduce((sum, p) => sum + ((Number(p.costPrice) || 0) * (Number(p.stock) || 0)), 0);
+  }, [filteredProducts]);
+
+  // Granular row selection state for user-selected items
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+
+  const selectedProducts = useMemo(() => {
+    if (selectedProductIds.size === 0) return [];
+    return safeProducts.filter(p => selectedProductIds.has(p.id));
+  }, [safeProducts, selectedProductIds]);
+
+  const selectedUnits = useMemo(() => {
+    return selectedProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+  }, [selectedProducts]);
+
+  const selectedRetailAmount = useMemo(() => {
+    return selectedProducts.reduce((sum, p) => sum + ((Number(p.sellingPrice) || 0) * (Number(p.stock) || 0)), 0);
+  }, [selectedProducts]);
+
+  const selectedCostAmount = useMemo(() => {
+    return selectedProducts.reduce((sum, p) => sum + ((Number(p.costPrice) || 0) * (Number(p.stock) || 0)), 0);
+  }, [selectedProducts]);
+
   // Interactive Column Sorting
   const { sortField, sortDirection, handleSort, sortItems } = useTableSort<Product>();
 
@@ -699,6 +752,60 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       imei_serials: (a, b) => (a.imeiList?.length || 0) - (b.imeiList?.length || 0),
     });
   }, [filteredProducts, sortField, sortDirection]);
+
+  // Header select-all status & handler
+  const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
+
+  const isAllSelected = useMemo(() => {
+    if (sortedProducts.length === 0) return false;
+    return sortedProducts.every(p => selectedProductIds.has(p.id));
+  }, [sortedProducts, selectedProductIds]);
+
+  const isSomeSelected = useMemo(() => {
+    if (selectedProductIds.size === 0) return false;
+    return sortedProducts.some(p => selectedProductIds.has(p.id));
+  }, [sortedProducts, selectedProductIds]);
+
+  useEffect(() => {
+    if (selectAllCheckboxRef.current) {
+      selectAllCheckboxRef.current.indeterminate = isSomeSelected && !isAllSelected;
+    }
+  }, [isSomeSelected, isAllSelected]);
+
+  const handleToggleSelectAll = (e?: React.ChangeEvent<HTMLInputElement> | React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (isAllSelected) {
+      setSelectedProductIds(prev => {
+        const next = new Set(prev);
+        sortedProducts.forEach(p => next.delete(p.id));
+        return next;
+      });
+    } else {
+      setSelectedProductIds(prev => {
+        const next = new Set(prev);
+        sortedProducts.forEach(p => next.add(p.id));
+        return next;
+      });
+    }
+  };
+
+  const handleToggleProductSelect = (productId: string, e?: React.MouseEvent | React.ChangeEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedProductIds(prev => {
+      const next = new Set(prev);
+      if (next.has(productId)) {
+        next.delete(productId);
+      } else {
+        next.add(productId);
+      }
+      return next;
+    });
+  };
+
+  const handleClearSelection = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedProductIds(new Set());
+  };
 
   const categories: { id: string; label: string }[] = [
     { id: 'all', label: 'All Products' },
@@ -725,6 +832,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     setFocFilter('all');
     setSearchQuery('');
     setScannedFeedback(null);
+    setSelectedProductIds(new Set());
   };
 
   const handleOpenAdd = () => {
@@ -771,7 +879,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       'Stock Status',
     ];
 
-    const rows = filteredProducts.map((p) => {
+    const targetExportList = selectedProductIds.size > 0 ? selectedProducts : filteredProducts;
+    const rows = targetExportList.map((p) => {
       const isPhone = isPhoneCategory(p.category);
       const specSummary = [
         p.ram && p.ram !== '-' ? `${p.ram} RAM` : null,
@@ -1761,6 +1870,115 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 Standard
               </button>
             </div>
+
+            {/* Total Units & Valuation Amount of Selected / Listed Items (Circled in UI) */}
+            {(() => {
+              const activeRetail = selectedProductIds.size > 0 ? selectedRetailAmount : filteredRetailAmount;
+              const activeCost = selectedProductIds.size > 0 ? selectedCostAmount : filteredCostAmount;
+              const activeValuationAmount = valuationMode === 'retail' ? activeRetail : activeCost;
+              const isCostMode = valuationMode === 'cost';
+
+              return (
+                <div 
+                  id="selected-items-total-units-badge"
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all shadow-2xs ${
+                    selectedProductIds.size > 0
+                      ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-indigo-200 shadow-xs'
+                      : 'bg-white text-slate-800 border-indigo-200/90 hover:border-indigo-300'
+                  }`}
+                  title={
+                    selectedProductIds.size > 0
+                      ? `${selectedProductIds.size} items individually selected. Total stock: ${selectedUnits.toLocaleString()} units. ${isCostMode ? 'Stock Value' : 'Retail Value'}: ${formatCurrency(activeValuationAmount, settings.currencySymbol)} (Alternative: ${formatCurrency(isCostMode ? activeRetail : activeCost, settings.currencySymbol)})`
+                      : `Total stock of listed items: ${filteredUnits.toLocaleString()} units. ${isCostMode ? 'Stock Value' : 'Retail Value'}: ${formatCurrency(activeValuationAmount, settings.currencySymbol)} (Alternative: ${formatCurrency(isCostMode ? activeRetail : activeCost, settings.currencySymbol)})`
+                  }
+                >
+                  <div className="flex items-center gap-1.5">
+                    {selectedProductIds.size > 0 ? (
+                      <CheckCircle className="w-3.5 h-3.5 text-white shrink-0" />
+                    ) : (
+                      <Package className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    )}
+                    <span className={`text-[11px] font-semibold ${selectedProductIds.size > 0 ? 'text-indigo-100' : 'text-slate-500'}`}>
+                      {selectedProductIds.size > 0 ? `Selected (${selectedProductIds.size}):` : 'Total Units:'}
+                    </span>
+                    <span className={`font-mono text-xs font-black ${selectedProductIds.size > 0 ? 'text-white' : 'text-indigo-950'}`}>
+                      {(selectedProductIds.size > 0 ? selectedUnits : filteredUnits).toLocaleString()} Units
+                    </span>
+                  </div>
+
+                  <span className={`h-3.5 w-px ${selectedProductIds.size > 0 ? 'bg-indigo-400' : 'bg-slate-200'}`} />
+
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    {/* Toggle Button between Retail Value and Stock Value */}
+                    <div 
+                      className={`inline-flex items-center p-0.5 rounded-lg border text-[10px] font-bold ${
+                        selectedProductIds.size > 0 
+                          ? 'bg-indigo-700/80 border-indigo-500/50 text-indigo-100' 
+                          : 'bg-slate-100 border-slate-200 text-slate-600'
+                      }`}
+                      role="group"
+                      aria-label="Valuation mode toggle"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleValuationModeChange('retail')}
+                        className={`px-1.5 py-0.5 rounded-md transition-all cursor-pointer ${
+                          !isCostMode
+                            ? selectedProductIds.size > 0
+                              ? 'bg-white text-indigo-900 shadow-2xs font-black'
+                              : 'bg-white text-slate-900 shadow-2xs font-black'
+                            : selectedProductIds.size > 0
+                              ? 'text-indigo-200 hover:text-white'
+                              : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                        title="Display Retail Value (Selling Price)"
+                      >
+                        Retail
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleValuationModeChange('cost')}
+                        className={`px-1.5 py-0.5 rounded-md transition-all cursor-pointer ${
+                          isCostMode
+                            ? selectedProductIds.size > 0
+                              ? 'bg-amber-300 text-slate-950 shadow-2xs font-black'
+                              : 'bg-indigo-600 text-white shadow-2xs font-black'
+                            : selectedProductIds.size > 0
+                              ? 'text-indigo-200 hover:text-white'
+                              : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                        title="Display Stock Value (Purchase Cost)"
+                      >
+                        Stock
+                      </button>
+                    </div>
+
+                    <span 
+                      className={`font-mono font-bold text-xs ${
+                        selectedProductIds.size > 0 
+                          ? isCostMode ? 'text-amber-300' : 'text-amber-200' 
+                          : isCostMode ? 'text-indigo-700 font-black' : 'text-emerald-700 font-black'
+                      }`}
+                      title={`${isCostMode ? 'Stock Cost Value' : 'Retail Selling Value'}: ${formatCurrency(activeValuationAmount, settings.currencySymbol)}`}
+                    >
+                      {formatCurrency(activeValuationAmount, settings.currencySymbol)}
+                    </span>
+                  </div>
+
+                  {selectedProductIds.size > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleClearSelection}
+                      className="ml-0.5 p-0.5 hover:bg-indigo-500 text-indigo-200 hover:text-white rounded-md transition-colors cursor-pointer"
+                      title="Clear item selection"
+                      aria-label="Clear selection"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
           <div className="flex items-center gap-2 self-end sm:self-auto">
             <button
@@ -1826,7 +2044,21 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 {visibleColumns.item_model !== false && (
                   <SortableHeader
                     field="item_model"
-                    label="Item & Model"
+                    label={
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          ref={selectAllCheckboxRef}
+                          checked={isAllSelected}
+                          onChange={handleToggleSelectAll}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
+                          title={isAllSelected ? "Deselect all visible items" : "Select all visible items"}
+                          aria-label="Select all visible items"
+                        />
+                        <span>Item & Model</span>
+                      </div>
+                    }
                     width={columnWidths.item_model}
                     minWidth={MIN_COLUMN_WIDTHS.item_model}
                     resizable
@@ -2003,16 +2235,27 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                     <tr 
                       key={product.id} 
                       className={`transition-colors ${
-                        isExactBarcodeMatch 
-                          ? 'bg-indigo-50/60 ring-1 ring-inset ring-indigo-300' 
-                          : 'hover:bg-slate-50/80'
+                        selectedProductIds.has(product.id)
+                          ? 'bg-indigo-50/70 hover:bg-indigo-50/90 ring-1 ring-inset ring-indigo-200'
+                          : isExactBarcodeMatch 
+                            ? 'bg-indigo-50/60 ring-1 ring-inset ring-indigo-300' 
+                            : 'hover:bg-slate-50/80'
                       }`}
                     >
                       
                       {/* Name, Brand & SKU */}
                       {visibleColumns.item_model !== false && (
                         <td className="py-3 px-4">
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2.5">
+                            <input
+                              type="checkbox"
+                              checked={selectedProductIds.has(product.id)}
+                              onChange={(e) => handleToggleProductSelect(product.id, e)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer shrink-0"
+                              title={`Select ${product.name}`}
+                              aria-label={`Select ${product.name}`}
+                            />
                             <button
                               type="button"
                               onClick={() => setSelectedProductForDetails(product)}

@@ -942,6 +942,29 @@ export interface InvoiceCustomization {
   // Custom text
   footerThankYouMessage: string;
   warrantyPolicyText: string;
+
+  // Visual Piece-by-Piece Layout Configuration (Figma-Style Canvas Builder)
+  sectionOrder?: InvoiceSectionKey[];
+  sectionStyles?: Partial<Record<InvoiceSectionKey, InvoiceSectionStyle>>;
+  activePreset?: 'classic' | 'modern_card' | 'compact' | 'official' | 'custom';
+}
+
+export type InvoiceSectionKey =
+  | 'logo_header'
+  | 'customer_tx_info'
+  | 'items_table'
+  | 'financial_totals'
+  | 'payment_qrs'
+  | 'warranty_policy'
+  | 'signatures'
+  | 'footer_note';
+
+export interface InvoiceSectionStyle {
+  visible?: boolean;
+  alignment?: 'left' | 'center' | 'right';
+  boxStyle?: 'plain' | 'card' | 'dashed' | 'bordered';
+  spacing?: 'compact' | 'normal' | 'relaxed';
+  fontSize?: 'small' | 'normal' | 'large';
 }
 
 export interface DenominationCount {
