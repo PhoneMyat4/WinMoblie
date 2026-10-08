@@ -1852,17 +1852,27 @@ Output a JSON response with:
       }
 
       const ai = getGenAI();
+      const currentDateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
       const prompt = `You are a real-time mobile tech market analyst with live Google Search access.
+Current Date: ${currentDateStr} (Year 2026).
 Research the official technical specifications and up-to-date Myanmar retail market pricing for: "${targetQuery}".
 
 Use Google Search to find verified, accurate, current specifications, available memory configurations, official colorways, and current street prices in Myanmar Kyats (MMK).
+
+CRITICAL REQUIREMENT FOR DATA SIGHTING DATES & STORES:
+- You MUST identify the specific date (e.g. "Oct 1, 2026", "Sep 28, 2026") and specific mobile shop/retailer in Myanmar (e.g., Anycall Mobile, Linn IT Mart, INNWA IT, Unique, KMD) where each price was posted or sighted.
+- In "myanmarMarketSummary", explicitly state the date and shop name for each price reference (e.g. "Sighted on Oct 1st at Anycall Mobile for 589,900 MMK...").
+- In "priceSightings", provide the list of specific sightings with their dates and store names.
+- In "dataObservationDate", summarize the overall date/timeframe (e.g., "Oct 1, 2026 at Anycall Mobile & Yangon Retailers").
+
 Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
 \`\`\`json
 {
   "brand": "Brand Name",
   "model": "Model Name",
   "officialName": "Full Official Title",
-  "releaseYear": "e.g. 2024 / 2025 / 2026",
+  "releaseYear": "e.g. 2025 / 2026",
+  "dataObservationDate": "e.g. Oct 1, 2026 at Anycall Mobile & Yangon Retailers",
   "display": "Screen size, panel type, refresh rate (e.g. 6.8-inch Dynamic AMOLED 2X, 120Hz)",
   "processor": "Chipset name (e.g. Snapdragon 8 Elite / Apple A18 Pro / Dimensity 9400)",
   "ramOptions": ["8GB", "12GB", "16GB"],
@@ -1875,7 +1885,16 @@ Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
     "min": 1750000,
     "max": 1950000
   },
-  "myanmarMarketSummary": "Detailed market summary in Burmese and English describing Myanmar market pricing, availability, and retail guidance."
+  "priceSightings": [
+    {
+      "store": "Anycall Mobile",
+      "date": "Oct 1, 2026",
+      "priceMmk": 1850000,
+      "variant": "8GB/256GB",
+      "sourceNote": "Official retail post"
+    }
+  ],
+  "myanmarMarketSummary": "Detailed market summary in Burmese and English describing Myanmar market pricing, with explicit observation dates and shop names (e.g., 'Oct 1st at Anycall Mobile...')."
 }
 \`\`\`
 Ensure all pricing values are valid numbers (MMK).`;
@@ -1885,6 +1904,7 @@ Ensure all pricing values are valid numbers (MMK).`;
       let finalResult: any = null;
       let groundingMeta: any = null;
       let modelUsed = '';
+      let usageMetadata: any = null;
 
       for (const m of candidateModels) {
         try {
@@ -1899,6 +1919,7 @@ Ensure all pricing values are valid numbers (MMK).`;
           const rawText = response.text || '';
           const candidate = response.candidates?.[0];
           groundingMeta = candidate?.groundingMetadata;
+          usageMetadata = response.usageMetadata;
 
           const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, rawText];
           const jsonStr = (jsonMatch[1] || rawText).trim();
@@ -1927,6 +1948,19 @@ Ensure all pricing values are valid numbers (MMK).`;
         }
       }
 
+      // Calculate token and Google Search Grounding cost metrics
+      const promptTokens = usageMetadata?.promptTokenCount || 0;
+      const candidatesTokens = usageMetadata?.candidatesTokenCount || 0;
+      const totalTokens = usageMetadata?.totalTokenCount || (promptTokens + candidatesTokens);
+
+      // Gemini 3.8 Flash pricing: $0.10 / 1M input tokens, $0.40 / 1M output tokens
+      const tokenCostUsd = ((promptTokens * 0.10) / 1_000_000) + ((candidatesTokens * 0.40) / 1_000_000);
+      // Google Search Grounding: $35 per 1,000 queries = $0.035 per search query (on paid tier; free up to 1,500/day on AI Studio free tier)
+      const searchQueriesCount = groundingMeta?.webSearchQueries?.length || 1;
+      const searchGroundingCostUsd = searchQueriesCount > 0 ? 0.035 : 0;
+      const estimatedTotalCostUsd = tokenCostUsd + searchGroundingCostUsd;
+      const estimatedCostMmk = Math.round(estimatedTotalCostUsd * 4500); // estimated 4,500 MMK / USD
+
       return res.json({
         success: true,
         data: finalResult,
@@ -1934,6 +1968,15 @@ Ensure all pricing values are valid numbers (MMK).`;
         groundingMetadata: {
           searchQueries: groundingMeta?.webSearchQueries || [],
           sources,
+        },
+        tokenUsage: {
+          promptTokens,
+          outputTokens: candidatesTokens,
+          totalTokens,
+          tokenCostUsd: Number(tokenCostUsd.toFixed(6)),
+          searchGroundingCostUsd,
+          estimatedTotalCostUsd: Number(estimatedTotalCostUsd.toFixed(5)),
+          estimatedCostMmk,
         },
       });
     } catch (err: any) {

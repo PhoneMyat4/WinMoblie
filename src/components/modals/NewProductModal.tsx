@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Package, X, Plus, Trash2, Check, Barcode, Smartphone, Layers, Sparkles, RefreshCw, Camera, ChevronRight, Calculator, TrendingUp, Globe, ExternalLink, AlertTriangle, Gift } from 'lucide-react';
+import { Package, X, Plus, Trash2, Check, Barcode, Smartphone, Layers, Sparkles, RefreshCw, Camera, ChevronRight, Calculator, TrendingUp, Globe, ExternalLink, AlertTriangle, Gift, Calendar, Store, Zap } from 'lucide-react';
 import { Product, ProductCategory, DeviceCondition, ShopSettings, ImeiPair } from '../../types';
 import { formatImei } from '../../utils/formatters';
 import { 
@@ -148,13 +148,14 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   const modelInputRef = useRef<HTMLInputElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Google Search Grounding Specs & Live Market Price State (gemini-3.5-flash with googleSearch tool)
+  // Google Search Grounding Specs & Live Market Price State (gemini-3.8-flash with googleSearch tool)
   const [isSearchingGroundedSpecs, setIsSearchingGroundedSpecs] = useState<boolean>(false);
   const [groundedSpecsData, setGroundedSpecsData] = useState<{
     brand?: string;
     model?: string;
     officialName?: string;
     releaseYear?: string;
+    dataObservationDate?: string;
     display?: string;
     processor?: string;
     ramOptions?: string[];
@@ -164,7 +165,23 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     battery?: string;
     recommendedSellingPriceMmk?: number;
     marketPriceRangeMmk?: { min: number; max: number };
+    priceSightings?: Array<{
+      store: string;
+      date: string;
+      priceMmk: number;
+      variant?: string;
+      sourceNote?: string;
+    }>;
     myanmarMarketSummary?: string;
+  } | null>(null);
+  const [groundedTokenUsage, setGroundedTokenUsage] = useState<{
+    promptTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    tokenCostUsd: number;
+    searchGroundingCostUsd: number;
+    estimatedTotalCostUsd: number;
+    estimatedCostMmk: number;
   } | null>(null);
   const [groundedSources, setGroundedSources] = useState<Array<{ title: string; url: string }>>([]);
   const [groundedSearchQueries, setGroundedSearchQueries] = useState<string[]>([]);
@@ -190,6 +207,9 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
         setGroundedSpecsData(data.data);
         setGroundedSources(data.groundingMetadata?.sources || []);
         setGroundedSearchQueries(data.groundingMetadata?.searchQueries || []);
+        if (data.tokenUsage) {
+          setGroundedTokenUsage(data.tokenUsage);
+        }
         setIsGroundedSpecsExpanded(true);
       } else {
         throw new Error(data.error || 'Failed to retrieve specs with Google Search Grounding.');
@@ -1072,30 +1092,66 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
                 {/* Recommended Myanmar Market Price */}
                 {groundedSpecsData.recommendedSellingPriceMmk && (
-                  <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wide">
-                        Live Myanmar Market Retail Benchmark
-                      </span>
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-base font-black text-emerald-950">
-                          {groundedSpecsData.recommendedSellingPriceMmk.toLocaleString()} MMK
-                        </span>
-                        {groundedSpecsData.marketPriceRangeMmk && (
-                          <span className="text-xs text-emerald-700 font-medium">
-                            (Market range: {groundedSpecsData.marketPriceRangeMmk.min.toLocaleString()} - {groundedSpecsData.marketPriceRangeMmk.max.toLocaleString()} MMK)
+                  <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl space-y-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wide">
+                            Live Myanmar Market Retail Benchmark
                           </span>
-                        )}
+                          {groundedSpecsData.dataObservationDate && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100/90 text-emerald-900 border border-emerald-300 font-bold text-[10px]" title="Exact observation date and retail source of the benchmark price">
+                              <Calendar className="w-2.5 h-2.5 text-emerald-700" />
+                              <span>{groundedSpecsData.dataObservationDate}</span>
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-base font-black text-emerald-950">
+                            {groundedSpecsData.recommendedSellingPriceMmk.toLocaleString()} MMK
+                          </span>
+                          {groundedSpecsData.marketPriceRangeMmk && (
+                            <span className="text-xs text-emerald-700 font-medium">
+                              (Market range: {groundedSpecsData.marketPriceRangeMmk.min.toLocaleString()} - {groundedSpecsData.marketPriceRangeMmk.max.toLocaleString()} MMK)
+                            </span>
+                          )}
+                        </div>
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setSellingPrice(groundedSpecsData.recommendedSellingPriceMmk!)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer shrink-0"
+                      >
+                        Set Selling Price to {groundedSpecsData.recommendedSellingPriceMmk.toLocaleString()} MMK
+                      </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setSellingPrice(groundedSpecsData.recommendedSellingPriceMmk!)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer shrink-0"
-                    >
-                      Set Selling Price to {groundedSpecsData.recommendedSellingPriceMmk.toLocaleString()} MMK
-                    </button>
+                    {/* Verified Store Sightings with Dates */}
+                    {groundedSpecsData.priceSightings && groundedSpecsData.priceSightings.length > 0 && (
+                      <div className="pt-2 border-t border-emerald-200/60">
+                        <span className="text-[10px] font-bold text-emerald-900 uppercase tracking-wider block mb-1.5 flex items-center gap-1">
+                          <Store className="w-3 h-3 text-emerald-700" />
+                          <span>Observed Retail Stores & Sighting Dates:</span>
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {groundedSpecsData.priceSightings.map((sighting, sIdx) => (
+                            <div key={sIdx} className="p-2 bg-white/90 border border-emerald-100 rounded-lg flex items-center justify-between gap-1 text-[11px] shadow-2xs">
+                              <div>
+                                <span className="font-bold text-slate-900">{sighting.store}</span>
+                                <span className="text-[10px] text-emerald-700 font-semibold ml-1.5">({sighting.date})</span>
+                                {sighting.variant && (
+                                  <span className="text-[9px] text-slate-500 block font-mono">{sighting.variant}</span>
+                                )}
+                              </div>
+                              <span className="font-mono font-black text-emerald-900 text-xs">
+                                {sighting.priceMmk?.toLocaleString()} MMK
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1104,6 +1160,32 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                   <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-700 leading-relaxed whitespace-pre-wrap">
                     <span className="font-bold text-slate-900 block mb-0.5">Market Analysis:</span>
                     {groundedSpecsData.myanmarMarketSummary}
+                  </div>
+                )}
+
+                {/* AI Token Usage & Cost Transparency Banner */}
+                {groundedTokenUsage && (
+                  <div className="p-2 bg-slate-50/80 border border-slate-200 rounded-lg flex items-center justify-between flex-wrap gap-2 text-[10px] text-slate-600">
+                    <div className="flex items-center gap-1.5">
+                      <Zap className="w-3 h-3 text-amber-500 shrink-0" />
+                      <span className="font-bold text-slate-700">Task Tokens:</span>
+                      <span className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-slate-200 text-slate-800">
+                        {groundedTokenUsage.totalTokens.toLocaleString()} tokens
+                      </span>
+                      <span className="text-slate-400">
+                        ({groundedTokenUsage.promptTokens} in / {groundedTokenUsage.outputTokens} out)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-slate-500 font-medium">Estimated AI Task Cost:</span>
+                      <span 
+                        className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 cursor-help"
+                        title={`Model tokens: ~$${groundedTokenUsage.tokenCostUsd} (gemini-3.8-flash: $0.10/1M in, $0.40/1M out) + Google Search Grounding: $${groundedTokenUsage.searchGroundingCostUsd} (paid tier; AI Studio free tier provides 1,500 free queries/day)`}
+                      >
+                        ~${groundedTokenUsage.estimatedTotalCostUsd} USD (≈ {groundedTokenUsage.estimatedCostMmk.toLocaleString()} MMK)
+                      </span>
+                    </div>
                   </div>
                 )}
 
