@@ -15,6 +15,10 @@ export interface SortableHeaderProps {
   colSpan?: number;
   title?: string;
   disabled?: boolean;
+  width?: number | string;
+  minWidth?: number | string;
+  resizable?: boolean;
+  onResizeStart?: (e: React.MouseEvent) => void;
 }
 
 export const SortableHeader: React.FC<SortableHeaderProps> = ({
@@ -29,6 +33,10 @@ export const SortableHeader: React.FC<SortableHeaderProps> = ({
   colSpan,
   title,
   disabled = false,
+  width,
+  minWidth,
+  resizable = false,
+  onResizeStart,
 }) => {
   const isActive = currentSortField === field && currentSortDirection !== null;
   const isAsc = isActive && currentSortDirection === 'asc';
@@ -59,13 +67,32 @@ export const SortableHeader: React.FC<SortableHeaderProps> = ({
   const thAlignClass =
     align === 'center' ? 'text-center' : align === 'right' ? 'text-right' : 'text-left';
 
+  const styleObj: React.CSSProperties = {
+    width: width !== undefined ? (typeof width === 'number' ? `${width}px` : width) : undefined,
+    minWidth: minWidth !== undefined ? (typeof minWidth === 'number' ? `${minWidth}px` : minWidth) : undefined,
+  };
+
   if (disabled) {
     return (
       <th
         colSpan={colSpan}
-        className={`py-3 px-4 select-none ${thAlignClass} ${className}`}
+        style={styleObj}
+        className={`relative py-3 px-4 select-none ${thAlignClass} ${className} group`}
       >
-        <span>{label}</span>
+        <span className="truncate">{label}</span>
+        {resizable && onResizeStart && (
+          <div
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              onResizeStart(e);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            title="Drag to resize column width"
+            className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-indigo-500/70 active:bg-indigo-600 transition-colors z-20 flex items-center justify-center opacity-0 group-hover:opacity-100"
+          >
+            <div className="w-0.5 h-3.5 bg-slate-400 rounded-full" />
+          </div>
+        )}
       </th>
     );
   }
@@ -76,7 +103,8 @@ export const SortableHeader: React.FC<SortableHeaderProps> = ({
       onClick={() => onSort(field)}
       title={defaultTitle}
       aria-sort={isAsc ? 'ascending' : isDesc ? 'descending' : 'none'}
-      className={`py-3 px-4 select-none cursor-pointer transition-colors duration-150 hover:bg-slate-200/70 active:bg-slate-300/60 group ${thAlignClass} ${
+      style={styleObj}
+      className={`relative py-3 px-4 select-none cursor-pointer transition-colors duration-150 hover:bg-slate-200/70 active:bg-slate-300/60 group ${thAlignClass} ${
         isActive ? 'bg-indigo-50/80 text-indigo-900 font-black' : ''
       } ${className}`}
     >
@@ -98,6 +126,20 @@ export const SortableHeader: React.FC<SortableHeaderProps> = ({
           )}
         </span>
       </div>
+
+      {resizable && onResizeStart && (
+        <div
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            onResizeStart(e);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          title="Drag to resize column width"
+          className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-indigo-500/70 active:bg-indigo-600 transition-colors z-20 flex items-center justify-center opacity-0 group-hover:opacity-100"
+        >
+          <div className="w-0.5 h-3.5 bg-slate-400 rounded-full" />
+        </div>
+      )}
     </th>
   );
 };

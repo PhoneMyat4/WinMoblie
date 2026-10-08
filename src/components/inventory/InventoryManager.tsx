@@ -31,7 +31,8 @@ import {
   Palette,
   FileSpreadsheet,
   ShieldAlert,
-  Gift
+  Gift,
+  MoreHorizontal
 } from 'lucide-react';
 import { 
   Product, 
@@ -168,6 +169,123 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   const activeColumnCount = useMemo(() => {
     return INVENTORY_COLUMNS.filter(col => visibleColumns[col.id] !== false).length;
   }, [visibleColumns]);
+
+  // Adjustable Column Widths State (Persistent in localStorage)
+  const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
+    item_model: 270,
+    category_condition: 180,
+    cost_price: 125,
+    selling_price: 125,
+    margin: 95,
+    stock_level: 115,
+    imei_serials: 220,
+    actions: 95,
+  };
+
+  const MIN_COLUMN_WIDTHS: Record<string, number> = {
+    item_model: 150,
+    category_condition: 120,
+    cost_price: 85,
+    selling_price: 85,
+    margin: 70,
+    stock_level: 80,
+    imei_serials: 130,
+    actions: 75,
+  };
+
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('inventory_table_column_widths');
+      if (saved) {
+        return { ...DEFAULT_COLUMN_WIDTHS, ...JSON.parse(saved) };
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_COLUMN_WIDTHS;
+  });
+
+  const handleResetColumnWidths = () => {
+    setColumnWidths(DEFAULT_COLUMN_WIDTHS);
+    try {
+      localStorage.removeItem('inventory_table_column_widths');
+    } catch {
+      // ignore
+    }
+  };
+
+  const resizingRef = useRef<{
+    field: string;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  const handleResizeStart = (field: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startWidth = columnWidths[field] || DEFAULT_COLUMN_WIDTHS[field] || 120;
+    resizingRef.current = {
+      field,
+      startX: e.clientX,
+      startWidth,
+    };
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const deltaX = moveEvent.clientX - resizingRef.current.startX;
+      const minW = MIN_COLUMN_WIDTHS[resizingRef.current.field] || 70;
+      const newWidth = Math.max(minW, Math.round(resizingRef.current.startWidth + deltaX));
+      setColumnWidths(prev => {
+        const updated = {
+          ...prev,
+          [resizingRef.current!.field]: newWidth,
+        };
+        try {
+          localStorage.setItem('inventory_table_column_widths', JSON.stringify(updated));
+        } catch {
+          // ignore
+        }
+        return updated;
+      });
+    };
+
+    const handleMouseUp = () => {
+      resizingRef.current = null;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  // Actions dropdown state
+  const [openActionMenu, setOpenActionMenu] = useState<{
+    productId: string;
+    product: Product;
+    top: number;
+    right: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!openActionMenu) return;
+    const handleScrollOrResize = () => setOpenActionMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenActionMenu(null);
+    };
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [openActionMenu]);
   
   // Real-time Barcode Scanner State
   const [scannedFeedback, setScannedFeedback] = useState<{
@@ -1664,6 +1782,15 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               <Download className="w-3.5 h-3.5 text-slate-500" />
               <span>Export CSV</span>
             </button>
+            <button
+              type="button"
+              onClick={handleResetColumnWidths}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 shadow-2xs transition-colors cursor-pointer"
+              title="Reset column widths to default lengths"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span className="hidden sm:inline">Reset Widths</span>
+            </button>
             <ColumnVisibilityFilter
               columns={INVENTORY_COLUMNS}
               visibleColumns={visibleColumns}
@@ -1683,13 +1810,27 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
+          <table className="w-full text-left border-collapse text-xs table-fixed">
+            <colgroup>
+              {visibleColumns.item_model !== false && <col style={{ width: `${columnWidths.item_model || 270}px` }} />}
+              {visibleColumns.category_condition !== false && <col style={{ width: `${columnWidths.category_condition || 180}px` }} />}
+              {visibleColumns.cost_price !== false && <col style={{ width: `${columnWidths.cost_price || 125}px` }} />}
+              {visibleColumns.selling_price !== false && <col style={{ width: `${columnWidths.selling_price || 125}px` }} />}
+              {visibleColumns.margin !== false && <col style={{ width: `${columnWidths.margin || 95}px` }} />}
+              {visibleColumns.stock_level !== false && <col style={{ width: `${columnWidths.stock_level || 115}px` }} />}
+              {visibleColumns.imei_serials !== false && <col style={{ width: `${columnWidths.imei_serials || 220}px` }} />}
+              {visibleColumns.actions !== false && <col style={{ width: `${columnWidths.actions || 95}px` }} />}
+            </colgroup>
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider">
                 {visibleColumns.item_model !== false && (
                   <SortableHeader
                     field="item_model"
                     label="Item & Model"
+                    width={columnWidths.item_model}
+                    minWidth={MIN_COLUMN_WIDTHS.item_model}
+                    resizable
+                    onResizeStart={(e) => handleResizeStart('item_model', e)}
                     currentSortField={sortField}
                     currentSortDirection={sortDirection}
                     onSort={handleSort}
@@ -1699,6 +1840,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                   <SortableHeader
                     field="category_condition"
                     label="Category / Condition"
+                    width={columnWidths.category_condition}
+                    minWidth={MIN_COLUMN_WIDTHS.category_condition}
+                    resizable
+                    onResizeStart={(e) => handleResizeStart('category_condition', e)}
                     currentSortField={sortField}
                     currentSortDirection={sortDirection}
                     onSort={handleSort}
@@ -1710,6 +1855,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                     label="Cost Price"
                     align="right"
                     numeric
+                    width={columnWidths.cost_price}
+                    minWidth={MIN_COLUMN_WIDTHS.cost_price}
+                    resizable
+                    onResizeStart={(e) => handleResizeStart('cost_price', e)}
                     currentSortField={sortField}
                     currentSortDirection={sortDirection}
                     onSort={handleSort}
@@ -1721,6 +1870,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                     label="Selling Price"
                     align="right"
                     numeric
+                    width={columnWidths.selling_price}
+                    minWidth={MIN_COLUMN_WIDTHS.selling_price}
+                    resizable
+                    onResizeStart={(e) => handleResizeStart('selling_price', e)}
                     currentSortField={sortField}
                     currentSortDirection={sortDirection}
                     onSort={handleSort}
@@ -1732,6 +1885,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                     label="Margin %"
                     align="right"
                     numeric
+                    width={columnWidths.margin}
+                    minWidth={MIN_COLUMN_WIDTHS.margin}
+                    resizable
+                    onResizeStart={(e) => handleResizeStart('margin', e)}
                     currentSortField={sortField}
                     currentSortDirection={sortDirection}
                     onSort={handleSort}
@@ -1743,6 +1900,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                     label="Stock Level"
                     align="center"
                     numeric
+                    width={columnWidths.stock_level}
+                    minWidth={MIN_COLUMN_WIDTHS.stock_level}
+                    resizable
+                    onResizeStart={(e) => handleResizeStart('stock_level', e)}
                     currentSortField={sortField}
                     currentSortDirection={sortDirection}
                     onSort={handleSort}
@@ -1753,12 +1914,37 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                     field="imei_serials"
                     label="IMEI Serial Numbers"
                     numeric
+                    width={columnWidths.imei_serials}
+                    minWidth={MIN_COLUMN_WIDTHS.imei_serials}
+                    resizable
+                    onResizeStart={(e) => handleResizeStart('imei_serials', e)}
                     currentSortField={sortField}
                     currentSortDirection={sortDirection}
                     onSort={handleSort}
                   />
                 )}
-                {visibleColumns.actions !== false && <th className="py-3 px-4 text-center select-none">Actions</th>}
+                {visibleColumns.actions !== false && (
+                  <th
+                    style={{
+                      width: columnWidths.actions ? `${columnWidths.actions}px` : '95px',
+                      minWidth: '75px',
+                    }}
+                    className="relative py-3 px-3 text-center select-none group"
+                  >
+                    <span>Actions</span>
+                    <div
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        handleResizeStart('actions', e);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Drag to resize Actions column width"
+                      className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-indigo-500/70 active:bg-indigo-600 transition-colors z-20 flex items-center justify-center opacity-0 group-hover:opacity-100"
+                    >
+                      <div className="w-0.5 h-3.5 bg-slate-400 rounded-full" />
+                    </div>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -2180,62 +2366,32 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                         </td>
                       )}
 
-                      {/* Action buttons */}
+                      {/* Action dropdown button (Space-Saving Minimalist Design) */}
                       {visibleColumns.actions !== false && (
-                        <td className="py-3 px-4 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            {onOpenProductHistory && (
-                              <button
-                                type="button"
-                                title="View Product Movement History & Lifecycle"
-                                onClick={() => onOpenProductHistory(product)}
-                                className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                              >
-                                <History className="w-4 h-4 text-indigo-600" />
-                              </button>
-                            )}
+                        <td className="py-2.5 px-3 text-center">
+                          <div className="relative inline-flex items-center justify-center">
                             <button
                               type="button"
-                              title="Print Barcode Labels (Laser & Thermal)"
-                              onClick={() => setBarcodeModalTarget({ product })}
-                              className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                            >
-                              <Barcode className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              title="View Full Item Details & Specs"
-                              onClick={() => setSelectedProductForDetails(product)}
-                              className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              title="Report Damage & Quarantine (Phase 1 Isolation)"
-                              onClick={() => {
-                                setSelectedProductForQuarantine(product);
-                                setIsQuarantineReportOpen(true);
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setOpenActionMenu(prev => prev?.productId === product.id ? null : {
+                                  productId: product.id,
+                                  product,
+                                  top: rect.bottom + 4,
+                                  right: window.innerWidth - rect.right,
+                                });
                               }}
-                              className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                              className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-2xs ${
+                                openActionMenu?.productId === product.id
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm ring-2 ring-indigo-200'
+                                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 hover:border-slate-300'
+                              }`}
+                              title="Open Actions Menu"
+                              aria-label={`Actions for ${product.name}`}
                             >
-                              <AlertTriangle className="w-4 h-4 text-amber-500" />
-                            </button>
-                            <button
-                              type="button"
-                              title="Edit Product"
-                              onClick={() => handleOpenEdit(product)}
-                              className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              title="Delete Product"
-                              onClick={() => handleDelete(product.id, product.name)}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-4 h-4" />
+                              <span>Actions</span>
+                              <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-150 ${openActionMenu?.productId === product.id ? 'rotate-180 text-white' : 'text-slate-400'}`} />
                             </button>
                           </div>
                         </td>
@@ -2373,6 +2529,116 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             }
           }}
         />
+      )}
+
+      {/* Floating Space-Saving Actions Dropdown Popover */}
+      {openActionMenu && (
+        <div 
+          className="fixed inset-0 z-50 cursor-default"
+          onClick={() => setOpenActionMenu(null)}
+        >
+          <div
+            style={{
+              position: 'fixed',
+              top: `${Math.min(openActionMenu.top, Math.max(10, window.innerHeight - 300))}px`,
+              right: `${Math.max(10, openActionMenu.right)}px`,
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-56 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-150 select-none"
+          >
+            <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 flex items-center justify-between">
+              <span className="truncate max-w-[170px]" title={openActionMenu.product.name}>
+                {openActionMenu.product.name}
+              </span>
+              <button 
+                type="button"
+                onClick={() => setOpenActionMenu(null)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer p-0.5 rounded"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+
+            <div className="py-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedProductForDetails(openActionMenu.product);
+                  setOpenActionMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-medium transition-colors cursor-pointer text-left"
+              >
+                <Eye className="w-4 h-4 text-indigo-500 shrink-0" />
+                <span>View Full Details & Specs</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  handleOpenEdit(openActionMenu.product);
+                  setOpenActionMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-medium transition-colors cursor-pointer text-left"
+              >
+                <Edit3 className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>Edit Product Info</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setBarcodeModalTarget({ product: openActionMenu.product });
+                  setOpenActionMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-medium transition-colors cursor-pointer text-left"
+              >
+                <Barcode className="w-4 h-4 text-slate-600 shrink-0" />
+                <span>Print Barcode Labels</span>
+              </button>
+
+              {onOpenProductHistory && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenProductHistory(openActionMenu.product);
+                    setOpenActionMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-medium transition-colors cursor-pointer text-left"
+                >
+                  <History className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>Movement History</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedProductForQuarantine(openActionMenu.product);
+                  setIsQuarantineReportOpen(true);
+                  setOpenActionMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-amber-700 hover:bg-amber-50 font-medium transition-colors cursor-pointer text-left"
+              >
+                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                <span>Report Damage / Quarantine</span>
+              </button>
+            </div>
+
+            <div className="border-t border-slate-100 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  handleDelete(openActionMenu.product.id, openActionMenu.product.name);
+                  setOpenActionMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-600 hover:bg-rose-50 font-semibold transition-colors cursor-pointer text-left"
+              >
+                <Trash2 className="w-4 h-4 text-rose-500 shrink-0" />
+                <span>Delete Product</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>
