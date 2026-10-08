@@ -172,6 +172,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       date: string;
       priceMmk: number;
       variant?: string;
+      url?: string;
       sourceNote?: string;
     }>;
     myanmarMarketSummary?: string;
@@ -1177,21 +1178,52 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                           <Store className="w-3 h-3 text-emerald-700" />
                           <span>Observed Retail Stores & Sighting Dates:</span>
                         </span>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                          {groundedSpecsData.priceSightings.map((sighting, sIdx) => (
-                            <div key={sIdx} className="p-2 bg-white/90 border border-emerald-100 rounded-lg flex items-center justify-between gap-1 text-[11px] shadow-2xs">
-                              <div>
-                                <span className="font-bold text-slate-900">{sighting.store}</span>
-                                <span className="text-[10px] text-emerald-700 font-semibold ml-1.5">({sighting.date})</span>
-                                {sighting.variant && (
-                                  <span className="text-[9px] text-slate-500 block font-mono">{sighting.variant}</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {groundedSpecsData.priceSightings.map((sighting, sIdx) => {
+                            const isFb = sighting.url?.includes('facebook.com') || sighting.store?.toLowerCase().includes('facebook');
+                            return (
+                              <div key={sIdx} className="p-2.5 bg-white/95 border border-emerald-200/90 rounded-xl flex flex-col justify-between gap-2 text-[11px] shadow-2xs hover:border-emerald-300 transition-all">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-bold text-slate-900">{sighting.store}</span>
+                                      <span className="text-[10px] text-emerald-800 font-bold px-1.5 py-0.2 bg-emerald-50 rounded border border-emerald-200">
+                                        {sighting.date}
+                                      </span>
+                                    </div>
+                                    {sighting.variant && (
+                                      <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                                        Variant: {sighting.variant}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="font-mono font-black text-emerald-900 text-xs shrink-0">
+                                    {sighting.priceMmk?.toLocaleString()} MMK
+                                  </span>
+                                </div>
+
+                                {sighting.url ? (
+                                  <a
+                                    href={sighting.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center justify-between gap-1.5 px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 text-[10px] font-bold transition-all group cursor-pointer"
+                                    title={`Open verified ${sighting.store} source post: ${sighting.url}`}
+                                  >
+                                    <div className="flex items-center gap-1 truncate">
+                                      {isFb ? <Facebook className="w-3 h-3 text-blue-600 shrink-0" /> : <Globe className="w-3 h-3 text-blue-600 shrink-0" />}
+                                      <span className="truncate">View Source Link</span>
+                                    </div>
+                                    <ExternalLink className="w-3 h-3 shrink-0 text-blue-500 group-hover:translate-x-0.5 transition-transform" />
+                                  </a>
+                                ) : (
+                                  <div className="text-[10px] text-slate-400 italic">
+                                    Verified via Google Grounding
+                                  </div>
                                 )}
                               </div>
-                              <span className="font-mono font-black text-emerald-900 text-xs">
-                                {sighting.priceMmk?.toLocaleString()} MMK
-                              </span>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}

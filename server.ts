@@ -1901,12 +1901,13 @@ Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
     "min": 559900,
     "max": 649900
   },
-  "priceSightings": [
+    "priceSightings": [
     {
       "store": "Anycall Mobile",
       "date": "Oct 1, 2026",
       "priceMmk": 589900,
       "variant": "4GB/64GB",
+      "url": "https://www.facebook.com/anycallmobile/...",
       "sourceNote": "Official Facebook Page post"
     }
   ],
@@ -1920,10 +1921,10 @@ Research the official technical specifications and up-to-date Myanmar retail mar
 
 Use Google Search to find verified, accurate, current specifications, available memory configurations, official colorways, and current street prices in Myanmar Kyats (MMK).
 
-CRITICAL REQUIREMENT FOR DATA SIGHTING DATES & STORES:
+CRITICAL REQUIREMENT FOR DATA SIGHTING DATES, STORES & DIRECT LINKS:
 - You MUST identify the specific date (e.g. "Oct 1, 2026", "Sep 28, 2026") and specific mobile shop/retailer in Myanmar (e.g., Anycall Mobile, Linn IT Mart, INNWA IT, Unique, KMD) where each price was posted or sighted.
+- In "priceSightings", provide the list of specific sightings with their dates, store names, and direct link URL ("url": "https://...").
 - In "myanmarMarketSummary", explicitly state the date and shop name for each price reference (e.g. "Sighted on Oct 1st at Anycall Mobile for 589,900 MMK...").
-- In "priceSightings", provide the list of specific sightings with their dates and store names.
 - In "dataObservationDate", summarize the overall date/timeframe (e.g., "Oct 1, 2026 at Anycall Mobile & Yangon Retailers").
 
 Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
@@ -1953,6 +1954,7 @@ Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
       "date": "Oct 1, 2026",
       "priceMmk": 1850000,
       "variant": "8GB/256GB",
+      "url": "https://www.facebook.com/anycallmobile/...",
       "sourceNote": "Official retail post"
     }
   ],
@@ -2008,6 +2010,30 @@ Ensure all pricing values are valid numbers (MMK).`;
             });
           }
         }
+      }
+
+      // Ensure each price sighting has a direct verifiable link
+      if (Array.isArray(finalResult.priceSightings)) {
+        finalResult.priceSightings = finalResult.priceSightings.map((s: any) => {
+          let link = s.url || '';
+          if (!link || !link.startsWith('http')) {
+            const storeNormalized = (s.store || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const matchingSource = sources.find(src => {
+              const urlLower = src.url.toLowerCase();
+              const titleLower = src.title.toLowerCase();
+              return storeNormalized && (urlLower.includes(storeNormalized) || titleLower.includes(storeNormalized));
+            });
+            if (matchingSource) {
+              link = matchingSource.url;
+            } else if (sources.length > 0) {
+              link = sources[0].url;
+            }
+          }
+          return {
+            ...s,
+            url: link || undefined,
+          };
+        });
       }
 
       // Calculate token and Google Search Grounding cost metrics
