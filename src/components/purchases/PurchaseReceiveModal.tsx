@@ -746,7 +746,7 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                             )}
                             {(item.childCategory || item.variant) && (
                               <span className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded text-[10px] font-semibold">
-                                Variant: {item.childCategory || item.variant}
+                                {item.childCategory || item.variant}
                               </span>
                             )}
                             {isPhoneCategory(item.category) && item.condition && item.condition !== 'brand_new' && (
@@ -893,7 +893,7 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                             <Package className="w-4 h-4 text-emerald-600 shrink-0" />
                             <span>
                               Catalog Specifications: <strong className="text-slate-900">{item.name}</strong> ({item.brand})
-                              {(item.childCategory || item.variant) ? ` • Variant: ${item.childCategory || item.variant}` : (item.condition && isPhoneCategory(item.category) ? ` • ${item.condition.replace(/_/g, ' ')}` : '')}
+                              {(item.childCategory || item.variant) ? ` • ${item.childCategory || item.variant}` : (item.condition && isPhoneCategory(item.category) ? ` • ${item.condition.replace(/_/g, ' ')}` : '')}
                               {item.warrantyMonths !== undefined ? ` • ${item.warrantyMonths}M Warranty` : ''}
                               {item.barcode ? ` • Barcode: ${item.barcode}` : ''}
                             </span>

@@ -335,6 +335,11 @@ export const PurchaseWorkflowDetailModal: React.FC<PurchaseWorkflowDetailModalPr
                           <div className="font-bold text-slate-900">{item.name}</div>
                           <div className="text-[11px] text-slate-500 flex items-center space-x-2 mt-0.5">
                             <span className="font-medium text-slate-700">{item.brand}</span>
+                            {(item.childCategory || item.variant) && (
+                              <span className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded text-[10px] font-semibold">
+                                {item.childCategory || item.variant}
+                              </span>
+                            )}
                             {item.condition && (
                               <span className="px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded text-[10px]">
                                 {item.condition.replace(/_/g, ' ')}
@@ -952,6 +957,7 @@ export const PurchaseWorkflowDetailModal: React.FC<PurchaseWorkflowDetailModalPr
                     <strong className="text-black block text-xs">{item.name}</strong>
                     <div className="text-[10px] text-gray-600 flex flex-wrap gap-1 mt-0.5">
                       <span>Brand: {item.brand}</span>
+                      {(item.childCategory || item.variant) && <span>• {item.childCategory || item.variant}</span>}
                       {item.ram && <span>• RAM: {item.ram}</span>}
                       {item.rom && <span>• ROM: {item.rom}</span>}
                       {item.condition && <span>• Condition: {item.condition.replace(/_/g, ' ')}</span>}

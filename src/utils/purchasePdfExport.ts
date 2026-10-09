@@ -240,6 +240,7 @@ export function exportPurchaseOrderPdf(purchase: PurchaseRecord, settings: ShopS
   const headers = ['#', 'Item Description & Model', 'Specs / Variant', 'Qty', `Unit Cost (${settings.currencySymbol})`, `Total (${settings.currencySymbol})`];
   const rows = purchase.items.map((item, idx) => {
     const specs = [
+      item.childCategory || item.variant || '',
       item.ram && item.ram !== '-' ? item.ram : '',
       item.rom && item.rom !== '-' ? item.rom : '',
       item.color && item.color !== '-' ? item.color : '',
@@ -811,7 +812,7 @@ export function exportPurchaseFullDossierPdf(purchase: PurchaseRecord, settings:
   const rows = purchase.items.map((item, idx) => [
     idx + 1,
     item.name,
-    [item.ram, item.rom, item.color].filter(Boolean).join(' • ') || item.category,
+    [item.childCategory || item.variant, item.ram, item.rom, item.color].filter(Boolean).join(' • ') || item.category,
     item.quantity,
     formatCurrency(item.unitCost, '').trim(),
     formatCurrency(item.totalCost || item.unitCost * item.quantity, '').trim(),

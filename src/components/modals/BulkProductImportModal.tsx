@@ -632,7 +632,7 @@ export const BulkProductImportModal: React.FC<BulkProductImportModalProps> = ({
                                   )}
                                   {(product.childCategory || product.variant) && (
                                     <div className="text-[10px] text-indigo-700 font-medium">
-                                      Child Cat: <span className="font-bold">{product.childCategory || product.variant}</span>
+                                      <span className="font-bold">{product.childCategory || product.variant}</span>
                                     </div>
                                   )}
                                   {product.color && product.color !== '-' && (

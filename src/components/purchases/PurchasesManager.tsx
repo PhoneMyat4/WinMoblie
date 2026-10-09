@@ -2957,8 +2957,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                                 <div className="text-[10px] text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
                                   <span>Brand: <strong>{item.brand}</strong></span>
                                   {(item.childCategory || item.variant) && (
-                                    <span className="font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1 py-0.2 rounded text-[10px]">
-                                      Variant: {item.childCategory || item.variant}
+                                    <span className="font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded text-[10px]">
+                                      {item.childCategory || item.variant}
                                     </span>
                                   )}
                                   {item.subCategory && <span>• Sub: {item.subCategory}</span>}

@@ -379,18 +379,33 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     return Array.from(childSet).sort((a, b) => a.localeCompare(b));
   }, [category, subCategory, products]);
 
-  // Available Brands strictly isolated to current category and subcategory from registered products
+  // Available Brands strictly isolated to current category, subcategory, and child category / variant from registered products
   const availableBrands = useMemo(() => {
     const brandSet = new Set<string>();
+    const targetChild = childCategory.trim().toLowerCase();
 
-    // From products matching this category and optional subcategory
+    // From products matching this category, optional subcategory, and optional childCategory
     products.forEach((p) => {
       if (canonicalCategory(p.category) === category) {
-        if (!subCategory || !p.subCategory || p.subCategory.toLowerCase() === subCategory.toLowerCase()) {
-          if (p.brand && p.brand.trim()) brandSet.add(p.brand.trim());
+        if (!subCategory || !p.subCategory || p.subCategory.trim().toLowerCase() === subCategory.trim().toLowerCase()) {
+          const pChild = (p.childCategory || p.variant || '').trim().toLowerCase();
+          if (!targetChild || pChild === targetChild) {
+            if (p.brand && p.brand.trim()) brandSet.add(p.brand.trim());
+          }
         }
       }
     });
+
+    // If no brands found for this specific child category yet, check across subcategory
+    if (brandSet.size === 0) {
+      products.forEach((p) => {
+        if (canonicalCategory(p.category) === category) {
+          if (!subCategory || !p.subCategory || p.subCategory.trim().toLowerCase() === subCategory.trim().toLowerCase()) {
+            if (p.brand && p.brand.trim()) brandSet.add(p.brand.trim());
+          }
+        }
+      });
+    }
 
     // If no brands found for this specific subcategory, check across parent category in registered products
     if (brandSet.size === 0 && !includeGlobalCatalog) {
@@ -411,24 +426,43 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     }
 
     return Array.from(brandSet).sort((a, b) => a.localeCompare(b));
-  }, [category, subCategory, products, includeGlobalCatalog]);
+  }, [category, subCategory, childCategory, products, includeGlobalCatalog]);
 
-  // Available Models strictly isolated to current category, subcategory, and brand
+  // Available Models strictly isolated to current category, subcategory, childCategory, and brand
   const availableModels = useMemo(() => {
     const modelSet = new Set<string>();
+    const targetChild = childCategory.trim().toLowerCase();
 
-    // From registered products matching this category and brand
+    // From registered products matching this category, brand, and optional child category
     products.forEach((p) => {
       if (canonicalCategory(p.category) === category) {
-        if (brand && p.brand && p.brand.toLowerCase() === brand.toLowerCase()) {
-          const raw = (p.model && p.model.trim()) || (p.name && p.name.trim()) || '';
-          if (raw) {
-            const clean = extractCleanModelName(raw, brand);
-            if (clean) modelSet.add(clean);
+        if (brand && p.brand && p.brand.trim().toLowerCase() === brand.trim().toLowerCase()) {
+          const pChild = (p.childCategory || p.variant || '').trim().toLowerCase();
+          if (!targetChild || pChild === targetChild) {
+            const raw = (p.model && p.model.trim()) || (p.name && p.name.trim()) || '';
+            if (raw) {
+              const clean = extractCleanModelName(raw, brand);
+              if (clean) modelSet.add(clean);
+            }
           }
         }
       }
     });
+
+    // Fallback to all models for this brand if none match the childCategory yet
+    if (modelSet.size === 0 && brand) {
+      products.forEach((p) => {
+        if (canonicalCategory(p.category) === category) {
+          if (p.brand && p.brand.trim().toLowerCase() === brand.trim().toLowerCase()) {
+            const raw = (p.model && p.model.trim()) || (p.name && p.name.trim()) || '';
+            if (raw) {
+              const clean = extractCleanModelName(raw, brand);
+              if (clean) modelSet.add(clean);
+            }
+          }
+        }
+      });
+    }
 
     // Only include pre-seeded taxonomy models if user explicitly turned on global catalog
     if (includeGlobalCatalog) {
@@ -446,7 +480,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     }
 
     return Array.from(modelSet).sort((a, b) => a.localeCompare(b));
-  }, [category, brand, subCategory, products, includeGlobalCatalog]);
+  }, [category, brand, subCategory, childCategory, products, includeGlobalCatalog]);
 
   // Filtered model suggestions for the current search query
   const filteredModelSuggestions = useMemo(() => {
@@ -1343,126 +1377,135 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
             brand={brand}
           />
 
-          {/* Category, Subcategory & Condition / Child Category */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-            <div>
-              <div className="h-5 mb-1.5 flex items-center justify-between gap-1 overflow-hidden">
-                <label className="block text-xs font-bold text-slate-700 truncate">
-                  Category *
-                </label>
-              </div>
-              <select
-                id="new-product-category-select"
-                value={category}
-                onChange={(e) => handleCategoryChange(e.target.value as ProductCategory)}
-                className="h-9 w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-              >
-                {CANONICAL_CATEGORIES.map((cat) => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.label}
-                  </option>
-                ))}
-              </select>
+          {/* Step 1: Category, Subcategory & Condition / Child Category */}
+          <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-200/90 space-y-2.5">
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
+              <span className="flex items-center gap-1.5 text-indigo-700">
+                <span className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px]">1</span>
+                <span>Taxonomy Classification: Category ➔ Subcategory ➔ Child Category / Variant</span>
+              </span>
             </div>
 
-            <div>
-              <div className="h-5 mb-1.5 flex items-center justify-between gap-1 overflow-hidden">
-                <label className="block text-xs font-bold text-slate-700 truncate min-w-0">
-                  Subcategory
-                </label>
-                {availableSubCategories.length > 0 && (
-                  <span className="text-[10px] text-slate-400 font-medium shrink-0">({availableSubCategories.length})</span>
-                )}
-              </div>
-              <div className="relative">
-                <input
-                  id="new-product-subcategory-input"
-                  type="text"
-                  autoComplete="off"
-                  list="new-product-subcategory-datalist"
-                  placeholder="Type or select subcategory..."
-                  value={subCategory}
-                  onChange={(e) => handleSubCategoryChange(e.target.value)}
-                  className="h-9 w-full pl-3 pr-8 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 font-medium bg-white focus:ring-2 focus:ring-indigo-500"
-                />
-                {subCategory && (
-                  <button
-                    type="button"
-                    onClick={() => handleSubCategoryChange('')}
-                    title="Clear Subcategory"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                <datalist id="new-product-subcategory-datalist">
-                  {availableSubCategories.map((sub) => (
-                    <option key={sub} value={sub} />
-                  ))}
-                </datalist>
-              </div>
-            </div>
-
-            {isPhone ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
               <div>
                 <div className="h-5 mb-1.5 flex items-center justify-between gap-1 overflow-hidden">
-                  <label className="block text-xs font-bold text-slate-700 truncate">Condition Grade</label>
+                  <label className="block text-xs font-bold text-slate-700 truncate">
+                    Category *
+                  </label>
                 </div>
                 <select
-                  id="new-product-condition-select"
-                  value={condition}
-                  onChange={(e) => setCondition(e.target.value as DeviceCondition)}
-                  className="h-9 w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 bg-white cursor-pointer"
+                  id="new-product-category-select"
+                  value={category}
+                  onChange={(e) => handleCategoryChange(e.target.value as ProductCategory)}
+                  className="h-9 w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                 >
-                  <option value="brand_new">Brand New (Box Pack)</option>
-                  <option value="used_grade_a_plus">Used - Grade A+ (Like New)</option>
-                  <option value="used_grade_a">Used - Grade A (Minor Wear)</option>
-                  <option value="used_grade_b">Used - Grade B (Visible Scratches)</option>
-                  <option value="used_grade_c">Used - Grade C (Heavy Wear)</option>
+                  {CANONICAL_CATEGORIES.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.label}
+                    </option>
+                  ))}
                 </select>
               </div>
-            ) : (
+
               <div>
                 <div className="h-5 mb-1.5 flex items-center justify-between gap-1 overflow-hidden">
-                  <label 
-                    className="block text-xs font-bold text-slate-700 truncate min-w-0 flex-1"
-                    title={subCategory ? `${subCategory} Child Category` : 'Child Category'}
-                  >
-                    Child Category
+                  <label className="block text-xs font-bold text-slate-700 truncate min-w-0">
+                    Subcategory
                   </label>
-                  {availableChildCategories.length > 0 && (
-                    <span className="text-[10px] text-slate-400 font-medium shrink-0">({availableChildCategories.length})</span>
+                  {availableSubCategories.length > 0 && (
+                    <span className="text-[10px] text-slate-400 font-medium shrink-0">({availableSubCategories.length})</span>
                   )}
                 </div>
                 <div className="relative">
                   <input
-                    id="new-product-child-category-input"
+                    id="new-product-subcategory-input"
                     type="text"
                     autoComplete="off"
-                    list="new-product-child-category-datalist"
-                    placeholder={subCategory ? `Type ${subCategory} child category...` : 'Type child category / variant (e.g. 65W GaN)...'}
-                    value={childCategory}
-                    onChange={(e) => setChildCategory(e.target.value)}
+                    list="new-product-subcategory-datalist"
+                    placeholder="Type or select subcategory..."
+                    value={subCategory}
+                    onChange={(e) => handleSubCategoryChange(e.target.value)}
                     className="h-9 w-full pl-3 pr-8 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 font-medium bg-white focus:ring-2 focus:ring-indigo-500"
                   />
-                  {childCategory && (
+                  {subCategory && (
                     <button
                       type="button"
-                      onClick={() => setChildCategory('')}
-                      title="Clear Variant"
+                      onClick={() => handleSubCategoryChange('')}
+                      title="Clear Subcategory"
                       className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   )}
-                  <datalist id="new-product-child-category-datalist">
-                    {availableChildCategories.map((c) => (
-                      <option key={c} value={c} />
+                  <datalist id="new-product-subcategory-datalist">
+                    {availableSubCategories.map((sub) => (
+                      <option key={sub} value={sub} />
                     ))}
                   </datalist>
                 </div>
               </div>
-            )}
+
+              {isPhone ? (
+                <div>
+                  <div className="h-5 mb-1.5 flex items-center justify-between gap-1 overflow-hidden">
+                    <label className="block text-xs font-bold text-slate-700 truncate">Condition Grade</label>
+                  </div>
+                  <select
+                    id="new-product-condition-select"
+                    value={condition}
+                    onChange={(e) => setCondition(e.target.value as DeviceCondition)}
+                    className="h-9 w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 bg-white cursor-pointer"
+                  >
+                    <option value="brand_new">Brand New (Box Pack)</option>
+                    <option value="used_grade_a_plus">Used - Grade A+ (Like New)</option>
+                    <option value="used_grade_a">Used - Grade A (Minor Wear)</option>
+                    <option value="used_grade_b">Used - Grade B (Visible Scratches)</option>
+                    <option value="used_grade_c">Used - Grade C (Heavy Wear)</option>
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <div className="h-5 mb-1.5 flex items-center justify-between gap-1 overflow-hidden">
+                    <label 
+                      className="block text-xs font-bold text-purple-800 truncate min-w-0 flex-1"
+                      title={subCategory ? `${subCategory} Child Category / Variant` : 'Child Category / Variant'}
+                    >
+                      Child Category / Variant
+                    </label>
+                    {availableChildCategories.length > 0 && (
+                      <span className="text-[10px] text-purple-600 font-bold shrink-0">({availableChildCategories.length} variants)</span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="new-product-child-category-input"
+                      type="text"
+                      autoComplete="off"
+                      list="new-product-child-category-datalist"
+                      placeholder={subCategory ? `Type ${subCategory} variant (e.g. V8, Type-C)...` : 'Variant / Child category (e.g. V8, Type-C, GaN)...'}
+                      value={childCategory}
+                      onChange={(e) => setChildCategory(e.target.value)}
+                      className="h-9 w-full pl-3 pr-8 py-1.5 border border-purple-300 rounded-lg text-xs text-slate-900 font-medium bg-white focus:ring-2 focus:ring-purple-500"
+                    />
+                    {childCategory && (
+                      <button
+                        type="button"
+                        onClick={() => setChildCategory('')}
+                        title="Clear Variant"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <datalist id="new-product-child-category-datalist">
+                      {availableChildCategories.map((c) => (
+                        <option key={c} value={c} />
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Brand & Product Title / Model */}

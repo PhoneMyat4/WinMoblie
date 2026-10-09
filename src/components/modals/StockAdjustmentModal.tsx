@@ -148,7 +148,14 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-slate-900 text-base">Adjust Stock Level</h3>
-              <p className="text-xs text-slate-500 line-clamp-1">{product.brand} - {product.name}</p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="text-xs text-slate-500 line-clamp-1">{product.brand} - {product.name}</p>
+                {(product.childCategory || product.variant) && (
+                  <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-100 text-purple-700 border border-purple-200">
+                    Variant: {product.childCategory || product.variant}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <button
