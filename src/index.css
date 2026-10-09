@@ -339,3 +339,64 @@ input::placeholder, textarea::placeholder {
     color: #000000 !important;
   }
 }
+
+/* Liquid Glass UI Card */
+#product-card-prod-1790840168350-0vwtn,
+.liquid-glass,
+.liquid-glass-card {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Interactive States */
+#product-card-prod-1790840168350-0vwtn:active,
+.liquid-glass:active,
+.liquid-glass-card:active {
+  transform: scale(0.95);
+  border-radius: 44px;
+}
+
+#product-card-prod-1790840168350-0vwtn:focus-visible,
+.liquid-glass:focus-visible,
+.liquid-glass-card:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+}
+
+/* Inner Gloss */
+#product-card-prod-1790840168350-0vwtn::before,
+.liquid-glass::before,
+.liquid-glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, transparent 40%, transparent 60%, rgba(255, 255, 255, 0.1) 100%);
+  pointer-events: none;
+}
+
+/* Interactive Glare */
+#product-card-prod-1790840168350-0vwtn::after,
+.liquid-glass::after,
+.liquid-glass-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at var(--x, 50%) var(--y, 50%), rgba(255, 255, 255, 0.4) 0%, transparent 60%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#product-card-prod-1790840168350-0vwtn:hover::after,
+.liquid-glass:hover::after,
+.liquid-glass-card:hover::after {
+  opacity: 1;
+}
+

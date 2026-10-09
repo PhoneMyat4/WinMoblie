@@ -364,13 +364,13 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                               saleData={saleData}
                             />
                             {!isFinalPage && isTable && (
-                              <div className="space-y-2 pt-1">
-                                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[11px]">
+                              <div className="pt-2 border-t border-slate-200">
+                                <div className="flex items-center justify-between text-[11px] py-1">
                                   <div className="flex items-center gap-2">
                                     <span className="text-slate-500 font-bold uppercase text-[10px]">Sheet {pageNumber} Subtotal:</span>
                                     <span className="font-mono font-bold text-slate-900">{formatCurrency(pageSubtotal, settings.currencySymbol || 'Ks')}</span>
                                   </div>
-                                  <div className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-lg">
+                                  <div className="text-[10px] font-bold text-slate-700">
                                     Continued on Sheet {pageNumber + 1} of {totalPages} ➔
                                   </div>
                                 </div>

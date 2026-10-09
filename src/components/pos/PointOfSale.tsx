@@ -1321,6 +1321,38 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
     };
   }, []);
 
+  // Liquid glass UI card glare effect logic
+  useEffect(() => {
+    const cards = document.querySelectorAll<HTMLElement>('.liquid-glass-card, .liquid-glass');
+    const handleMove = (e: MouseEvent) => {
+      const card = e.currentTarget as HTMLElement;
+      if (!card) return;
+      const rect = card.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      card.style.setProperty('--x', `${x}%`);
+      card.style.setProperty('--y', `${y}%`);
+    };
+    const handleLeave = (e: MouseEvent) => {
+      const card = e.currentTarget as HTMLElement;
+      if (!card) return;
+      card.style.setProperty('--x', '50%');
+      card.style.setProperty('--y', '50%');
+    };
+
+    cards.forEach(card => {
+      card.addEventListener('mousemove', handleMove as EventListener);
+      card.addEventListener('mouseleave', handleLeave as EventListener);
+    });
+
+    return () => {
+      cards.forEach(card => {
+        card.removeEventListener('mousemove', handleMove as EventListener);
+        card.removeEventListener('mouseleave', handleLeave as EventListener);
+      });
+    };
+  }, [filteredProducts]);
+
   return (
     <div id="pos-screen" className="max-w-7xl mx-auto p-2.5 sm:p-6 lg:p-8 w-full min-w-0 overflow-x-hidden">
       
@@ -2260,11 +2292,22 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
                     id={`product-card-${product.id}`}
                     onClick={() => !isUnavailable && addToCart(product)}
                     onMouseEnter={(e) => handleProductMouseEnter(product, e)}
-                    onMouseLeave={handleProductMouseLeave}
-                    className={`bg-white rounded-xl border p-3 flex flex-col justify-between transition-all cursor-pointer select-none group relative ${
+                    onMouseMove={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const x = ((e.clientX - rect.left) / rect.width) * 100;
+                      const y = ((e.clientY - rect.top) / rect.height) * 100;
+                      e.currentTarget.style.setProperty('--x', `${x}%`);
+                      e.currentTarget.style.setProperty('--y', `${y}%`);
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.setProperty('--x', '50%');
+                      e.currentTarget.style.setProperty('--y', '50%');
+                      handleProductMouseLeave();
+                    }}
+                    className={`liquid-glass liquid-glass-card p-3 flex flex-col justify-between cursor-pointer select-none group relative ${
                       isUnavailable
-                        ? 'opacity-60 border-slate-200 bg-slate-50 cursor-not-allowed'
-                        : 'border-slate-200 hover:border-indigo-400 hover:shadow-md active:scale-98'
+                        ? 'opacity-60 cursor-not-allowed'
+                        : ''
                     }`}
                   >
                     <div>
