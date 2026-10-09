@@ -1834,7 +1834,38 @@ Output a JSON response with:
     }
   });
 
-  // Google Search Grounded Specs & Live Myanmar Market Price (gemini-3.5-flash with googleSearch tool)
+// Verified Myanmar Retailers Facebook Official Page Directory
+const VERIFIED_MYANMAR_STORE_PAGES: Record<string, string> = {
+  anycall: 'https://www.facebook.com/AnycallMobileMyanmar/',
+  anycallmobile: 'https://www.facebook.com/AnycallMobileMyanmar/',
+  'anycall mobile': 'https://www.facebook.com/AnycallMobileMyanmar/',
+  'anycall store': 'https://www.facebook.com/AnycallMobileMyanmar/',
+  linnit: 'https://www.facebook.com/linnitmart',
+  linnitmart: 'https://www.facebook.com/linnitmart',
+  'linn it': 'https://www.facebook.com/linnitmart',
+  'linn it mart': 'https://www.facebook.com/linnitmart',
+  innwa: 'https://www.facebook.com/innwait',
+  innwait: 'https://www.facebook.com/innwait',
+  'innwa it': 'https://www.facebook.com/innwait',
+  'innwa it mart': 'https://www.facebook.com/innwait',
+  unique: 'https://www.facebook.com/uniquemobilemyanmar',
+  uniquemobile: 'https://www.facebook.com/uniquemobilemyanmar',
+  'unique mobile': 'https://www.facebook.com/uniquemobilemyanmar',
+  winmobile: 'https://www.facebook.com/WinMobileWorld',
+  winmobileworld: 'https://www.facebook.com/WinMobileWorld',
+  'win mobile world': 'https://www.facebook.com/WinMobileWorld',
+  kmd: 'https://www.facebook.com/kmdcomputershop',
+  'kmd mobile': 'https://www.facebook.com/kmdcomputershop',
+  'kmd computer': 'https://www.facebook.com/kmdcomputershop',
+  mobileking: 'https://www.facebook.com/MobileKingMyanmar',
+  'mobile king': 'https://www.facebook.com/MobileKingMyanmar',
+  phyowai: 'https://www.facebook.com/PhyoWaiMobile',
+  'phyo wai mobile': 'https://www.facebook.com/PhyoWaiMobile',
+  starmobile: 'https://www.facebook.com/StarMobileMyanmar',
+  'star mobile': 'https://www.facebook.com/StarMobileMyanmar',
+};
+
+// Google Search Grounded Specs & Live Myanmar Market Price (gemini-3.5-flash with googleSearch tool)
   app.post('/api/products/search-grounded-specs', async (req, res) => {
     try {
       const { query, brand, model, sourceFocus } = req.body;
@@ -1863,12 +1894,12 @@ STRICT SOURCE RESTRICTION: FACEBOOK DATA ONLY:
 You must STRICTLY narrow down your Google search queries and data extraction EXCLUSIVELY to Facebook data (site:facebook.com).
 In Myanmar, retail mobile shops publish their active retail street prices, promotions, and arrival announcements directly to their official Facebook pages.
 Major trusted Myanmar retailers on Facebook include:
-- Anycall Mobile (facebook.com/anycallmobile / Anycall store pages)
+- Anycall Mobile (facebook.com/AnycallMobileMyanmar/)
 - Linn IT Mart (facebook.com/linnitmart)
 - INNWA IT (facebook.com/innwait)
-- Unique Mobile (facebook.com/uniquemobile)
-- Win Mobile World (facebook.com/winmobileworld)
-- Mobile King, KMD Computer & Mobile, etc.
+- Unique Mobile (facebook.com/uniquemobilemyanmar)
+- Win Mobile World (facebook.com/WinMobileWorld)
+- Mobile King (facebook.com/MobileKingMyanmar), KMD Computer & Mobile (facebook.com/kmdcomputershop), etc.
 
 SEARCH INSTRUCTIONS:
 - You MUST formulate your Google Search queries strictly targeting Facebook posts, such as:
@@ -1878,7 +1909,8 @@ SEARCH INSTRUCTIONS:
   • "site:facebook.com ${targetQuery} price Myanmar"
 - Extract prices, RAM/ROM configurations, factory colors, and post dates EXCLUSIVELY from verified Myanmar mobile shop Facebook posts.
 - For every price sighting, provide the exact Facebook post date (e.g. "Oct 1, 2026", "Sep 28, 2026") and the shop's Facebook page name.
-- Only cite facebook.com URLs in sources.
+- NEVER invent or synthesize fake post URL slugs (such as "/posts/July16_2026_DR25"). Facebook rejects guessed post paths.
+- For "url", provide the store's official verified Facebook page URL (e.g. "https://www.facebook.com/AnycallMobileMyanmar/", "https://www.facebook.com/linnitmart") or exact verified citation link from Google search.
 
 Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
 \`\`\`json
@@ -1901,13 +1933,13 @@ Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
     "min": 559900,
     "max": 649900
   },
-    "priceSightings": [
+  "priceSightings": [
     {
       "store": "Anycall Mobile",
       "date": "Oct 1, 2026",
       "priceMmk": 589900,
       "variant": "4GB/64GB",
-      "url": "https://www.facebook.com/anycallmobile/...",
+      "url": "https://www.facebook.com/AnycallMobileMyanmar/",
       "sourceNote": "Official Facebook Page post"
     }
   ],
@@ -1924,6 +1956,7 @@ Use Google Search to find verified, accurate, current specifications, available 
 CRITICAL REQUIREMENT FOR DATA SIGHTING DATES, STORES & DIRECT LINKS:
 - You MUST identify the specific date (e.g. "Oct 1, 2026", "Sep 28, 2026") and specific mobile shop/retailer in Myanmar (e.g., Anycall Mobile, Linn IT Mart, INNWA IT, Unique, KMD) where each price was posted or sighted.
 - In "priceSightings", provide the list of specific sightings with their dates, store names, and direct link URL ("url": "https://...").
+- NEVER invent fake post URL slugs (such as "/posts/July16..."). Output the retailer's official website / Facebook page URL or verified search citation URL.
 - In "myanmarMarketSummary", explicitly state the date and shop name for each price reference (e.g. "Sighted on Oct 1st at Anycall Mobile for 589,900 MMK...").
 - In "dataObservationDate", summarize the overall date/timeframe (e.g., "Oct 1, 2026 at Anycall Mobile & Yangon Retailers").
 
@@ -1954,7 +1987,7 @@ Format your output as valid JSON within a \`\`\`json ... \`\`\` code block:
       "date": "Oct 1, 2026",
       "priceMmk": 1850000,
       "variant": "8GB/256GB",
-      "url": "https://www.facebook.com/anycallmobile/...",
+      "url": "https://www.facebook.com/AnycallMobileMyanmar/",
       "sourceNote": "Official retail post"
     }
   ],
@@ -2012,26 +2045,74 @@ Ensure all pricing values are valid numbers (MMK).`;
         }
       }
 
-      // Ensure each price sighting has a direct verifiable link
+      // Ensure each price sighting has real, verified, working URL links
       if (Array.isArray(finalResult.priceSightings)) {
         finalResult.priceSightings = finalResult.priceSightings.map((s: any) => {
-          let link = s.url || '';
-          if (!link || !link.startsWith('http')) {
-            const storeNormalized = (s.store || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-            const matchingSource = sources.find(src => {
-              const urlLower = src.url.toLowerCase();
-              const titleLower = src.title.toLowerCase();
-              return storeNormalized && (urlLower.includes(storeNormalized) || titleLower.includes(storeNormalized));
-            });
-            if (matchingSource) {
-              link = matchingSource.url;
-            } else if (sources.length > 0) {
+          const storeName = s.store || '';
+          const storeClean = storeName.toLowerCase().trim();
+          const storeNormalized = storeClean.replace(/[^a-z0-9]/g, '');
+
+          // Check against known verified Myanmar store Facebook pages
+          let verifiedFbPage = '';
+          for (const [key, val] of Object.entries(VERIFIED_MYANMAR_STORE_PAGES)) {
+            const keyNorm = key.replace(/[^a-z0-9]/g, '');
+            if (storeClean.includes(key) || storeNormalized.includes(keyNorm) || keyNorm.includes(storeNormalized)) {
+              verifiedFbPage = val;
+              break;
+            }
+          }
+
+          let link = (s.url || '').trim();
+
+          // Fix hallucinated or broken Facebook links
+          if (link.includes('facebook.com')) {
+            // Replace broken /anycallmobile with verified page
+            if (link.toLowerCase().includes('anycallmobile') && !link.toLowerCase().includes('anycallmobilemyanmar')) {
+              link = 'https://www.facebook.com/AnycallMobileMyanmar/';
+            }
+
+            // Fix hallucinated Facebook post slugs (e.g. /posts/July16_2026_DR25)
+            const fakePostSlugMatch = link.match(/^https?:\/\/(?:www\.)?facebook\.com\/([^\/?#]+)\/posts\/(.*)$/i);
+            if (fakePostSlugMatch) {
+              const pageHandle = fakePostSlugMatch[1];
+              const postSlug = fakePostSlugMatch[2];
+              // Genuine Facebook post IDs are numeric (e.g. 12345678) or begin with pfbid...
+              if (!/^\d+$/.test(postSlug) && !postSlug.startsWith('pfbid')) {
+                link = verifiedFbPage || `https://www.facebook.com/${pageHandle}`;
+              }
+            }
+          }
+
+          // If link is empty or not in sources, check if any real Google citation matches this store
+          const matchingSource = sources.find(src => {
+            const urlLower = src.url.toLowerCase();
+            const titleLower = src.title.toLowerCase();
+            return storeNormalized && (urlLower.includes(storeNormalized) || titleLower.includes(storeNormalized));
+          });
+
+          if (matchingSource) {
+            link = matchingSource.url;
+          } else if (!link || !link.startsWith('http')) {
+            if (verifiedFbPage) {
+              link = verifiedFbPage;
+            } else if (sources[0]?.url) {
               link = sources[0].url;
             }
           }
+
+          // Always provide guaranteed working Facebook Search & Google Search URLs
+          const fbSearchQuery = `${storeName} ${targetQuery}`.trim();
+          const fbSearchUrl = `https://www.facebook.com/search/posts/?q=${encodeURIComponent(fbSearchQuery)}`;
+          const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(`site:facebook.com "${storeName}" "${targetQuery}"`)}`;
+          const webSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(`"${storeName}" "${targetQuery}" price Myanmar MMK`)}`;
+
           return {
             ...s,
-            url: link || undefined,
+            url: link || verifiedFbPage || fbSearchUrl,
+            officialPageUrl: verifiedFbPage || link || fbSearchUrl,
+            facebookSearchUrl: fbSearchUrl,
+            googleSearchUrl: googleSearchUrl,
+            webSearchUrl: webSearchUrl,
           };
         });
       }

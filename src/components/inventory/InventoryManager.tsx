@@ -111,6 +111,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('all');
+  const [selectedChildCategory, setSelectedChildCategory] = useState<string>('all');
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
   const [selectedRam, setSelectedRam] = useState<string>('all');
   const [selectedRom, setSelectedRom] = useState<string>('all');
@@ -493,6 +494,31 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [safeProducts, selectedCategory, selectedBrand]);
 
+  // Available Child Categories (or variant tags) for current category, subcategory & brand selection
+  const availableChildCategories = useMemo(() => {
+    const targetProducts = safeProducts.filter(p => {
+      if (!p) return false;
+      const matchCat = selectedCategory === 'all' || canonicalCategory(p.category) === selectedCategory;
+      const matchSubCat = selectedSubCategory === 'all' || 
+        (p.subCategory && p.subCategory.toLowerCase() === selectedSubCategory.toLowerCase());
+      const matchBrand = selectedBrand === 'all' || (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
+      return matchCat && matchSubCat && matchBrand;
+    });
+
+    const childMap = new Map<string, number>();
+    targetProducts.forEach(p => {
+      if (!p) return;
+      const child = (p.childCategory || p.variant || '').trim();
+      if (child && child !== '-') {
+        childMap.set(child, (childMap.get(child) || 0) + 1);
+      }
+    });
+
+    return Array.from(childMap.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [safeProducts, selectedCategory, selectedSubCategory, selectedBrand]);
+
   // Available RAM options (extracted from phone products)
   const availableRams = useMemo(() => {
     const targetProducts = safeProducts.filter(p => {
@@ -637,6 +663,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       const matchesCat = selectedCategory === 'all' || canonicalCategory(p.category) === selectedCategory;
       const matchesSubCat = selectedSubCategory === 'all' || 
         (p.subCategory && p.subCategory.toLowerCase() === selectedSubCategory.toLowerCase());
+      const matchesChildCat = selectedChildCategory === 'all' ||
+        ((p.childCategory || p.variant || '').toLowerCase() === selectedChildCategory.toLowerCase());
       const matchesBrand = selectedBrand === 'all' ||
         (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
 
@@ -669,19 +697,21 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           ? Boolean(p.isGiftItem)
           : !p.isGiftItem;
 
-      if (!matchesCat || !matchesSubCat || !matchesBrand || !matchesRam || !matchesRom || !matchesColor || !matchesLowStock || !matchesFoc) {
+      if (!matchesCat || !matchesSubCat || !matchesChildCat || !matchesBrand || !matchesRam || !matchesRom || !matchesColor || !matchesLowStock || !matchesFoc) {
         return false;
       }
 
       if (tokens.length === 0) return true;
 
-      // Searchable string containing all metadata (Name, Brand, Model, RAM, ROM, Storage, Color, Category, Subcategory, SKU, Barcode, Condition, IMEI)
+      // Searchable string containing all metadata (Name, Brand, Model, RAM, ROM, Storage, Color, Category, Subcategory, Child Category, SKU, Barcode, Condition, IMEI)
       const searchableParts = [
         p.name,
         p.brand,
         p.model,
         p.category,
         p.subCategory,
+        p.childCategory,
+        p.variant,
         p.ram,
         p.rom,
         p.storage,
@@ -699,7 +729,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       // Every word typed in the search box must match at least one attribute
       return tokens.every(token => searchableText.includes(token));
     });
-  }, [products, selectedCategory, selectedSubCategory, selectedBrand, selectedRam, selectedRom, selectedColor, showLowStockOnly, focFilter, searchQuery]);
+  }, [products, selectedCategory, selectedSubCategory, selectedChildCategory, selectedBrand, selectedRam, selectedRom, selectedColor, showLowStockOnly, focFilter, searchQuery]);
 
   // Financial metrics for filtered / catalog listed items
   const filteredUnits = useMemo(() => {
@@ -815,6 +845,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   const handleCategoryChange = (catId: string) => {
     setSelectedCategory(catId);
     setSelectedSubCategory('all');
+    setSelectedChildCategory('all');
     setSelectedBrand('all');
     setSelectedRam('all');
     setSelectedRom('all');
@@ -824,6 +855,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   const handleResetAllFilters = () => {
     setSelectedCategory('all');
     setSelectedSubCategory('all');
+    setSelectedChildCategory('all');
     setSelectedBrand('all');
     setSelectedRam('all');
     setSelectedRom('all');
@@ -1642,6 +1674,81 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           </div>
         )}
 
+        {/* Row 3b: Child Category Filter Section */}
+        {availableChildCategories.length > 0 && (
+          <div id="inventory-child-category-filter-bar" className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2 pt-2.5 border-t border-slate-200/80 text-xs">
+            <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-0.5 min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-purple-700 font-bold shrink-0 text-[11px] px-1">
+                <Layers className="w-3.5 h-3.5 text-purple-600" />
+                <span>Child Category:</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedChildCategory('all')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                  selectedChildCategory === 'all'
+                    ? 'bg-purple-700 text-white shadow-xs'
+                    : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                All Child Categories
+              </button>
+
+              {availableChildCategories.map(child => (
+                <button
+                  key={child.name}
+                  type="button"
+                  onClick={() => setSelectedChildCategory(selectedChildCategory.toLowerCase() === child.name.toLowerCase() ? 'all' : child.name)}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                    selectedChildCategory.toLowerCase() === child.name.toLowerCase()
+                      ? 'bg-purple-700 text-white shadow-xs'
+                      : 'bg-white text-slate-700 hover:bg-purple-50 hover:text-purple-700 border border-slate-200'
+                  }`}
+                  title={`${child.name} (${child.count} items)`}
+                >
+                  <span>{child.name}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                    selectedChildCategory.toLowerCase() === child.name.toLowerCase()
+                      ? 'bg-purple-900 text-purple-100'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {child.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-slate-200">
+              <select
+                id="inventory-child-category-dropdown"
+                value={selectedChildCategory}
+                onChange={(e) => setSelectedChildCategory(e.target.value)}
+                className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-medium focus:ring-2 focus:ring-purple-600 focus:outline-hidden cursor-pointer"
+              >
+                <option value="all">All Child Categories</option>
+                {availableChildCategories.map(child => (
+                  <option key={child.name} value={child.name}>
+                    {child.name} ({child.count})
+                  </option>
+                ))}
+              </select>
+
+              {selectedChildCategory !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedChildCategory('all')}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-red-600 hover:bg-white rounded-lg border border-transparent hover:border-slate-200 transition-all cursor-pointer"
+                  title="Clear child category filter"
+                >
+                  <X className="w-3 h-3" />
+                  <span>Reset</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Row 4: Color Variant Filter Section */}
         {availableColors.length > 0 && (
           <div id="inventory-color-filter-bar" className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2 pt-2.5 border-t border-slate-200/80 text-xs">
@@ -1727,7 +1834,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       </div>
 
       {/* Active Filters Summary Strip */}
-      {(selectedBrand !== 'all' || selectedRam !== 'all' || selectedRom !== 'all' || selectedColor !== 'all' || selectedSubCategory !== 'all' || selectedCategory !== 'all' || searchQuery || showLowStockOnly || focFilter !== 'all') && (
+      {(selectedBrand !== 'all' || selectedRam !== 'all' || selectedRom !== 'all' || selectedColor !== 'all' || selectedSubCategory !== 'all' || selectedChildCategory !== 'all' || selectedCategory !== 'all' || searchQuery || showLowStockOnly || focFilter !== 'all') && (
         <div className="flex items-center justify-between gap-2 px-3 py-2 bg-indigo-50/60 border border-indigo-100 rounded-xl text-xs flex-wrap animate-in fade-in duration-150">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-slate-500 font-bold text-[11px]">Active Filters ({filteredProducts.length} results):</span>
@@ -1790,6 +1897,14 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               <span className="inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-800 px-2 py-0.5 rounded-md font-semibold text-[11px]">
                 Sub: {selectedSubCategory}
                 <button onClick={() => setSelectedSubCategory('all')} className="hover:text-red-600 cursor-pointer"><X className="w-3 h-3" /></button>
+              </span>
+            )}
+
+            {selectedChildCategory !== 'all' && (
+              <span className="inline-flex items-center gap-1 bg-white border border-purple-200 text-purple-900 px-2 py-0.5 rounded-md font-semibold text-[11px]">
+                <Layers className="w-3 h-3 text-purple-600" />
+                <span>Child Cat: {selectedChildCategory}</span>
+                <button onClick={() => setSelectedChildCategory('all')} className="hover:text-red-600 cursor-pointer"><X className="w-3 h-3" /></button>
               </span>
             )}
 
@@ -2204,6 +2319,15 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                           <X className="w-3.5 h-3.5" /> Clear subcategory filter ("{selectedSubCategory}")
                         </button>
                       )}
+                      {selectedChildCategory !== 'all' && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedChildCategory('all')}
+                          className="inline-flex items-center gap-1.5 text-xs text-purple-600 font-bold hover:underline cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" /> Clear child category filter ("{selectedChildCategory}")
+                        </button>
+                      )}
                       {selectedCategory !== 'all' && (
                         <button
                           type="button"
@@ -2374,9 +2498,14 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                                 {cond.label}
                               </span>
                             ) : (product.childCategory || product.variant) ? (
-                              <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded border bg-indigo-50 text-indigo-700 border-indigo-200">
-                                Variant: {product.childCategory || product.variant}
-                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedChildCategory((product.childCategory || product.variant)!)}
+                                title={`Filter by child category: ${product.childCategory || product.variant}`}
+                                className="inline-block px-2 py-0.5 text-[10px] font-bold rounded border bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 transition-colors cursor-pointer"
+                              >
+                                Child Cat: {product.childCategory || product.variant}
+                              </button>
                             ) : null}
                             {product.color && product.color.trim() && (
                               <button

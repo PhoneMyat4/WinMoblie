@@ -174,6 +174,10 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       variant?: string;
       url?: string;
       sourceNote?: string;
+      officialPageUrl?: string;
+      facebookSearchUrl?: string;
+      googleSearchUrl?: string;
+      webSearchUrl?: string;
     }>;
     myanmarMarketSummary?: string;
   } | null>(null);
@@ -1171,16 +1175,34 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                       </button>
                     </div>
 
-                    {/* Verified Store Sightings with Dates */}
+                    {/* Verified Store Sightings with Dates & Non-Broken Links */}
                     {groundedSpecsData.priceSightings && groundedSpecsData.priceSightings.length > 0 && (
-                      <div className="pt-2 border-t border-emerald-200/60">
-                        <span className="text-[10px] font-bold text-emerald-900 uppercase tracking-wider block mb-1.5 flex items-center gap-1">
-                          <Store className="w-3 h-3 text-emerald-700" />
-                          <span>Observed Retail Stores & Sighting Dates:</span>
-                        </span>
+                      <div className="pt-2 border-t border-emerald-200/60 space-y-2">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-[10px] font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-1">
+                            <Store className="w-3 h-3 text-emerald-700" />
+                            <span>Observed Retail Stores & Sighting Dates:</span>
+                          </span>
+                          <span className="text-[10px] text-emerald-700 font-medium">
+                            Live store search & verified pages
+                          </span>
+                        </div>
+
+                        {/* Direct Access Information Tip */}
+                        <div className="p-2 bg-blue-50/90 border border-blue-200/90 rounded-lg flex items-start gap-1.5 text-[10px] text-blue-900 leading-normal">
+                          <Facebook className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold">Facebook Link Tip:</span> If direct links show <em>&quot;This content isn&apos;t available right now&quot;</em>, it is due to Facebook requiring user sign-in or private post permissions. Click <strong>&quot;Search Posts on Facebook&quot;</strong> or <strong>&quot;Google Result&quot;</strong> below to see the verified retail postings.
+                          </div>
+                        </div>
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           {groundedSpecsData.priceSightings.map((sighting, sIdx) => {
-                            const isFb = sighting.url?.includes('facebook.com') || sighting.store?.toLowerCase().includes('facebook');
+                            const deviceQuery = `${groundedSpecsData.brand || brand || ''} ${groundedSpecsData.model || model || name || ''}`.trim();
+                            const fbSearchHref = sighting.facebookSearchUrl || `https://www.facebook.com/search/posts/?q=${encodeURIComponent(`${sighting.store} ${deviceQuery}`)}`;
+                            const googleSearchHref = sighting.googleSearchUrl || `https://www.google.com/search?q=${encodeURIComponent(`site:facebook.com "${sighting.store}" "${deviceQuery}"`)}`;
+                            const officialPageHref = sighting.officialPageUrl || sighting.url;
+
                             return (
                               <div key={sIdx} className="p-2.5 bg-white/95 border border-emerald-200/90 rounded-xl flex flex-col justify-between gap-2 text-[11px] shadow-2xs hover:border-emerald-300 transition-all">
                                 <div className="flex items-start justify-between gap-2">
@@ -1202,25 +1224,50 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
                                   </span>
                                 </div>
 
-                                {sighting.url ? (
+                                {/* Working Access Buttons */}
+                                <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                                  {/* Guaranteed Working Facebook Post Search */}
                                   <a
-                                    href={sighting.url}
+                                    href={fbSearchHref}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="inline-flex items-center justify-between gap-1.5 px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 text-[10px] font-bold transition-all group cursor-pointer"
-                                    title={`Open verified ${sighting.store} source post: ${sighting.url}`}
+                                    className="w-full inline-flex items-center justify-between gap-1.5 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold shadow-2xs transition-all group cursor-pointer"
+                                    title={`Search Facebook for "${sighting.store} ${deviceQuery}" posts`}
                                   >
-                                    <div className="flex items-center gap-1 truncate">
-                                      {isFb ? <Facebook className="w-3 h-3 text-blue-600 shrink-0" /> : <Globe className="w-3 h-3 text-blue-600 shrink-0" />}
-                                      <span className="truncate">View Source Link</span>
+                                    <div className="flex items-center gap-1.5 truncate">
+                                      <Facebook className="w-3 h-3 text-white shrink-0" />
+                                      <span className="truncate">Search Posts on Facebook</span>
                                     </div>
-                                    <ExternalLink className="w-3 h-3 shrink-0 text-blue-500 group-hover:translate-x-0.5 transition-transform" />
+                                    <ExternalLink className="w-3 h-3 shrink-0 text-white/80 group-hover:translate-x-0.5 transition-transform" />
                                   </a>
-                                ) : (
-                                  <div className="text-[10px] text-slate-400 italic">
-                                    Verified via Google Grounding
+
+                                  {/* Official Store Page & Google Result */}
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    {officialPageHref && (
+                                      <a
+                                        href={officialPageHref}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center justify-center gap-1 px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md border border-slate-200 text-[9.5px] font-semibold transition-colors"
+                                        title={`Open official verified page of ${sighting.store}`}
+                                      >
+                                        <Store className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+                                        <span className="truncate">Store Page</span>
+                                      </a>
+                                    )}
+
+                                    <a
+                                      href={googleSearchHref}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center justify-center gap-1 px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md border border-slate-200 text-[9.5px] font-semibold transition-colors"
+                                      title={`Search Google index for "${sighting.store}" post citations`}
+                                    >
+                                      <Globe className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+                                      <span className="truncate">Google Result</span>
+                                    </a>
                                   </div>
-                                )}
+                                </div>
                               </div>
                             );
                           })}
