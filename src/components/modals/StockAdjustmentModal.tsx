@@ -134,16 +134,16 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
   return (
     <div 
       id="stock-adjustment-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto animate-modal-backdrop"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 overflow-y-auto animate-modal-backdrop"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200 flex flex-col animate-modal-content max-h-[92vh]">
-        {/* Header */}
-        <div className="px-6 py-4 bg-gradient-to-r from-rose-50 via-indigo-50/30 to-slate-50 border-b border-slate-100 flex items-center justify-between">
+      <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-300/90 flex flex-col animate-modal-content max-h-[92vh] ring-1 ring-slate-900/10">
+        {/* Header with ambient subtle glow */}
+        <div className="px-6 py-4.5 bg-gradient-to-r from-rose-50/80 via-indigo-50/40 to-slate-50 border-b border-slate-200 flex items-center justify-between relative overflow-hidden">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-rose-600 text-white flex items-center justify-center shadow-md shadow-rose-200">
+            <div className="w-10 h-10 rounded-2xl bg-rose-600 text-white flex items-center justify-center shadow-md shadow-rose-300">
               <Sliders className="w-5 h-5" />
             </div>
             <div>
@@ -161,7 +161,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-white rounded-xl transition-colors cursor-pointer"
+            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-white rounded-xl transition-colors cursor-pointer border border-transparent hover:border-slate-200"
           >
             <X className="w-5 h-5" />
           </button>
@@ -170,36 +170,36 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
         {/* Scrollable Form Body */}
         <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 text-slate-800 text-xs sm:text-sm">
           {errorMsg && (
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-rose-700 text-xs">
+            <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl flex items-center gap-2 text-rose-800 text-xs font-semibold">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           {/* Current Stock vs New Stock Preview Card */}
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+          <div className="p-4.5 bg-gradient-to-br from-slate-50 via-indigo-50/30 to-purple-50/20 rounded-2xl border border-slate-300/90 shadow-xs flex items-center justify-between">
             <div>
-              <span className="text-xs text-slate-500 font-medium">Current Stock</span>
-              <div className="text-2xl font-black text-slate-800 mt-0.5">
+              <span className="text-xs text-slate-500 font-semibold">Current Stock</span>
+              <div className="text-2xl font-black text-slate-900 mt-0.5">
                 {product.stock} <span className="text-xs font-semibold text-slate-500">units</span>
               </div>
             </div>
 
             <div className="flex flex-col items-center justify-center px-4">
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+              <span className={`text-xs font-black px-2.5 py-1 rounded-full border shadow-2xs ${
                 quantityChange > 0 
-                  ? 'bg-emerald-100 text-emerald-800' 
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
                   : quantityChange < 0 
-                  ? 'bg-rose-100 text-rose-800' 
-                  : 'bg-slate-200 text-slate-700'
+                  ? 'bg-rose-100 text-rose-800 border-rose-300' 
+                  : 'bg-slate-200 text-slate-700 border-slate-300'
               }`}>
                 {quantityChange > 0 ? `+${quantityChange}` : quantityChange < 0 ? `${quantityChange}` : '0'} units
               </span>
-              <span className="text-[10px] text-slate-400 mt-1 font-mono">Transition</span>
+              <span className="text-[10px] text-slate-500 mt-1 font-mono font-semibold">Transition</span>
             </div>
 
             <div className="text-right">
-              <span className="text-xs text-slate-500 font-medium">Projected New Stock</span>
+              <span className="text-xs text-slate-500 font-semibold">Projected New Stock</span>
               <div className={`text-2xl font-black mt-0.5 ${
                 (product.minStockAlert > 0 ? projectedStock <= product.minStockAlert : projectedStock <= 0) ? 'text-amber-600' : 'text-indigo-600'
               }`}>
@@ -218,17 +218,17 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
                   setAdjustmentType('reduce');
                   if (reason === 'restock') setReason('damaged');
                 }}
-                className={`py-2.5 px-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all cursor-pointer font-bold text-xs ${
+                className={`py-2.5 px-3 rounded-xl border-2 flex flex-col items-center justify-center gap-1 transition-all cursor-pointer font-bold text-xs ${
                   adjustmentType === 'reduce'
-                    ? 'bg-rose-50 border-rose-500 text-rose-700 shadow-xs ring-2 ring-rose-200'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    ? 'bg-rose-50 border-rose-500 text-rose-800 shadow-sm ring-4 ring-rose-100'
+                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50 hover:border-slate-400'
                 }`}
               >
                 <div className="flex items-center gap-1">
                   <Minus className="w-3.5 h-3.5" />
                   <span>Deduct Units</span>
                 </div>
-                <span className="text-[10px] font-normal text-slate-400">Damage / Sample / RMA</span>
+                <span className="text-[10px] font-medium text-slate-500">Damage / Sample / RMA</span>
               </button>
 
               <button
@@ -237,17 +237,17 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
                   setAdjustmentType('add');
                   if (reason === 'damaged' || reason === 'sample') setReason('restock');
                 }}
-                className={`py-2.5 px-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all cursor-pointer font-bold text-xs ${
+                className={`py-2.5 px-3 rounded-xl border-2 flex flex-col items-center justify-center gap-1 transition-all cursor-pointer font-bold text-xs ${
                   adjustmentType === 'add'
-                    ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-xs ring-2 ring-emerald-200'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    ? 'bg-emerald-50 border-emerald-500 text-emerald-800 shadow-sm ring-4 ring-emerald-100'
+                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50 hover:border-slate-400'
                 }`}
               >
                 <div className="flex items-center gap-1">
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Units</span>
                 </div>
-                <span className="text-[10px] font-normal text-slate-400">Restock / Bonus / Found</span>
+                <span className="text-[10px] font-medium text-slate-500">Restock / Bonus / Found</span>
               </button>
 
               <button
@@ -256,17 +256,17 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
                   setAdjustmentType('set_exact');
                   setReason('correction');
                 }}
-                className={`py-2.5 px-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all cursor-pointer font-bold text-xs ${
+                className={`py-2.5 px-3 rounded-xl border-2 flex flex-col items-center justify-center gap-1 transition-all cursor-pointer font-bold text-xs ${
                   adjustmentType === 'set_exact'
-                    ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-xs ring-2 ring-indigo-200'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    ? 'bg-indigo-50 border-indigo-500 text-indigo-800 shadow-sm ring-4 ring-indigo-100'
+                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50 hover:border-slate-400'
                 }`}
               >
                 <div className="flex items-center gap-1">
                   <Equal className="w-3.5 h-3.5" />
                   <span>Set Exact Count</span>
                 </div>
-                <span className="text-[10px] font-normal text-slate-400">Audit Recount Reset</span>
+                <span className="text-[10px] font-medium text-slate-500">Audit Recount Reset</span>
               </button>
             </div>
           </div>
@@ -284,7 +284,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
                   max={adjustmentType === 'reduce' ? product.stock : 9999}
                   value={quantityInput}
                   onChange={(e) => setQuantityInput(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-sm"
+                  className="flex-1 px-3 py-2.5 bg-slate-50/90 hover:bg-white focus:bg-white border-2 border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 rounded-xl font-bold text-slate-900 focus:outline-hidden text-sm"
                   required
                 />
                 <div className="flex items-center gap-1">
@@ -293,7 +293,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
                       key={qty}
                       type="button"
                       onClick={() => setQuantityInput(qty)}
-                      className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs cursor-pointer"
+                      className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-300/80 text-slate-700 font-bold rounded-lg text-xs cursor-pointer shadow-2xs"
                     >
                       {qty}
                     </button>
@@ -311,7 +311,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
                 min="0"
                 value={exactCountInput}
                 onChange={(e) => setExactCountInput(Math.max(0, parseInt(e.target.value) || 0))}
-                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-sm"
+                className="w-full px-3 py-2.5 bg-slate-50/90 hover:bg-white focus:bg-white border-2 border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 rounded-xl font-bold text-slate-900 focus:outline-hidden text-sm"
                 required
               />
             </div>
@@ -323,7 +323,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
             <select
               value={reason}
               onChange={(e) => setReason(e.target.value as StockAdjustment['reason'])}
-              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-medium text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-xs sm:text-sm"
+              className="w-full px-3 py-2.5 bg-slate-50/90 hover:bg-white focus:bg-white border-2 border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 rounded-xl font-medium text-slate-900 focus:outline-hidden text-xs sm:text-sm cursor-pointer"
             >
               {adjustmentType === 'reduce' ? (
                 <>
@@ -418,7 +418,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
                 onChange={(e) => setReasonNotes(e.target.value)}
                 rows={2}
                 placeholder="e.g. Scratched screen during display setup, moved to RMA bin..."
-                className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                className="w-full p-2.5 bg-slate-50/90 hover:bg-white focus:bg-white border-2 border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-hidden transition-all shadow-inner font-medium"
               />
             </div>
           </div>
@@ -433,7 +433,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
               <select
                 value={performedBy}
                 onChange={(e) => setPerformedBy(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-xs sm:text-sm"
+                className="w-full px-3 py-2.5 bg-slate-50/90 hover:bg-white focus:bg-white border-2 border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 rounded-xl font-semibold text-slate-900 focus:outline-hidden text-xs sm:text-sm cursor-pointer shadow-inner transition-all"
               >
                 {staffUsers.map(st => (
                   <option key={st.id} value={st.name}>
@@ -446,24 +446,24 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
                 type="text"
                 value={performedBy}
                 onChange={(e) => setPerformedBy(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium text-slate-900 text-xs sm:text-sm"
+                className="w-full px-3 py-2.5 bg-slate-50/90 hover:bg-white focus:bg-white border-2 border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 rounded-xl font-semibold text-slate-900 text-xs sm:text-sm shadow-inner transition-all"
                 required
               />
             )}
           </div>
 
           {/* Footer Actions */}
-          <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-100">
+          <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-200">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+              className="px-4 py-2.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 rounded-xl font-bold text-xs transition-colors cursor-pointer shadow-2xs"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className={`px-5 py-2.5 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-5 py-2.5 text-white rounded-xl font-black text-xs shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer flex items-center gap-1.5 ${
                 adjustmentType === 'add'
                   ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200'
                   : 'bg-rose-600 hover:bg-rose-700 shadow-rose-200'

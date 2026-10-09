@@ -129,8 +129,10 @@ export const InvoiceSectionRenderer: React.FC<InvoiceSectionRendererProps> = ({
     else if (style.spacing === 'relaxed') list.push(isA5 ? 'my-4 py-3 space-y-3' : 'my-3 py-2 space-y-2');
     else list.push(isA5 ? 'my-2 py-2 space-y-2' : 'my-1.5 py-1.5 space-y-1.5');
 
-    // Box Style
-    if (style.boxStyle === 'card') {
+    // Box Style (Remove box around text for customer_tx_info and logo_header)
+    if (sectionKey === 'customer_tx_info' || sectionKey === 'logo_header') {
+      // Clean borderless, boxless layout as requested by user
+    } else if (style.boxStyle === 'card') {
       list.push(isA5 ? 'p-3 bg-slate-50/80 rounded-xl border border-slate-200 shadow-2xs' : 'p-2 bg-slate-50/80 rounded-lg border border-slate-300');
     } else if (style.boxStyle === 'dashed') {
       list.push(isA5 ? 'p-3 rounded-xl border border-dashed border-slate-300 bg-slate-50/40' : 'py-2 px-1 border-y border-dashed border-slate-400');
@@ -141,13 +143,6 @@ export const InvoiceSectionRenderer: React.FC<InvoiceSectionRendererProps> = ({
     // Font Scaling
     if (style.fontSize === 'small') list.push('text-[10px] leading-tight');
     else if (style.fontSize === 'large') list.push('text-sm leading-relaxed');
-
-    // Figma selection outline
-    if (isCanvasInspectMode && isSelected) {
-      list.push('ring-2 ring-blue-500 ring-offset-2 rounded-xl bg-blue-50/20 shadow-xs');
-    } else if (isCanvasInspectMode) {
-      list.push('hover:ring-1 hover:ring-blue-300 hover:ring-offset-1 rounded-xl cursor-pointer');
-    }
 
     return list.join(' ');
   };
@@ -180,35 +175,31 @@ export const InvoiceSectionRenderer: React.FC<InvoiceSectionRendererProps> = ({
   const renderLogoHeader = () => {
     if (isA5) {
       return (
-        <div className={`flex flex-col sm:flex-row items-start justify-between border-b-2 border-slate-900 pb-3 gap-2 ${
-          style.alignment === 'center' ? 'text-center items-center' : style.alignment === 'right' ? 'text-right items-end' : 'text-left items-start'
-        }`}>
-          <div className="space-y-1">
+        <div className="w-full flex flex-row items-start justify-between border-b-2 border-slate-900 pb-3 gap-4">
+          {/* Left: Win Mobile / Shop Branding Text Group */}
+          <div className="space-y-1 text-left min-w-0 flex-1">
             {custom.shopLogoUrl && (
               <img
                 src={custom.shopLogoUrl}
                 alt="Logo"
                 style={{ height: `${custom.invoiceLogoSize || 44}px` }}
-                className={`object-contain mb-1 bg-transparent transition-all ${
-                  style.alignment === 'center' ? 'mx-auto' : style.alignment === 'right' ? 'ml-auto' : ''
-                }`}
+                className="object-contain mb-1 bg-transparent transition-all"
                 referrerPolicy="no-referrer"
               />
             )}
-            <h4 className="text-base sm:text-lg font-black uppercase tracking-tight text-slate-900">
+            <h4 className="text-base sm:text-lg font-black uppercase tracking-tight text-slate-900 leading-tight">
               {custom.headerTitle || settings.shopName}
             </h4>
             {custom.subHeader && (
-              <p className="text-[11px] font-semibold text-slate-600">{custom.subHeader}</p>
+              <p className="text-[11px] font-semibold text-slate-600 leading-tight">{custom.subHeader}</p>
             )}
-            <p className="text-[10px] text-slate-500">
+            <p className="text-[10px] text-slate-500 leading-tight">
               {custom.addressLine1 || settings.address}, {custom.city || settings.cityCountry}
             </p>
           </div>
 
-          <div className={`space-y-0.5 text-[10px] text-slate-600 ${
-            style.alignment === 'center' ? 'text-center' : 'text-right'
-          }`}>
+          {/* Right: Invoice Number Text Group (Horizontally in line with Win mobile) */}
+          <div className="space-y-0.5 text-[10px] text-slate-600 text-right shrink-0">
             <div className="font-mono font-bold text-slate-900 text-xs flex items-center justify-end gap-1.5">
               <span>{saleData?.invoiceNumber || 'INV-2026-001'}</span>
               {totalPages > 1 && (
@@ -217,7 +208,7 @@ export const InvoiceSectionRenderer: React.FC<InvoiceSectionRendererProps> = ({
                 </span>
               )}
             </div>
-            <p>{formatDateTime(saleData?.date || new Date().toISOString())}</p>
+            <p className="font-medium text-slate-700">{formatDateTime(saleData?.date || new Date().toISOString())}</p>
             <p className="font-bold text-slate-800">Hotline: {custom.phone1 || settings.phone}</p>
             {custom.phone2 && <p>Tel: {custom.phone2}</p>}
             {custom.viberNumber && <p>Viber: {custom.viberNumber}</p>}
@@ -255,9 +246,12 @@ export const InvoiceSectionRenderer: React.FC<InvoiceSectionRendererProps> = ({
   const renderCustomerTxInfo = () => {
     if (isA5) {
       return (
-        <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[11px]">
-          <div>
-            <span className="text-slate-400 font-bold text-[9px] uppercase tracking-wider">Bill To / Customer Info:</span>
+        <div className="w-full flex flex-row items-start justify-between gap-4 py-1 text-[11px]">
+          {/* Left: Customer Info (Under dividing line) */}
+          <div className="space-y-0.5 text-left flex-1 min-w-0">
+            <span className="text-slate-400 font-bold text-[9px] uppercase tracking-wider block">
+              Bill To / Customer Info:
+            </span>
             <div className="font-bold text-slate-900 text-xs mt-0.5">
               {custom.showCustomerInfo ? (saleData?.customerName || 'U Thura Min') : 'Walk-in Customer'}
             </div>
@@ -267,10 +261,14 @@ export const InvoiceSectionRenderer: React.FC<InvoiceSectionRendererProps> = ({
               </div>
             )}
           </div>
-          <div className="text-right">
-            <span className="text-slate-400 font-bold text-[9px] uppercase tracking-wider">Transaction Info:</span>
+
+          {/* Right: Transaction Info (Under dividing line, horizontally aligned with Customer Info) */}
+          <div className="space-y-0.5 text-right shrink-0">
+            <span className="text-slate-400 font-bold text-[9px] uppercase tracking-wider block">
+              Transaction Info:
+            </span>
             {custom.showCashierName && (
-              <div className="font-semibold text-slate-800 text-xs mt-0.5">
+              <div className="font-medium text-slate-700 text-xs mt-0.5">
                 Cashier: <span className="font-bold text-slate-900">{saleData?.cashierName || settings.currentStaffName || 'Operator'}</span>
               </div>
             )}
@@ -601,43 +599,7 @@ export const InvoiceSectionRenderer: React.FC<InvoiceSectionRendererProps> = ({
   };
 
   return (
-    <div
-      onClick={() => isCanvasInspectMode && onSelectSection?.(sectionKey)}
-      className={getBoxClasses()}
-    >
-      {/* Figma Canvas Floating Badge (Shown only in visual designer mode) */}
-      {isCanvasInspectMode && (
-        <div className="absolute -top-3 left-2 z-20 flex items-center gap-1 bg-blue-600 text-white px-2 py-0.5 rounded-full text-[9px] font-bold shadow-xs">
-          <span>❖ {meta?.shortLabel}</span>
-          {onMoveSection && (
-            <div className="flex items-center gap-0.5 ml-1 pl-1 border-l border-blue-400">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onMoveSection(sectionKey, 'up');
-                }}
-                className="hover:text-blue-200 p-0.5"
-                title="Move Up"
-              >
-                <ChevronUp className="w-2.5 h-2.5" />
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onMoveSection(sectionKey, 'down');
-                }}
-                className="hover:text-blue-200 p-0.5"
-                title="Move Down"
-              >
-                <ChevronDown className="w-2.5 h-2.5" />
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
+    <div className={getBoxClasses()}>
       {renderSectionContent()}
     </div>
   );

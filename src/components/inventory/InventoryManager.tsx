@@ -20,6 +20,7 @@ import {
   Filter,
   Cpu,
   HardDrive,
+  Sliders,
   SlidersHorizontal,
   RotateCcw,
   Eye,
@@ -58,6 +59,7 @@ import { BulkProductImportModal } from '../modals/BulkProductImportModal';
 import { QuarantineReportModal } from './QuarantineReportModal';
 import { QuarantineManagerModal } from './QuarantineManagerModal';
 import { WholeInventoryLogModal } from './WholeInventoryLogModal';
+import { StockAdjustmentModal } from '../modals/StockAdjustmentModal';
 import { ColumnVisibilityFilter, ColumnDefinition } from '../common/ColumnVisibilityFilter';
 import { SortableHeader, useTableSort } from '../common/SortableHeader';
 import { canonicalCategory, isPhoneCategory, CANONICAL_CATEGORIES } from '../../data/categoryTaxonomy';
@@ -126,6 +128,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState<boolean>(false);
   const [isWholeLogModalOpen, setIsWholeLogModalOpen] = useState<boolean>(false);
+  const [stockAdjustModalProduct, setStockAdjustModalProduct] = useState<Product | null>(null);
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState<boolean>(false);
   const categoryDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -1006,77 +1009,116 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   };
 
   return (
-    <div id="inventory-screen" className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+    <div id="inventory-screen" className="relative min-h-[calc(100vh-4rem)] max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+      {/* Ambient Depth & Bokeh Lighting Atmosphere (Scoped strictly to Inventory & Stock Adjust) */}
+      <div className="absolute inset-0 -z-10 pointer-events-none overflow-hidden rounded-3xl" aria-hidden="true">
+        {/* Soft atmospheric gradient canvas */}
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-200/50 via-slate-100/70 to-indigo-50/25" />
+
+        {/* Luminous floating Bokeh Orbs for depth */}
+        <div className="absolute -top-20 -left-20 w-96 h-96 rounded-full bg-gradient-to-br from-indigo-400/25 to-blue-400/15 blur-[100px] animate-bokeh-1" />
+        <div className="absolute top-1/4 -right-20 w-[30rem] h-[30rem] rounded-full bg-gradient-to-bl from-purple-400/20 to-pink-400/15 blur-[120px] animate-bokeh-2" />
+        <div className="absolute top-2/3 left-10 w-[26rem] h-[26rem] rounded-full bg-gradient-to-tr from-sky-400/20 to-teal-300/15 blur-[110px] animate-bokeh-3" />
+        <div className="absolute bottom-10 right-1/4 w-96 h-96 rounded-full bg-gradient-to-tl from-amber-300/20 to-rose-300/15 blur-[115px] animate-bokeh-1" />
+
+        {/* Tactile micro-grid dot matrix for depth and element separation */}
+        <div 
+          className="absolute inset-0 opacity-[0.04]" 
+          style={{ 
+            backgroundImage: 'radial-gradient(#0f172a 1.25px, transparent 1.25px)', 
+            backgroundSize: '24px 24px' 
+          }} 
+        />
+      </div>
       
       {/* Top Valuation Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
+        <div className="bg-white/95 backdrop-blur-md p-4.5 rounded-2xl border border-slate-300/80 shadow-md shadow-slate-300/40 hover:shadow-lg hover:border-indigo-400/80 transition-all duration-200 relative overflow-hidden group">
+          <div className="flex items-center justify-between text-slate-600 text-xs font-bold mb-1.5">
             <span>Total Units in Stock</span>
-            <Package className="w-4 h-4 text-indigo-500" />
+            <div className="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform">
+              <Package className="w-4 h-4" />
+            </div>
           </div>
-          <p className="text-2xl font-black text-slate-900">{totalUnits}</p>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-[11px] text-slate-500">{products.length} product lines</span>
+          <p className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">{totalUnits}</p>
+          <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-slate-100">
+            <span className="text-[11px] font-semibold text-slate-500">{products.length} product lines</span>
             <button
               type="button"
               onClick={() => setIsWholeLogModalOpen(true)}
-              className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+              className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer flex items-center gap-0.5"
               title="Open dedicated whole inventory audit & movement log"
             >
-              View Log &rarr;
+              <span>View Log</span>
+              <span>&rarr;</span>
             </button>
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
+        <div className="bg-white/95 backdrop-blur-md p-4.5 rounded-2xl border border-slate-300/80 shadow-md shadow-slate-300/40 hover:shadow-lg hover:border-indigo-400/80 transition-all duration-200 relative overflow-hidden group">
+          <div className="flex items-center justify-between text-slate-600 text-xs font-bold mb-1.5">
             <span>Stock Cost Valuation</span>
-            <DollarSign className="w-4 h-4 text-slate-600" />
+            <div className="w-7 h-7 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700 group-hover:scale-110 transition-transform">
+              <DollarSign className="w-4 h-4" />
+            </div>
           </div>
-          <p className="text-2xl font-black text-slate-900">
+          <p className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
             {formatCurrency(totalCostValuation, settings.currencySymbol)}
           </p>
-          <p className="text-[11px] text-slate-500 mt-1">Acquisition capital invested</p>
+          <div className="mt-1.5 pt-1.5 border-t border-slate-100">
+            <p className="text-[11px] text-slate-500 font-medium">Acquisition capital invested</p>
+          </div>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-semibold mb-1">
+        <div className="bg-white/95 backdrop-blur-md p-4.5 rounded-2xl border border-slate-300/80 shadow-md shadow-slate-300/40 hover:shadow-lg hover:border-emerald-400/80 transition-all duration-200 relative overflow-hidden group">
+          <div className="flex items-center justify-between text-slate-600 text-xs font-bold mb-1.5">
             <span>Expected Retail Value</span>
-            <TrendingUp className="w-4 h-4 text-emerald-600" />
+            <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 group-hover:scale-110 transition-transform">
+              <TrendingUp className="w-4 h-4" />
+            </div>
           </div>
-          <p className="text-2xl font-black text-emerald-700">
+          <p className="text-2xl sm:text-3xl font-black text-emerald-700 tracking-tight">
             {formatCurrency(totalRetailValuation, settings.currencySymbol)}
           </p>
-          <p className="text-[11px] text-emerald-600 mt-1 font-semibold">
-            +{formatCurrency(projectedGrossProfit, settings.currencySymbol)} Profit Potential
-          </p>
+          <div className="mt-1.5 pt-1.5 border-t border-slate-100">
+            <p className="text-[11px] text-emerald-700 font-bold">
+              +{formatCurrency(projectedGrossProfit, settings.currencySymbol)} Profit Potential
+            </p>
+          </div>
         </div>
 
-        <div className={`p-4 rounded-2xl border shadow-2xs ${
-          lowStockItems.length > 0 ? 'bg-amber-50/70 border-amber-200' : 'bg-white border-slate-200'
+        <div className={`p-4.5 rounded-2xl border transition-all duration-200 relative overflow-hidden group ${
+          lowStockItems.length > 0 
+            ? 'bg-amber-50/90 border-amber-300 shadow-md shadow-amber-200/50 hover:shadow-lg hover:border-amber-400' 
+            : 'bg-white/95 backdrop-blur-md border-slate-300/80 shadow-md shadow-slate-300/40 hover:shadow-lg hover:border-indigo-400/80'
         }`}>
-          <div className="flex items-center justify-between text-xs font-semibold mb-1">
-            <span className={lowStockItems.length > 0 ? 'text-amber-800' : 'text-slate-500'}>Low Stock Alerts</span>
-            <AlertTriangle className={`w-4 h-4 ${lowStockItems.length > 0 ? 'text-amber-600' : 'text-slate-400'}`} />
+          <div className="flex items-center justify-between text-xs font-bold mb-1.5">
+            <span className={lowStockItems.length > 0 ? 'text-amber-900' : 'text-slate-600'}>Low Stock Alerts</span>
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+              lowStockItems.length > 0 ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-500 border border-slate-200'
+            }`}>
+              <AlertTriangle className="w-4 h-4" />
+            </div>
           </div>
-          <p className={`text-2xl font-black ${lowStockItems.length > 0 ? 'text-amber-900' : 'text-slate-900'}`}>
+          <p className={`text-2xl sm:text-3xl font-black tracking-tight ${lowStockItems.length > 0 ? 'text-amber-950' : 'text-slate-900'}`}>
             {lowStockItems.length}
           </p>
-          <button
-            type="button"
-            onClick={() => setShowLowStockOnly(!showLowStockOnly)}
-            className="text-[11px] font-bold text-amber-700 hover:underline mt-1 block"
-          >
-            {showLowStockOnly ? 'Show All Items' : 'Filter Low Stock Items'}
-          </button>
+          <div className={`mt-1.5 pt-1.5 border-t ${lowStockItems.length > 0 ? 'border-amber-200/80' : 'border-slate-100'}`}>
+            <button
+              type="button"
+              onClick={() => setShowLowStockOnly(!showLowStockOnly)}
+              className="text-[11px] font-bold text-amber-800 hover:text-amber-950 hover:underline block cursor-pointer"
+            >
+              {showLowStockOnly ? 'Show All Items' : 'Filter Low Stock Items'}
+            </button>
+          </div>
         </div>
 
       </div>
 
       {/* Standalone Product Search & Barcode Scanner Row */}
-      <div id="inventory-search-row" className="sticky top-14 sm:top-[60px] z-30 w-full bg-white/95 backdrop-blur-md p-3 sm:p-4 rounded-2xl border border-slate-200/90 shadow-md shadow-slate-200/50 transition-all">
+      <div id="inventory-search-row" className="sticky top-14 sm:top-[60px] z-30 w-full bg-white/95 backdrop-blur-md p-3.5 sm:p-4 rounded-2xl border border-slate-300/90 shadow-lg shadow-slate-300/40 ring-1 ring-slate-900/5 transition-all">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full">
           <div className="relative flex-1 w-full min-w-0">
             <div className="absolute left-3.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-slate-400 pointer-events-none">
@@ -1111,7 +1153,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 }
               }}
               placeholder="Scan barcode / IMEI or search SKU, model, brand..."
-              className="w-full pl-10 pr-10 py-3 bg-slate-50/70 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 focus:outline-hidden shadow-2xs transition-all font-mono font-medium tracking-wide"
+              className="w-full pl-10 pr-10 py-3 bg-slate-50/90 hover:bg-slate-50 focus:bg-white border-2 border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 rounded-xl text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-hidden shadow-inner transition-all font-mono font-medium tracking-wide"
             />
             {searchQuery && (
               <button
@@ -1130,10 +1172,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             <button
               type="button"
               onClick={() => setIsScannerActive(!isScannerActive)}
-              className={`inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-2xs whitespace-nowrap w-full sm:w-auto ${
+              className={`inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-xs whitespace-nowrap w-full sm:w-auto ${
                 isScannerActive 
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100' 
-                  : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                  ? 'bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100' 
+                  : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
               }`}
               title={isScannerActive ? "Real-time hardware scanner is active" : "Scanner listener paused"}
             >
@@ -1155,7 +1197,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               setSelectedProductForQuarantine(null);
               setIsQuarantineReportOpen(true);
             }}
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-950 font-bold text-xs rounded-xl border border-amber-200 shadow-2xs transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-950 font-bold text-xs rounded-xl border border-amber-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer"
             title="Phase 1: Report damage and immediately isolate item from sellable POS inventory"
           >
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
@@ -1172,7 +1214,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 setIsQuarantineManagerOpen(true);
               }
             }}
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-2xs transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-md shadow-slate-900/20 border border-slate-800 hover:-translate-y-0.5 transition-all cursor-pointer"
             title="Phase 2 & 3: Manager Assessment & Final Disposition Hub (RMA, Write-Off, B-Stock)"
           >
             <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
@@ -1188,7 +1230,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             id="open-bulk-import-btn"
             type="button"
             onClick={() => setIsBulkImportOpen(true)}
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 font-bold text-xs rounded-xl border border-emerald-200 shadow-2xs transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 font-bold text-xs rounded-xl border border-emerald-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer"
             title="Bulk import products from CSV template or spreadsheet paste"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -1199,10 +1241,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             id="inventory-foc-gifts-btn"
             type="button"
             onClick={() => setFocFilter(focFilter === 'gift_only' ? 'all' : 'gift_only')}
-            className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-2xs ${
+            className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-sm hover:shadow-md hover:-translate-y-0.5 ${
               focFilter === 'gift_only'
-                ? 'bg-purple-600 text-white border-purple-700 shadow-xs'
-                : 'bg-purple-50 hover:bg-purple-100 text-purple-950 border-purple-200'
+                ? 'bg-purple-600 text-white border-purple-700 shadow-md shadow-purple-300/50'
+                : 'bg-purple-50 hover:bg-purple-100 text-purple-950 border border-purple-300'
             }`}
             title="Filter and manage Free Of Charge (FOC) promotional gifts & bonus stock"
           >
@@ -1221,7 +1263,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             id="open-whole-inventory-log-btn"
             type="button"
             onClick={() => setIsWholeLogModalOpen(true)}
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-gradient-to-r from-indigo-50 to-purple-50 hover:from-indigo-100 hover:to-purple-100 text-indigo-950 font-bold text-xs rounded-xl border border-indigo-200 shadow-2xs transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-indigo-950 font-bold text-xs rounded-xl border border-indigo-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer"
             title="Dedicated Window: Master chronological audit log of all inventory movements, price changes, sales, and quarantines"
           >
             <History className="w-4 h-4 text-indigo-600 shrink-0" />
@@ -1237,10 +1279,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                   onClearAllProducts();
                 }
               }}
-              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 shadow-2xs transition-all cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold text-xs rounded-xl border border-rose-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer"
               title="Remove all products from inventory"
             >
-              <Trash2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+              <Trash2 className="w-3.5 h-3.5 text-rose-600 shrink-0" />
               <span>Clear Products</span>
             </button>
           )}
@@ -1252,7 +1294,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               id="open-stock-check-btn"
               type="button"
               onClick={onOpenStockCheck}
-              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-indigo-950 font-bold text-xs rounded-xl border border-slate-200 shadow-2xs transition-all cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-indigo-950 font-bold text-xs rounded-xl border border-slate-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer"
             >
               <ClipboardCheck className="w-4 h-4 text-indigo-600 shrink-0" />
               <span>Stock Audit</span>
@@ -1263,7 +1305,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             id="open-add-product-btn"
             type="button"
             onClick={handleOpenAdd}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-300/60 hover:shadow-lg hover:-translate-y-0.5 transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4 shrink-0" />
             <span>+ Add Item</span>
@@ -1313,33 +1355,33 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               id="inventory-category-select-btn"
               type="button"
               onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
-              className={`inline-flex items-center justify-between gap-3 px-3.5 py-2 bg-white hover:bg-slate-50/90 text-slate-800 text-xs rounded-xl border transition-all cursor-pointer min-w-[210px] shadow-2xs ${
-                isCategoryDropdownOpen ? 'border-indigo-400 ring-2 ring-indigo-50' : 'border-slate-200 hover:border-slate-300'
+              className={`inline-flex items-center justify-between gap-3 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-800 text-xs rounded-xl border-2 transition-all cursor-pointer min-w-[220px] shadow-sm hover:shadow-md ring-1 ring-slate-900/10 ${
+                isCategoryDropdownOpen ? 'border-indigo-600 ring-4 ring-indigo-100 shadow-md' : 'border-slate-300 hover:border-slate-400'
               }`}
               aria-haspopup="listbox"
               aria-expanded={isCategoryDropdownOpen}
               title={`${categories.find(c => c.id === selectedCategory)?.label || 'All Products'}: ${categoryStats.modelCount} models, ${categoryStats.totalQuantity} total in-stock units`}
             >
               <div className="flex items-center gap-2 truncate">
-                <span className="text-slate-400 font-medium text-[11px]">Category:</span>
+                <span className="text-slate-500 font-semibold text-[11px]">Category:</span>
                 <span className="font-bold text-slate-900 truncate">
                   {categories.find(c => c.id === selectedCategory)?.label || 'All Products'}
                 </span>
                 <span 
-                  className="px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 font-mono text-[10px] font-bold"
+                  className="px-1.5 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700 font-mono text-[10px] font-bold"
                   title={`${categoryStats.modelCount} Product Models • ${categoryStats.totalQuantity} Total In-Stock Units`}
                 >
                   {categoryStats.modelCount} items • {categoryStats.totalQuantity} qty
                 </span>
               </div>
-              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 shrink-0 ${isCategoryDropdownOpen ? 'rotate-180 text-slate-700' : ''}`} />
+              <ChevronDown className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-150 shrink-0 ${isCategoryDropdownOpen ? 'rotate-180 text-slate-800' : ''}`} />
             </button>
 
             {/* Dropdown Menu Popover */}
             {isCategoryDropdownOpen && (
               <div 
                 id="inventory-category-dropdown-menu"
-                className="absolute top-full left-0 mt-1.5 w-72 bg-white rounded-xl border border-slate-200 shadow-lg p-1 z-30 animate-in fade-in zoom-in-95 duration-150"
+                className="absolute top-full left-0 mt-1.5 w-72 bg-white rounded-xl border border-slate-300 shadow-xl p-1 z-30 animate-in fade-in zoom-in-95 duration-150"
                 role="listbox"
               >
                 <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -1364,7 +1406,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                         }}
                         className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs transition-colors cursor-pointer text-left ${
                           isSelected 
-                            ? 'bg-slate-100 text-slate-900 font-bold' 
+                            ? 'bg-indigo-50 text-indigo-950 font-bold border border-indigo-200' 
                             : 'text-slate-700 hover:bg-slate-50 font-medium'
                         }`}
                         role="option"
@@ -1373,12 +1415,12 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                         <span className="truncate">{cat.label}</span>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                            isSelected ? 'bg-slate-200 text-slate-800 font-bold' : 'text-slate-500 bg-slate-50'
+                            isSelected ? 'bg-indigo-200/80 text-indigo-900 font-bold' : 'text-slate-500 bg-slate-100'
                           }`}>
                             {count} models • {catStock} qty
                           </span>
                           {isSelected && (
-                            <Check className="w-3.5 h-3.5 text-slate-900 shrink-0" />
+                            <Check className="w-3.5 h-3.5 text-indigo-700 shrink-0" />
                           )}
                         </div>
                       </button>
@@ -1392,12 +1434,12 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           {/* Beside its box: Total items counts & quantity badges */}
           <div 
             id="inventory-category-totals-pill"
-            className="inline-flex items-center gap-2 sm:gap-3 px-3 py-1.5 bg-white border border-slate-200 shadow-2xs rounded-xl text-xs"
+            className="inline-flex items-center gap-2 sm:gap-3 px-3.5 py-2 bg-white/95 border border-slate-300/90 shadow-sm rounded-xl text-xs"
             title={`Current view summary: ${(selectedBrand !== 'all' ? activeBrandStats.totalQuantity : categoryStats.totalQuantity).toLocaleString()} total in-stock units across ${(selectedBrand !== 'all' ? activeBrandStats.modelCount : categoryStats.modelCount)} product models`}
           >
             <div className="flex items-center gap-1.5">
               <Package className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <span className="text-[11px] font-medium text-slate-500">Total Quantity:</span>
+              <span className="text-[11px] font-semibold text-slate-500">Total Quantity:</span>
               <span className="font-mono font-black text-indigo-700 text-sm">
                 {(selectedBrand !== 'all' ? activeBrandStats.totalQuantity : categoryStats.totalQuantity).toLocaleString()}
               </span>
@@ -1407,7 +1449,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             <span className="text-slate-200">|</span>
 
             <div className="flex items-center gap-1 text-[11px]">
-              <span className="text-slate-500 font-medium">Items / Models:</span>
+              <span className="text-slate-500 font-semibold">Items / Models:</span>
               <span className="font-mono font-bold text-slate-800">
                 {selectedBrand !== 'all' ? activeBrandStats.modelCount : categoryStats.modelCount}
               </span>
@@ -1430,7 +1472,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           <button
             type="button"
             onClick={() => handleCategoryChange('all')}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 hover:text-slate-900 hover:bg-white rounded-lg border border-slate-200 shadow-2xs transition-all cursor-pointer"
             title="Reset to all categories"
           >
             <X className="w-3 h-3" />
@@ -1440,7 +1482,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       </div>
 
       {/* Multi-Dimensional Filter Hub (Ordered by Strict Hierarchy: Subcategory -> Child Category / Variant -> Brand -> Specs) */}
-      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-3 shadow-2xs">
+      <div className="bg-white/95 backdrop-blur-md border border-slate-300/90 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-md shadow-slate-300/30 ring-1 ring-slate-900/5">
         
         {/* Hierarchy Context Indicator */}
         <div className="flex items-center justify-between gap-2 pb-1 border-b border-slate-200/70 text-[11px] text-slate-500">
@@ -1527,7 +1569,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 id="inventory-subcategory-dropdown"
                 value={selectedSubCategory}
                 onChange={(e) => handleSubCategorySelect(e.target.value)}
-                className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-medium focus:ring-2 focus:ring-indigo-600 focus:outline-hidden cursor-pointer"
+                className="bg-white border-2 border-slate-300 hover:border-slate-400 rounded-xl px-3.5 py-1.5 text-xs text-slate-800 font-bold shadow-sm hover:shadow-md ring-1 ring-slate-900/10 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-600 focus:outline-hidden cursor-pointer transition-all"
               >
                 <option value="all">All Subcategories</option>
                 {availableSubCategories.map(sub => (
@@ -1541,7 +1583,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 <button
                   type="button"
                   onClick={() => handleSubCategorySelect('all')}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-red-600 hover:bg-white rounded-lg border border-transparent hover:border-slate-200 transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-red-600 hover:bg-white rounded-lg border border-slate-200 hover:border-red-300 shadow-2xs hover:shadow-xs transition-all cursor-pointer"
                   title="Clear subcategory filter"
                 >
                   <X className="w-3 h-3" />
@@ -1602,7 +1644,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 id="inventory-child-category-dropdown"
                 value={selectedChildCategory}
                 onChange={(e) => handleChildCategorySelect(e.target.value)}
-                className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-medium focus:ring-2 focus:ring-purple-600 focus:outline-hidden cursor-pointer"
+                className="bg-white border-2 border-purple-300 hover:border-purple-400 rounded-xl px-3.5 py-1.5 text-xs text-purple-950 font-bold shadow-sm hover:shadow-md ring-1 ring-purple-900/10 focus:ring-2 focus:ring-purple-500 focus:border-purple-600 focus:outline-hidden cursor-pointer transition-all"
               >
                 <option value="all">All Variants / Child Cats</option>
                 {availableChildCategories.map(child => (
@@ -1616,7 +1658,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 <button
                   type="button"
                   onClick={() => handleChildCategorySelect('all')}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-red-600 hover:bg-white rounded-lg border border-transparent hover:border-slate-200 transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-red-600 hover:bg-white rounded-lg border border-slate-200 hover:border-red-300 shadow-2xs hover:shadow-xs transition-all cursor-pointer"
                   title="Clear child category filter"
                 >
                   <X className="w-3 h-3" />
@@ -1678,7 +1720,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 id="inventory-brand-dropdown"
                 value={selectedBrand}
                 onChange={(e) => handleBrandSelect(e.target.value)}
-                className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-medium focus:ring-2 focus:ring-indigo-600 focus:outline-hidden cursor-pointer"
+                className="bg-white border-2 border-indigo-300 hover:border-indigo-400 rounded-xl px-3.5 py-1.5 text-xs text-indigo-950 font-bold shadow-sm hover:shadow-md ring-1 ring-indigo-900/10 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-600 focus:outline-hidden cursor-pointer transition-all"
               >
                 <option value="all">
                   All Brands ({availableBrands.reduce((s, b) => s + b.count, 0)} models)
@@ -1695,7 +1737,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               <button
                 type="button"
                 onClick={() => handleBrandSelect('all')}
-                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-red-600 hover:bg-white rounded-lg border border-transparent hover:border-slate-200 transition-all cursor-pointer"
+                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-red-600 hover:bg-white rounded-lg border border-slate-200 hover:border-red-300 shadow-2xs hover:shadow-xs transition-all cursor-pointer"
                 title="Clear brand filter"
               >
                 <X className="w-3 h-3" />
@@ -1710,7 +1752,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2.5 border-t border-slate-200/80">
             
             {/* RAM Filter */}
-            <div className="bg-white/80 border border-slate-200 rounded-xl p-2 flex items-center justify-between gap-2 overflow-hidden">
+            <div className="bg-white border-2 border-slate-300 hover:border-slate-400 rounded-xl p-2.5 flex items-center justify-between gap-2 overflow-hidden shadow-sm hover:shadow-md ring-1 ring-slate-900/5 transition-all">
               <div className="flex items-center gap-1.5 text-indigo-700 font-bold shrink-0 text-[11px] px-1">
                 <Cpu className="w-3.5 h-3.5 text-indigo-600" />
                 <span>RAM:</span>
@@ -1720,10 +1762,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedRam('all')}
-                  className={`px-2 py-0.5 rounded text-[11px] font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
                     selectedRam === 'all'
-                      ? 'bg-indigo-600 text-white shadow-2xs'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      ? 'bg-indigo-600 text-white shadow-xs ring-1 ring-indigo-700'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 shadow-2xs'
                   }`}
                 >
                   All
@@ -1733,14 +1775,14 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                     key={r.name}
                     type="button"
                     onClick={() => setSelectedRam(selectedRam.toLowerCase() === r.name.toLowerCase() ? 'all' : r.name)}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
                       selectedRam.toLowerCase() === r.name.toLowerCase()
-                        ? 'bg-indigo-600 text-white shadow-2xs'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        ? 'bg-indigo-600 text-white shadow-xs ring-1 ring-indigo-700'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 shadow-2xs'
                     }`}
                   >
                     <span>{r.name}</span>
-                    <span className={`text-[9px] px-1 py-0.2 rounded-full font-mono ${
+                    <span className={`text-[9px] px-1 py-0.2 rounded-full font-mono font-bold ${
                       selectedRam.toLowerCase() === r.name.toLowerCase()
                         ? 'bg-indigo-700 text-indigo-100'
                         : 'bg-slate-200 text-slate-600'
@@ -1755,16 +1797,16 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedRam('all')}
-                  className="p-1 text-slate-400 hover:text-red-600 rounded cursor-pointer"
+                  className="p-1 text-slate-400 hover:text-red-600 rounded-lg cursor-pointer transition-colors"
                   title="Clear RAM filter"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
 
             {/* ROM / Storage Filter */}
-            <div className="bg-white/80 border border-slate-200 rounded-xl p-2 flex items-center justify-between gap-2 overflow-hidden">
+            <div className="bg-white border-2 border-purple-300 hover:border-purple-400 rounded-xl p-2.5 flex items-center justify-between gap-2 overflow-hidden shadow-sm hover:shadow-md ring-1 ring-purple-950/5 transition-all">
               <div className="flex items-center gap-1.5 text-purple-700 font-bold shrink-0 text-[11px] px-1">
                 <HardDrive className="w-3.5 h-3.5 text-purple-600" />
                 <span>ROM:</span>
@@ -1774,10 +1816,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedRom('all')}
-                  className={`px-2 py-0.5 rounded text-[11px] font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
                     selectedRom === 'all'
-                      ? 'bg-purple-600 text-white shadow-2xs'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      ? 'bg-purple-600 text-white shadow-xs ring-1 ring-purple-700'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 shadow-2xs'
                   }`}
                 >
                   All
@@ -1787,14 +1829,14 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                     key={r.name}
                     type="button"
                     onClick={() => setSelectedRom(selectedRom.toLowerCase() === r.name.toLowerCase() ? 'all' : r.name)}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
                       selectedRom.toLowerCase() === r.name.toLowerCase()
-                        ? 'bg-purple-600 text-white shadow-2xs'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        ? 'bg-purple-600 text-white shadow-xs ring-1 ring-purple-700'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 shadow-2xs'
                     }`}
                   >
                     <span>{r.name}</span>
-                    <span className={`text-[9px] px-1 py-0.2 rounded-full font-mono ${
+                    <span className={`text-[9px] px-1 py-0.2 rounded-full font-mono font-bold ${
                       selectedRom.toLowerCase() === r.name.toLowerCase()
                         ? 'bg-purple-700 text-purple-100'
                         : 'bg-slate-200 text-slate-600'
@@ -1809,10 +1851,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedRom('all')}
-                  className="p-1 text-slate-400 hover:text-red-600 rounded cursor-pointer"
+                  className="p-1 text-slate-400 hover:text-red-600 rounded-lg cursor-pointer transition-colors"
                   title="Clear ROM filter"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
@@ -2091,10 +2133,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       )}
 
       {/* Inventory Table Container */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-300/90 shadow-xl shadow-slate-300/40 overflow-hidden ring-1 ring-slate-900/5">
         
         {/* Table Top Header Bar with Column Filter and Ledger Stats */}
-        <div className="p-3.5 sm:px-4 sm:py-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/70">
+        <div className="p-3.5 sm:px-5 sm:py-3.5 border-b border-slate-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-100/80">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-black text-slate-900">
               Stock Ledger & Catalog ({filteredProducts.length} Items Listed)
@@ -2104,13 +2146,13 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 Low Stock Filter
               </span>
             )}
-            <div className="inline-flex items-center p-0.5 bg-slate-200/80 rounded-xl text-[11px] font-bold">
+            <div className="inline-flex items-center p-0.5 bg-slate-200/90 rounded-xl text-[11px] font-bold border border-slate-300/70">
               <button
                 type="button"
                 onClick={() => setFocFilter('all')}
                 className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                   focFilter === 'all'
-                    ? 'bg-white text-slate-900 shadow-2xs'
+                    ? 'bg-white text-slate-900 shadow-2xs font-black'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -2121,7 +2163,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 onClick={() => setFocFilter('gift_only')}
                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                   focFilter === 'gift_only'
-                    ? 'bg-purple-600 text-white shadow-2xs'
+                    ? 'bg-purple-600 text-white shadow-2xs font-black'
                     : 'text-purple-700 hover:text-purple-900 hover:bg-purple-50'
                 }`}
                 title="Filter FOC & Promotional Gift Items"
@@ -2134,7 +2176,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 onClick={() => setFocFilter('standard_only')}
                 className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                   focFilter === 'standard_only'
-                    ? 'bg-white text-slate-900 shadow-2xs'
+                    ? 'bg-white text-slate-900 shadow-2xs font-black'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -2152,7 +2194,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               return (
                 <div 
                   id="selected-items-total-units-badge"
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all shadow-2xs ${
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border-2 transition-all shadow-sm ${
                     selectedProductIds.size > 0
                       ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-indigo-200 shadow-xs'
                       : 'bg-white text-slate-800 border-indigo-200/90 hover:border-indigo-300'
@@ -2311,7 +2353,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               {visibleColumns.actions !== false && <col style={{ width: `${columnWidths.actions || 95}px` }} />}
             </colgroup>
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider">
+              <tr className="bg-slate-100/90 border-b-2 border-slate-300 text-slate-700 uppercase tracking-wider text-xs font-black">
                 {visibleColumns.item_model !== false && (
                   <SortableHeader
                     field="item_model"
@@ -2450,7 +2492,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 )}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-200/90 bg-white">
               {sortedProducts.length === 0 ? (
                 <tr>
                   <td colSpan={activeColumnCount || 8} className="py-12 text-center text-slate-400">
@@ -2516,16 +2558,16 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                       key={product.id} 
                       className={`transition-colors ${
                         selectedProductIds.has(product.id)
-                          ? 'bg-indigo-50/70 hover:bg-indigo-50/90 ring-1 ring-inset ring-indigo-200'
+                          ? 'bg-indigo-50/80 hover:bg-indigo-100/70 ring-1 ring-inset ring-indigo-300'
                           : isExactBarcodeMatch 
-                            ? 'bg-indigo-50/60 ring-1 ring-inset ring-indigo-300' 
-                            : 'hover:bg-slate-50/80'
+                            ? 'bg-indigo-50/70 ring-1 ring-inset ring-indigo-300' 
+                            : 'hover:bg-indigo-50/40'
                       }`}
                     >
                       
                       {/* Name, Brand & SKU */}
                       {visibleColumns.item_model !== false && (
-                        <td className="py-3 px-4">
+                        <td className="py-3.5 px-4">
                           <div className="flex items-center gap-2.5">
                             <input
                               type="checkbox"
@@ -2539,7 +2581,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                             <button
                               type="button"
                               onClick={() => setSelectedProductForDetails(product)}
-                              className="w-10 h-10 rounded-xl overflow-hidden bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center hover:ring-2 hover:ring-indigo-500 transition-all cursor-pointer shadow-2xs group/thumb relative"
+                              className="w-10 h-10 rounded-xl overflow-hidden bg-slate-100 border border-slate-300/90 shrink-0 flex items-center justify-center hover:ring-2 hover:ring-indigo-500 transition-all cursor-pointer shadow-xs group/thumb relative"
                               title="Click to view product photo & details"
                             >
                               {product.imageUrl ? (
@@ -3141,6 +3183,18 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  setStockAdjustModalProduct(openActionMenu.product);
+                  setOpenActionMenu(null);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-indigo-700 hover:bg-indigo-50 font-semibold transition-colors cursor-pointer text-left"
+              >
+                <Sliders className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>Adjust Stock Level</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
                   setSelectedProductForQuarantine(openActionMenu.product);
                   setIsQuarantineReportOpen(true);
                   setOpenActionMenu(null);
@@ -3167,6 +3221,26 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Standalone Stock Adjustment Modal */}
+      {stockAdjustModalProduct && (
+        <StockAdjustmentModal
+          product={stockAdjustModalProduct}
+          isOpen={Boolean(stockAdjustModalProduct)}
+          onClose={() => setStockAdjustModalProduct(null)}
+          onConfirm={(adjustment) => {
+            StorageService.adjustStock(adjustment);
+            const updated = {
+              ...stockAdjustModalProduct,
+              stock: adjustment.newStock,
+              imeiList: adjustment.imeiList || stockAdjustModalProduct.imeiList,
+            };
+            onSaveProduct(updated);
+            setStockAdjustModalProduct(null);
+          }}
+          staffUsers={staffUsers}
+        />
       )}
 
     </div>

@@ -22,8 +22,8 @@ export const DEFAULT_INVOICE_SECTION_STYLES: Record<InvoiceSectionKey, Required<
   customer_tx_info: {
     visible: true,
     alignment: 'left',
-    boxStyle: 'card',
-    spacing: 'normal',
+    boxStyle: 'plain',
+    spacing: 'compact',
     fontSize: 'normal',
   },
   items_table: {
@@ -158,8 +158,8 @@ export interface InvoiceLayoutPreset {
 export const INVOICE_LAYOUT_PRESETS: InvoiceLayoutPreset[] = [
   {
     id: 'modern_card',
-    name: 'Modern Modular Cards (Figma Clean)',
-    description: 'Soft rounded container cards, centered minimalist QR codes, clean hierarchy',
+    name: 'Modern Clean Voucher',
+    description: 'Clean borderless header and metadata, clear item table, minimalist QR codes',
     badge: 'Popular',
     sectionOrder: [
       'logo_header',
@@ -173,7 +173,7 @@ export const INVOICE_LAYOUT_PRESETS: InvoiceLayoutPreset[] = [
     ],
     sectionStyles: {
       logo_header: { visible: true, alignment: 'center', boxStyle: 'plain', spacing: 'normal', fontSize: 'normal' },
-      customer_tx_info: { visible: true, alignment: 'left', boxStyle: 'card', spacing: 'normal', fontSize: 'normal' },
+      customer_tx_info: { visible: true, alignment: 'left', boxStyle: 'plain', spacing: 'compact', fontSize: 'normal' },
       items_table: { visible: true, alignment: 'left', boxStyle: 'bordered', spacing: 'normal', fontSize: 'normal' },
       financial_totals: { visible: true, alignment: 'right', boxStyle: 'card', spacing: 'normal', fontSize: 'normal' },
       payment_qrs: { visible: true, alignment: 'center', boxStyle: 'card', spacing: 'normal', fontSize: 'normal' },

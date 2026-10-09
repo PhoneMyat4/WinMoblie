@@ -52,6 +52,51 @@ input::placeholder, textarea::placeholder {
   will-change: transform, opacity;
 }
 
+@keyframes bokehDriftSlow {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translate(24px, -18px) scale(1.08);
+    opacity: 0.75;
+  }
+}
+
+@keyframes bokehDriftReverse {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translate(-28px, 22px) scale(1.12);
+    opacity: 0.7;
+  }
+}
+
+@keyframes bokehDriftAlt {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translate(18px, 26px) scale(1.05);
+    opacity: 0.65;
+  }
+}
+
+.animate-bokeh-1 {
+  animation: bokehDriftSlow 16s ease-in-out infinite;
+}
+
+.animate-bokeh-2 {
+  animation: bokehDriftReverse 20s ease-in-out infinite;
+}
+
+.animate-bokeh-3 {
+  animation: bokehDriftAlt 24s ease-in-out infinite;
+}
+
 @page {
   size: auto;
   margin: 0mm;

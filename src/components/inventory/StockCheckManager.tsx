@@ -724,10 +724,30 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
   };
 
   return (
-    <div id="stock-check-system-container" className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <div id="stock-check-system-container" className="relative min-h-[calc(100vh-4rem)] p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+      {/* Ambient Depth & Bokeh Lighting Atmosphere (Scoped strictly to Inventory & Stock Adjust) */}
+      <div className="absolute inset-0 -z-10 pointer-events-none overflow-hidden rounded-3xl" aria-hidden="true">
+        {/* Soft atmospheric gradient canvas */}
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-200/50 via-slate-100/70 to-indigo-50/25" />
+
+        {/* Luminous floating Bokeh Orbs for depth */}
+        <div className="absolute -top-20 -left-20 w-96 h-96 rounded-full bg-gradient-to-br from-indigo-400/25 to-blue-400/15 blur-[100px] animate-bokeh-1" />
+        <div className="absolute top-1/4 -right-20 w-[30rem] h-[30rem] rounded-full bg-gradient-to-bl from-purple-400/20 to-pink-400/15 blur-[120px] animate-bokeh-2" />
+        <div className="absolute top-2/3 left-10 w-[26rem] h-[26rem] rounded-full bg-gradient-to-tr from-sky-400/20 to-teal-300/15 blur-[110px] animate-bokeh-3" />
+        <div className="absolute bottom-10 right-1/4 w-96 h-96 rounded-full bg-gradient-to-tl from-amber-300/20 to-rose-300/15 blur-[115px] animate-bokeh-1" />
+
+        {/* Tactile micro-grid dot matrix for depth and element separation */}
+        <div 
+          className="absolute inset-0 opacity-[0.04]" 
+          style={{ 
+            backgroundImage: 'radial-gradient(#0f172a 1.25px, transparent 1.25px)', 
+            backgroundSize: '24px 24px' 
+          }} 
+        />
+      </div>
       
       {/* Top Header Strip */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-300/90">
         <div>
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-200">
@@ -745,7 +765,7 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
         </div>
 
         {/* View Navigation Tabs */}
-        <div className="flex items-center gap-2 bg-slate-200/80 p-1 rounded-2xl">
+        <div className="flex items-center gap-2 bg-slate-200/90 p-1.5 rounded-2xl border border-slate-300/80 shadow-2xs">
           <button
             type="button"
             onClick={() => setCurrentView('active_session')}
@@ -781,8 +801,8 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
 
       {/* VIEW 1: NEW AUDIT SETUP */}
       {currentView === 'new_setup' && (
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs max-w-3xl mx-auto space-y-6">
-          <div className="pb-4 border-b border-slate-100">
+        <div className="bg-white/95 backdrop-blur-md rounded-3xl border border-slate-300/90 p-6 sm:p-8 shadow-xl shadow-slate-300/30 max-w-3xl mx-auto space-y-6 ring-1 ring-slate-900/5">
+          <div className="pb-4 border-b border-slate-200">
             <h2 className="text-lg font-bold text-slate-900">Start New Physical Stock Audit</h2>
             <p className="text-xs text-slate-500">Configure your count scope and assign staff auditors.</p>
           </div>
@@ -797,10 +817,10 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
                 <button
                   type="button"
                   onClick={() => setAuditScope('all')}
-                  className={`p-3 rounded-2xl border text-left cursor-pointer transition-all ${
+                  className={`p-3 rounded-2xl border-2 text-left cursor-pointer transition-all ${
                     auditScope === 'all'
-                      ? 'border-indigo-600 bg-indigo-50/50 text-indigo-950 ring-2 ring-indigo-500/20 font-bold'
-                      : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                      ? 'border-indigo-600 bg-indigo-50/70 text-indigo-950 ring-4 ring-indigo-100 font-bold shadow-xs'
+                      : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700 hover:border-slate-300 shadow-2xs'
                   }`}
                 >
                   <Package className="w-4 h-4 text-indigo-600 mb-1" />
@@ -1123,7 +1143,7 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
                 </div>
 
                 {/* Discrepancy Count */}
-                <div className="p-3.5 bg-white border border-slate-200 rounded-2xl shadow-xs">
+                <div className="p-3.5 bg-white/95 backdrop-blur-md border border-slate-300/80 rounded-2xl shadow-md shadow-slate-300/30">
                   <div className="flex items-center justify-between text-slate-500 text-[11px] font-bold mb-1">
                     <span>Matched vs Discrepancies</span>
                     <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
@@ -1131,12 +1151,12 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
                   <p className="text-xl font-black text-slate-900">
                     <span className="text-emerald-700">{activeSession.matchedItemsCount}</span> / <span className="text-rose-700">{activeSession.discrepantItemsCount}</span>
                   </p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">Matched / Needs Adjust</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5 font-medium">Matched / Needs Adjust</p>
                 </div>
               </div>
 
               {/* Continuous Barcode & IMEI Rapid Scan Bar */}
-              <div className="bg-white border-2 border-indigo-500/40 rounded-2xl p-4 shadow-sm space-y-2">
+              <div className="bg-white/95 backdrop-blur-md border-2 border-indigo-500/80 rounded-2xl p-4 shadow-lg shadow-indigo-100/60 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <label className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
                     <ScanLine className="w-4 h-4 text-indigo-600 animate-pulse" />
@@ -1261,11 +1281,11 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
               </div>
 
               {/* Physical Audit Stock Table */}
-              <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="bg-white rounded-3xl border border-slate-300/90 shadow-xl shadow-slate-300/40 overflow-hidden ring-1 ring-slate-900/5">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs sm:text-sm border-collapse">
                     <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold text-[11px] uppercase tracking-wider">
+                      <tr className="bg-slate-100/90 border-b-2 border-slate-300 text-slate-700 font-black text-xs uppercase tracking-wider">
                         <SortableHeader
                           field="product_name"
                           label="Item & Model"
@@ -1335,7 +1355,7 @@ export const StockCheckManager: React.FC<StockCheckManagerProps> = ({
                         <th className="py-3.5 px-4 text-center select-none">Quick Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium">
+                    <tbody className="divide-y divide-slate-200/90 font-medium bg-white">
                       {sortedActiveItems.map((item) => {
                         const originalProduct = products.find(p => p.id === item.productId);
                         const isPhone = isPhoneCategory(item.category) || (originalProduct && (Boolean(originalProduct.rom && originalProduct.rom !== '-') || Boolean(originalProduct.imeiPairs?.length) || Boolean(originalProduct.imeiList?.length)));
