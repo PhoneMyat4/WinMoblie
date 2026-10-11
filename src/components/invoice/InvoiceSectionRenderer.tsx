@@ -492,7 +492,7 @@ export const InvoiceSectionRenderer: React.FC<InvoiceSectionRendererProps> = ({
           <div className="flex items-start gap-4 flex-wrap pt-0.5">
             {paymentQrs.map((qr) => (
               <div key={qr.id} className="flex flex-col items-center text-center">
-                <div className="w-16 h-16 sm:w-18 sm:h-18 bg-white p-1 rounded-lg border border-slate-300 shadow-2xs flex items-center justify-center shrink-0 overflow-hidden">
+                <div className="w-16 h-16 sm:w-18 sm:h-18 bg-white flex items-center justify-center shrink-0 overflow-hidden">
                   {qr.qrImageUrl ? (
                     <img 
                       src={qr.qrImageUrl} 
@@ -528,7 +528,7 @@ export const InvoiceSectionRenderer: React.FC<InvoiceSectionRendererProps> = ({
         <div className="flex items-center justify-center gap-3 flex-wrap">
           {paymentQrs.map((qr) => (
             <div key={qr.id} className="flex flex-col items-center">
-              <div className="w-16 h-16 bg-white p-1 border border-slate-300 rounded-lg flex items-center justify-center">
+              <div className="w-16 h-16 bg-white p-0.5 flex items-center justify-center">
                 {qr.qrImageUrl ? (
                   <img src={qr.qrImageUrl} alt={qr.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                 ) : (

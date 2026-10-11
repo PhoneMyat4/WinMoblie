@@ -121,6 +121,15 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   }, [editingProduct]);
 
   const isPhone = isPhoneCategory(category);
+  // Strict dependent taxonomy categories: Accessories & Gadgets, Cookware, and Sim Cards
+  const isStrictCategory = useMemo(() => {
+    const norm = canonicalCategory(category);
+    return norm === 'accessories_gadgets' || norm === 'cookware' || norm === 'sim_cards';
+  }, [category]);
+
+  const isChildCategoryDisabled = isStrictCategory && !subCategory.trim();
+  const isBrandDisabled = isStrictCategory && (!subCategory.trim() || !childCategory.trim());
+  const isModelDisabled = isStrictCategory && (!subCategory.trim() || !childCategory.trim() || !brand.trim());
   const [imeiPairs, setImeiPairs] = useState<ImeiPair[]>(initialImeiPairs);
   const [newImei1Input, setNewImei1Input] = useState<string>('');
   const [newImei2Input, setNewImei2Input] = useState<string>('');
@@ -365,6 +374,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
   // Available Child Categories / Variants strictly for selected category & subcategory from registered products
   const availableChildCategories = useMemo(() => {
+    if (isStrictCategory && !subCategory.trim()) return [];
     const childSet = new Set<string>();
     products.forEach(p => {
       if (canonicalCategory(p.category) === category) {
@@ -377,10 +387,13 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       }
     });
     return Array.from(childSet).sort((a, b) => a.localeCompare(b));
-  }, [category, subCategory, products]);
+  }, [category, subCategory, products, isStrictCategory]);
 
   // Available Brands strictly isolated to current category, subcategory, and child category / variant from registered products
   const availableBrands = useMemo(() => {
+    if (isStrictCategory && (!subCategory.trim() || !childCategory.trim())) {
+      return [];
+    }
     const brandSet = new Set<string>();
     const targetChild = childCategory.trim().toLowerCase();
 
@@ -408,7 +421,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     }
 
     // If no brands found for this specific subcategory, check across parent category in registered products
-    if (brandSet.size === 0 && !includeGlobalCatalog) {
+    if (brandSet.size === 0 && !includeGlobalCatalog && !isStrictCategory) {
       products.forEach((p) => {
         if (canonicalCategory(p.category) === category && p.brand && p.brand.trim()) {
           brandSet.add(p.brand.trim());
@@ -420,16 +433,19 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     if (includeGlobalCatalog) {
       const taxBrands = getBrandsForCategory(category, subCategory);
       taxBrands.forEach(b => brandSet.add(b));
-      if (brandSet.size === 0) {
+      if (brandSet.size === 0 && !isStrictCategory) {
         getBrandsForCategory(category).forEach(b => brandSet.add(b));
       }
     }
 
     return Array.from(brandSet).sort((a, b) => a.localeCompare(b));
-  }, [category, subCategory, childCategory, products, includeGlobalCatalog]);
+  }, [category, subCategory, childCategory, products, includeGlobalCatalog, isStrictCategory]);
 
   // Available Models strictly isolated to current category, subcategory, childCategory, and brand
   const availableModels = useMemo(() => {
+    if (isStrictCategory && (!subCategory.trim() || !childCategory.trim() || !brand.trim())) {
+      return [];
+    }
     const modelSet = new Set<string>();
     const targetChild = childCategory.trim().toLowerCase();
 
@@ -449,8 +465,8 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       }
     });
 
-    // Fallback to all models for this brand if none match the childCategory yet
-    if (modelSet.size === 0 && brand) {
+    // Fallback to all models for this brand if none match the childCategory yet (only for non-strict categories)
+    if (modelSet.size === 0 && brand && !isStrictCategory) {
       products.forEach((p) => {
         if (canonicalCategory(p.category) === category) {
           if (p.brand && p.brand.trim().toLowerCase() === brand.trim().toLowerCase()) {
@@ -465,13 +481,13 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     }
 
     // Only include pre-seeded taxonomy models if user explicitly turned on global catalog
-    if (includeGlobalCatalog) {
+    if (includeGlobalCatalog && brand) {
       const taxModels = getModelsForBrand(category, brand, subCategory);
       taxModels.forEach(m => {
         const clean = extractCleanModelName(m.name, brand);
         if (clean) modelSet.add(clean);
       });
-      if (modelSet.size === 0 && brand) {
+      if (modelSet.size === 0 && brand && !isStrictCategory) {
         getModelsForBrand(category, brand).forEach(m => {
           const clean = extractCleanModelName(m.name, brand);
           if (clean) modelSet.add(clean);
@@ -480,7 +496,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     }
 
     return Array.from(modelSet).sort((a, b) => a.localeCompare(b));
-  }, [category, brand, subCategory, childCategory, products, includeGlobalCatalog]);
+  }, [category, brand, subCategory, childCategory, products, includeGlobalCatalog, isStrictCategory]);
 
   // Filtered model suggestions for the current search query
   const filteredModelSuggestions = useMemo(() => {
@@ -591,16 +607,39 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   // Subcategory Change Handler (create-able and search-able text box)
   const handleSubCategoryChange = (newSub: string) => {
     setSubCategory(newSub);
+    if (isStrictCategory && newSub !== subCategory) {
+      setChildCategory('');
+      setBrand('');
+      setModel('');
+      setName('');
+    }
+  };
+
+  // Child Category / Variant Change Handler
+  const handleChildCategoryChange = (newChild: string) => {
+    setChildCategory(newChild);
+    if (isStrictCategory && newChild !== childCategory) {
+      setBrand('');
+      setModel('');
+      setName('');
+    }
   };
 
   // Brand Change Handler (create-able and search-able text box)
   const handleBrandChange = (newBrand: string) => {
     setBrand(newBrand);
-    if (newBrand.trim() && name.trim()) {
-      const cleaned = extractCleanModelName(name, newBrand);
-      if (cleaned !== name) {
-        setName(cleaned);
-        setModel(cleaned);
+    if (isStrictCategory) {
+      if (newBrand !== brand) {
+        setModel('');
+        setName('');
+      }
+    } else {
+      if (newBrand.trim() && name.trim()) {
+        const cleaned = extractCleanModelName(name, newBrand);
+        if (cleaned !== name) {
+          setName(cleaned);
+          setModel(cleaned);
+        }
       }
     }
   };
@@ -620,6 +659,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
   // Handle typing product name
   const handleNameChange = (val: string) => {
+    if (isModelDisabled) return;
     let cleanVal = val;
     const trimmed = val.trim();
 
