@@ -277,8 +277,6 @@ export const MOCK_PRODUCT_IDS = new Set<string>([
 export function isMockProduct(p: { id?: string; category?: string; brand?: string; name?: string } | null | undefined): boolean {
   if (!p || !p.id) return false;
   if (MOCK_PRODUCT_IDS.has(p.id) || p.id.startsWith('prod-cook-')) return true;
-  if (p.category === 'cookware') return true;
-  if (p.brand === 'Daw Pu' || (p.name && p.name.toLowerCase().includes('daw pu'))) return true;
   return false;
 }
 
@@ -777,7 +775,7 @@ export const StorageService = {
     } else {
       products.unshift(stampedProduct);
     }
-    StorageService.saveProducts(products, false);
+    StorageService.saveProducts(products, triggerSync);
 
     if (triggerSync && activeStorageSyncHandler?.onProductUpsert) {
       activeStorageSyncHandler.onProductUpsert(stampedProduct);

@@ -484,6 +484,7 @@ export default function App() {
 
   const handleSaveProduct = (prod: Product) => {
     StorageService.saveProduct(prod);
+    setProducts(StorageService.getProducts());
     AuditLogger.logInventory('PRODUCT_UPDATED', `Saved product: ${prod.name}`, currentActiveUser, {
       targetId: prod.id,
       targetName: prod.name,
@@ -493,12 +494,14 @@ export default function App() {
 
   const handleBulkSaveProducts = (newProducts: Product[], mergeWithExisting: boolean) => {
     StorageService.bulkSaveProducts(newProducts, mergeWithExisting);
+    setProducts(StorageService.getProducts());
     AuditLogger.logInventory('BULK_IMPORT', `Bulk updated ${newProducts.length} products`, currentActiveUser);
   };
 
   const handleDeleteProduct = (id: string) => {
     const existing = StorageService.getProducts().find(p => p.id === id);
     StorageService.deleteProduct(id);
+    setProducts(StorageService.getProducts());
     AuditLogger.logInventory('PRODUCT_DELETED', `Deleted product: ${existing?.name || id}`, currentActiveUser, { targetId: id });
   };
 
@@ -510,6 +513,7 @@ export default function App() {
 
   const handleStockAdjustment = (adj: StockAdjustment) => {
     StorageService.adjustStock(adj);
+    setProducts(StorageService.getProducts());
     AuditLogger.logInventory(
       'STOCK_ADJUSTED',
       `Stock adjusted for ${adj.productName}: ${adj.quantityChange > 0 ? '+' : ''}${adj.quantityChange} (${adj.reason})`,

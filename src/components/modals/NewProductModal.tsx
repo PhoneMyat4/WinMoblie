@@ -363,8 +363,8 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       }
     });
 
-    // Provide standard taxonomy options if user explicitly enabled global catalog OR if no custom subcategories exist yet
-    if (includeGlobalCatalog || subSet.size === 0) {
+    // Provide standard taxonomy options ONLY if user explicitly enabled global catalog suggestions
+    if (includeGlobalCatalog) {
       const taxSubs = getSubCategoriesForCategory(category);
       taxSubs.forEach(s => subSet.add(s));
     }
