@@ -690,10 +690,12 @@ export function getProductLifecycleMetrics(
     }
   });
 
-  const currentStock = product.stock;
-  const currentValuation = product.costPrice * currentStock;
-  const retailValuation = product.sellingPrice * currentStock;
-  const grossProfitGenerated = totalSoldRevenue - (totalSoldQty * product.costPrice);
+  const currentStock = Math.max(0, Number(product.stock) || 0);
+  const safeCost = Math.max(0, Number(product.costPrice) || 0);
+  const safeSelling = Math.max(0, Number(product.sellingPrice) || 0);
+  const currentValuation = safeCost * currentStock;
+  const retailValuation = safeSelling * currentStock;
+  const grossProfitGenerated = totalSoldRevenue - (totalSoldQty * safeCost);
 
   return {
     totalPurchasedQty,

@@ -464,8 +464,10 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
     let totalStockValuation = 0;
     let totalStockUnits = 0;
     categoryFilteredProducts.forEach(p => {
-      totalStockValuation += p.costPrice * p.stock;
-      totalStockUnits += p.stock;
+      const positiveStock = Math.max(0, Number(p.stock) || 0);
+      const safeCost = Math.max(0, Number(p.costPrice) || 0);
+      totalStockValuation += safeCost * positiveStock;
+      totalStockUnits += positiveStock;
     });
 
     return {

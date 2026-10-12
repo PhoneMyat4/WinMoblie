@@ -113,8 +113,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     : 0;
   
   const isLowStock = product.minStockAlert > 0 ? product.stock <= product.minStockAlert : product.stock <= 0;
-  const totalStockCostValuation = product.costPrice * product.stock;
-  const totalStockRetailValuation = product.sellingPrice * product.stock;
+  const safeStock = Math.max(0, Number(product.stock) || 0);
+  const safeCost = Math.max(0, Number(product.costPrice) || 0);
+  const safeRetail = Math.max(0, Number(product.sellingPrice) || 0);
+  const totalStockCostValuation = safeCost * safeStock;
+  const totalStockRetailValuation = safeRetail * safeStock;
 
   const handleSavePhoto = () => {
     const updated: Product = {

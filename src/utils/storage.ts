@@ -81,7 +81,7 @@ import {
   initialPersonalDebts
 } from '../data/initialPersonalFinance';
 import { DEFAULT_ROLE_PERMISSIONS } from './permissionUtils';
-import { isSameProductVariant, findExactVariantMatch, normalizeVariantText } from './variantUtils';
+import { isSameProductVariant, findExactVariantMatch, normalizeVariantText, getProductVariantKey } from './variantUtils';
 import { canonicalCategory, isPhoneCategory } from '../data/categoryTaxonomy';
 
 export const STORAGE_KEYS = {
@@ -649,7 +649,16 @@ export const StorageService = {
     const seenMap = new Map<string, number>();
     list.forEach(p => {
       if (!p || typeof p !== 'object') return;
-      const key = `${canonicalCategory(p.category)}|${normalizeVariantText(p.brand)}|${normalizeVariantText(p.name)}|${normalizeVariantText(p.rom || p.storage)}|${normalizeVariantText(p.color)}`;
+
+      // Never auto-merge non-phone products if either product has empty child category/variant
+      // Items without an explicit child category must remain distinct and independent
+      const pChildCat = normalizeVariantText(p.childCategory || p.variant);
+      if (!isPhoneCategory(p.category) && !pChildCat) {
+        deduplicated.push({ ...p });
+        return;
+      }
+
+      const key = getProductVariantKey(p) || p.id;
       if (seenMap.has(key)) {
         const existingIdx = seenMap.get(key)!;
         const existing = deduplicated[existingIdx];
@@ -1918,9 +1927,12 @@ export const StorageService = {
           const cleanBrand = normalizeVariantText(item.brand);
           const cleanName = normalizeVariantText(item.name);
           const cleanCat = canonicalCategory(item.category);
+          const itemChild = normalizeVariantText(item.childCategory || item.variant);
           targetProduct = products.find(p => {
             if (canonicalCategory(p.category) !== cleanCat) return false;
             if (cleanBrand && normalizeVariantText(p.brand) !== cleanBrand) return false;
+            const pChild = normalizeVariantText(p.childCategory || p.variant);
+            if (itemChild !== pChild) return false;
             const pName = normalizeVariantText(p.name);
             const pModel = p.model ? normalizeVariantText(p.model) : '';
             return pName === cleanName || pModel === cleanName ||
@@ -2332,9 +2344,12 @@ export const StorageService = {
         const cleanBrand = normalizeVariantText(item.brand);
         const cleanName = normalizeVariantText(item.name);
         const cleanCat = canonicalCategory(item.category);
+        const itemChild = normalizeVariantText(item.childCategory || item.variant);
         targetProduct = products.find(p => {
           if (canonicalCategory(p.category) !== cleanCat) return false;
           if (cleanBrand && normalizeVariantText(p.brand) !== cleanBrand) return false;
+          const pChild = normalizeVariantText(p.childCategory || p.variant);
+          if (itemChild !== pChild) return false;
           const pName = normalizeVariantText(p.name);
           const pModel = p.model ? normalizeVariantText(p.model) : '';
           return pName === cleanName || pModel === cleanName ||
@@ -3773,7 +3788,7 @@ export const StorageService = {
     const seenVariants = new Set<string>();
     let duplicateVariantsFound = 0;
     products.forEach(p => {
-      const key = `${canonicalCategory(p.category)}|${normalizeVariantText(p.brand)}|${normalizeVariantText(p.name)}|${normalizeVariantText(p.rom || p.storage)}|${normalizeVariantText(p.color)}|${normalizeVariantText(p.condition)}`.toLowerCase();
+      const key = (getProductVariantKey(p) || p.id).toLowerCase();
       if (seenVariants.has(key)) {
         duplicateVariantsFound++;
       } else {

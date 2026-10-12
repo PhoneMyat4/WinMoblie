@@ -441,9 +441,9 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
   // Financial Stock Valuation
   const safeProducts = useMemo(() => Array.isArray(products) ? products.filter(Boolean) : [], [products]);
-  const totalUnits = safeProducts.reduce((s, p) => s + (Number(p.stock) || 0), 0);
-  const totalCostValuation = safeProducts.reduce((s, p) => s + ((Number(p.costPrice) || 0) * (Number(p.stock) || 0)), 0);
-  const totalRetailValuation = safeProducts.reduce((s, p) => s + ((Number(p.sellingPrice) || 0) * (Number(p.stock) || 0)), 0);
+  const totalUnits = safeProducts.reduce((s, p) => s + Math.max(0, Number(p.stock) || 0), 0);
+  const totalCostValuation = safeProducts.reduce((s, p) => s + (Math.max(0, Number(p.costPrice) || 0) * Math.max(0, Number(p.stock) || 0)), 0);
+  const totalRetailValuation = safeProducts.reduce((s, p) => s + (Math.max(0, Number(p.sellingPrice) || 0) * Math.max(0, Number(p.stock) || 0)), 0);
   const projectedGrossProfit = totalRetailValuation - totalCostValuation;
   const lowStockItems = safeProducts.filter(p => {
     const min = typeof p.minStockAlert === 'number' ? p.minStockAlert : 0;
@@ -721,8 +721,9 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
       if (tokens.length === 0) return true;
 
-      // Searchable string containing all metadata (Name, Brand, Model, RAM, ROM, Storage, Color, Category, Subcategory, Child Category, SKU, Barcode, Condition, IMEI)
+      // Searchable string containing all metadata (ID, Name, Brand, Model, RAM, ROM, Storage, Color, Category, Subcategory, Child Category, SKU, Barcode, Condition, IMEI)
       const searchableParts = [
+        p.id,
         p.name,
         p.brand,
         p.model,
@@ -751,15 +752,15 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
   // Financial metrics for filtered / catalog listed items
   const filteredUnits = useMemo(() => {
-    return filteredProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+    return filteredProducts.reduce((sum, p) => sum + Math.max(0, Number(p.stock) || 0), 0);
   }, [filteredProducts]);
 
   const filteredRetailAmount = useMemo(() => {
-    return filteredProducts.reduce((sum, p) => sum + ((Number(p.sellingPrice) || 0) * (Number(p.stock) || 0)), 0);
+    return filteredProducts.reduce((sum, p) => sum + (Math.max(0, Number(p.sellingPrice) || 0) * Math.max(0, Number(p.stock) || 0)), 0);
   }, [filteredProducts]);
 
   const filteredCostAmount = useMemo(() => {
-    return filteredProducts.reduce((sum, p) => sum + ((Number(p.costPrice) || 0) * (Number(p.stock) || 0)), 0);
+    return filteredProducts.reduce((sum, p) => sum + (Math.max(0, Number(p.costPrice) || 0) * Math.max(0, Number(p.stock) || 0)), 0);
   }, [filteredProducts]);
 
   // Granular row selection state for user-selected items
@@ -771,15 +772,15 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   }, [safeProducts, selectedProductIds]);
 
   const selectedUnits = useMemo(() => {
-    return selectedProducts.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+    return selectedProducts.reduce((sum, p) => sum + Math.max(0, Number(p.stock) || 0), 0);
   }, [selectedProducts]);
 
   const selectedRetailAmount = useMemo(() => {
-    return selectedProducts.reduce((sum, p) => sum + ((Number(p.sellingPrice) || 0) * (Number(p.stock) || 0)), 0);
+    return selectedProducts.reduce((sum, p) => sum + (Math.max(0, Number(p.sellingPrice) || 0) * Math.max(0, Number(p.stock) || 0)), 0);
   }, [selectedProducts]);
 
   const selectedCostAmount = useMemo(() => {
-    return selectedProducts.reduce((sum, p) => sum + ((Number(p.costPrice) || 0) * (Number(p.stock) || 0)), 0);
+    return selectedProducts.reduce((sum, p) => sum + (Math.max(0, Number(p.costPrice) || 0) * Math.max(0, Number(p.stock) || 0)), 0);
   }, [selectedProducts]);
 
   // Interactive Column Sorting

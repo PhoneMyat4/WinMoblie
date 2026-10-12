@@ -91,7 +91,15 @@ export const getProductVariantKey = (item: VariantSpecifications): string => {
   const subCat = normalizeVariantText(item.subCategory);
   const childCat = normalizeVariantText(item.childCategory || item.variant);
   const color = extractNormalizedColor(item.color);
-  return `item|brand:${brand}|name:${name}|cat:${category}|sub:${subCat}|child:${childCat}|cond:${condition}|color:${color}`;
+
+  // If child category is empty / unspecified:
+  // - It must never match any product with an assigned child category.
+  // - To prevent unintended merging of distinct products where child category was omitted,
+  //   each product retains its own unique identifier via item.id (if present).
+  // - If item.id is missing (e.g. prospective/unsaved form), use '__empty_unassigned__'
+  //   so it cannot collide with existing persisted products.
+  const childKey = childCat ? childCat : (item.id ? `__empty_${item.id}__` : '__empty_unassigned__');
+  return `item|brand:${brand}|name:${name}|cat:${category}|sub:${subCat}|child:${childKey}|cond:${condition}|color:${color}`;
 };
 
 /**
@@ -102,6 +110,19 @@ export const isSameProductVariant = (
   b: VariantSpecifications
 ): boolean => {
   if (!a || !b) return false;
+  if (canonicalCategory(a.category) !== canonicalCategory(b.category)) return false;
+
+  // For non-phone items: if either item has empty child category/variant, they should NOT be assumed identical
+  // unless they are explicitly the exact same product ID
+  if (!isPhoneCategory(a.category)) {
+    const aChild = normalizeVariantText(a.childCategory || a.variant);
+    const bChild = normalizeVariantText(b.childCategory || b.variant);
+    if (!aChild || !bChild) {
+      if (a.id && b.id && a.id === b.id) return true;
+      return false; // Empty child categories do not match each other or defined child categories
+    }
+  }
+
   const keyA = getProductVariantKey(a);
   const keyB = getProductVariantKey(b);
   return Boolean(keyA && keyB && keyA === keyB);
@@ -116,6 +137,16 @@ export const findExactVariantMatch = (
   excludeId?: string
 ): Product | undefined => {
   if (!specs.name || !specs.name.trim()) return undefined;
+
+  // For non-phone items: if specs has empty child category, it should never match an existing product
+  // because an unassigned child category cannot be definitively matched to any existing variant
+  if (!isPhoneCategory(specs.category)) {
+    const specsChild = normalizeVariantText(specs.childCategory || specs.variant);
+    if (!specsChild) {
+      return undefined;
+    }
+  }
+
   const targetKey = getProductVariantKey(specs);
 
   return products.find((p) => {

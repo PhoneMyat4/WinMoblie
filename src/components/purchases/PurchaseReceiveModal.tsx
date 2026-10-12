@@ -181,6 +181,7 @@ export const PurchaseReceiveModal: React.FC<PurchaseReceiveModalProps> = ({
                      catalogProducts.find(p => 
                        canonicalCategory(p.category) === canonicalCategory(targetItem.category) &&
                        p.brand.toLowerCase() === (targetItem.brand || '').toLowerCase() &&
+                       (p.childCategory || p.variant || '').toLowerCase() === (targetItem.childCategory || targetItem.variant || '').toLowerCase() &&
                        (p.name.toLowerCase() === targetItem.name.toLowerCase() || (p.model && p.model.toLowerCase() === targetItem.name.toLowerCase()))
                      );
 

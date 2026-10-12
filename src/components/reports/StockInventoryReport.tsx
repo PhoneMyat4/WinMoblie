@@ -165,9 +165,12 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
     let totalImeisCount = 0;
 
     products.forEach((p) => {
-      totalUnits += p.stock;
-      totalCostValuation += p.costPrice * p.stock;
-      totalRetailValuation += p.sellingPrice * p.stock;
+      const positiveStock = Math.max(0, Number(p.stock) || 0);
+      const safeCost = Math.max(0, Number(p.costPrice) || 0);
+      const safeRetail = Math.max(0, Number(p.sellingPrice) || 0);
+      totalUnits += positiveStock;
+      totalCostValuation += safeCost * positiveStock;
+      totalRetailValuation += safeRetail * positiveStock;
       if (p.stock <= 0) {
         outOfStockCount++;
       } else if (p.minStockAlert > 0 && p.stock <= p.minStockAlert) {
@@ -270,9 +273,12 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
     let retail = 0;
     let units = 0;
     filteredProducts.forEach(p => {
-      cost += p.costPrice * p.stock;
-      retail += p.sellingPrice * p.stock;
-      units += p.stock;
+      const positiveStock = Math.max(0, Number(p.stock) || 0);
+      const safeCost = Math.max(0, Number(p.costPrice) || 0);
+      const safeRetail = Math.max(0, Number(p.sellingPrice) || 0);
+      cost += safeCost * positiveStock;
+      retail += safeRetail * positiveStock;
+      units += positiveStock;
     });
     return {
       name: accessorySubCategoryFilter,
@@ -291,9 +297,12 @@ export const StockInventoryReport: React.FC<StockInventoryReportProps> = ({
     products.forEach((p) => {
       const label = getCategoryLabel(p.category);
       const existing = map.get(label) || { cost: 0, retail: 0, units: 0 };
-      existing.cost += p.costPrice * p.stock;
-      existing.retail += p.sellingPrice * p.stock;
-      existing.units += p.stock;
+      const positiveStock = Math.max(0, Number(p.stock) || 0);
+      const safeCost = Math.max(0, Number(p.costPrice) || 0);
+      const safeRetail = Math.max(0, Number(p.sellingPrice) || 0);
+      existing.cost += safeCost * positiveStock;
+      existing.retail += safeRetail * positiveStock;
+      existing.units += positiveStock;
       map.set(label, existing);
     });
 
