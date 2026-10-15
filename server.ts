@@ -522,7 +522,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
         try {
           const ai = getGenAI();
           const response = await ai.models.generateContent({
-            model: 'gemini-3.7-flash',
+            model: 'gemini-3.8-flash',
             contents: {
               parts: [
                 {
