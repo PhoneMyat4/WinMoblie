@@ -82,8 +82,33 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    match /expenseCategories/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
     match /cashDrawer/{docId} {
       allow read, write: if isSignedIn();
+    }
+
+    match /cashDrawerShifts/{shiftId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /monthlyCapitalSnapshots/{snapId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /capitalCashTransfers/{transferId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /focDistributions/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /sales_archive/{saleId} {
+      allow read, create: if isSignedIn();
+      allow update, delete: if false;
     }
 
     match /preOrders/{preOrderId} {
@@ -118,13 +143,49 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
-    // Catch-all: requires authenticated staff session
-    match /{collection}/{docId} {
+    match /socialMarketing/{docId} {
       allow read, write: if isSignedIn();
     }
 
-    match /{collection}/{docId}/{subCollection}/{subDocId} {
+    match /facebookPosts/{docId} {
       allow read, write: if isSignedIn();
+    }
+
+    match /announcements/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /chatChannels/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /chatMessages/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /personalWallets/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /personalTransactions/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /personalBudgets/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /personalGoals/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /personalDebts/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Default deny catch-all so specific collection restrictions (such as append-only audit logs and non-deletable sales) are never overridden
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

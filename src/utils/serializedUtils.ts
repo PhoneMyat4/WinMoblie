@@ -701,14 +701,17 @@ export function calculateShiftReconciliation(
     }
   });
 
-  // 2. Cash In / Cash Out from manual vouchers on that date (exclude auto-booked sales, expenses, and refunds to prevent double-counting)
+  // 2. Cash In / Cash Out from manual vouchers on that date (use explicit entryType === 'manual' with legacy prefix fallback)
   let manualCashInTotal = 0;
   (cashDrawer.cashInManual || []).forEach(tx => {
     const reason = tx.reason || '';
     const isAutoSaleIn =
-      reason.startsWith('POS Invoice #') ||
-      reason.startsWith('Credit Down Payment #') ||
-      reason.startsWith('Credit Debt Collection #');
+      tx.entryType ? tx.entryType !== 'manual' : (
+        reason.startsWith('POS Invoice #') ||
+        reason.startsWith('Credit Down Payment #') ||
+        reason.startsWith('Credit Debt Collection #') ||
+        reason.startsWith('[Daily Sales Cash Deduction]')
+      );
     if (tx.time && tx.time.slice(0, 10) === targetDate && !isAutoSaleIn) {
       manualCashInTotal += Math.round(Number(tx.amount) || 0);
     }
@@ -718,9 +721,14 @@ export function calculateShiftReconciliation(
   (cashDrawer.cashOutManual || []).forEach(tx => {
     const reason = tx.reason || '';
     const isAutoExpenseOrRefundOut =
-      reason.startsWith('[Daily Sales Cash Deduction] Expense #') ||
-      reason.startsWith('Cash Refund for Invoice #') ||
-      reason.startsWith('Refund Outflow');
+      tx.entryType ? tx.entryType !== 'manual' : (
+        reason.startsWith('[Daily Sales Cash Deduction]') ||
+        reason.startsWith('Purchase Order #') ||
+        reason.startsWith('PO #') ||
+        reason.startsWith('Refund Invoice #') ||
+        reason.startsWith('Cash Refund for Invoice #') ||
+        reason.startsWith('Refund Outflow')
+      );
     if (tx.time && tx.time.slice(0, 10) === targetDate && !isAutoExpenseOrRefundOut) {
       manualCashOutTotal += Math.round(Number(tx.amount) || 0);
     }

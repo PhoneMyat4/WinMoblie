@@ -39,6 +39,7 @@ import { archiveSalesData, listArchivedFiles } from './server/archiveService';
 
 async function startServer() {
   const app = express();
+  app.set('trust proxy', 1);
   const PORT = Number(process.env.PORT) || 3000;
 
   // JSON payload parser for base64 image data (hardened 5MB limit to prevent DoS attacks)
@@ -144,7 +145,7 @@ async function startServer() {
   }, 60_000);
 
   app.use('/api', (req, res, next) => {
-    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'local';
+    const ip = req.ip || req.socket?.remoteAddress || 'local';
     const isSensitiveRoute =
       req.path.startsWith('/archive-data') ||
       req.path.startsWith('/ai-assistant') ||
@@ -641,17 +642,24 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
         activeModel = 'gemini-3.8-flash';
       }
 
-      // Check admin authorization
-      const isAdmin = Boolean(
-        req.body.isAdmin ||
-        (context as any)?.isAdmin ||
-        (context.settings as any)?.isAdmin ||
-        req.body.userRole === 'Admin' ||
-        req.body.userRole === 'Owner' ||
-        req.body.userRole === 'Manager'
+      // Check admin authorization: verify against server ADMIN_AUDIT_KEY or authenticated Owner/Manager staff role (never blindly trust req.body.isAdmin alone)
+      const hasAuditKeyHeader = Boolean(
+        process.env.ADMIN_AUDIT_KEY &&
+        req.headers['x-admin-audit-key'] === process.env.ADMIN_AUDIT_KEY
       );
-      if (isAdmin) {
-        (context as any).isAdmin = true;
+      const staffRoleFromContext = String(
+        req.body.userRole ||
+        (context.settings as any)?.currentStaffRole ||
+        ''
+      ).trim();
+      const isPrivilegedStaffRole =
+        staffRoleFromContext === 'Owner' ||
+        staffRoleFromContext === 'Manager' ||
+        staffRoleFromContext === 'Admin';
+      const isAdmin = Boolean(hasAuditKeyHeader || isPrivilegedStaffRole);
+      (context as any).isAdmin = isAdmin;
+      if (context.settings && typeof context.settings === 'object') {
+        (context.settings as any).isAdmin = isAdmin;
       }
 
       const replyLanguage = req.body.language || 'my';
@@ -865,6 +873,8 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
             parsedArgs = {};
           }
 
+          // Strip any LLM-supplied isAdmin flag and enforce server-verified isAdmin
+          delete parsedArgs.isAdmin;
           if (isAdmin) {
             parsedArgs.isAdmin = true;
           }

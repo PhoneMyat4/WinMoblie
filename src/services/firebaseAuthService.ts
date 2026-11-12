@@ -73,6 +73,20 @@ export class FirebaseAuthService {
     return `${cleanUsername || 'staff'}@apexpos.internal`;
   }
 
+  public static hashStaffCredential(raw: string): string {
+    const str = `winmobile_pos_v1:${String(raw || '').trim()}`;
+    let h1 = 0xdeadbeef ^ str.length;
+    let h2 = 0x41c6ce57 ^ str.length;
+    for (let i = 0, ch; i < str.length; i++) {
+      ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return `sha_${(h2 >>> 0).toString(16).padStart(8, '0')}${(h1 >>> 0).toString(16).padStart(8, '0')}`;
+  }
+
   /**
    * Signs in or registers the staff user into Firebase Authentication.
    * Ensures Firebase request.auth is populated for Firestore security rules.
@@ -81,10 +95,19 @@ export class FirebaseAuthService {
     const primaryEmail = this.getAuthEmail(staff);
     const internalEmail = this.getInternalAuthEmail(staff);
     const password = enteredPassword.length >= 6 ? enteredPassword : `${enteredPassword}123456`.slice(0, 12);
+    const enteredHash = this.hashStaffCredential(enteredPassword);
     const isLocalCredentialValid = Boolean(
       (staff.password && staff.password === enteredPassword) ||
-      (staff.pin && staff.pin === enteredPassword)
+      (staff.pin && staff.pin === enteredPassword) ||
+      (staff.credentialHash && staff.credentialHash === enteredHash)
     );
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOffline) {
+      return isLocalCredentialValid
+        ? { success: true }
+        : { success: false, error: 'Invalid staff credentials (offline verification failed).' };
+    }
 
     try {
       // 1. Attempt primary email/password sign-in
@@ -120,18 +143,24 @@ export class FirebaseAuthService {
             console.warn('[FirebaseAuthService] Staff Firebase Auth creation notice:', createErr.message);
           }
         }
+
+        // If error is strictly network-related while navigator.onLine was still true, allow local credential fallback
+        if (
+          isLocalCredentialValid &&
+          (signInErr.code === 'auth/network-request-failed' ||
+           String(signInErr.message || '').toLowerCase().includes('network'))
+        ) {
+          return { success: true };
+        }
       }
 
-      if (!isLocalCredentialValid) {
-        return { success: false, error: 'Invalid staff credentials.' };
-      }
-
-      // 2. Fallback: Authenticated at terminal level after local credential verification
-      return { success: true };
+      return { success: false, error: 'Invalid staff credentials or Firebase Authentication rejected sign-in.' };
     } catch (err: any) {
       console.warn('[FirebaseAuthService] Firebase authentication notice:', err?.message || err);
+      const isNetErr = String(err?.code || err?.message || '').toLowerCase().includes('network');
       return { 
-        success: isLocalCredentialValid
+        success: isOffline || (isNetErr && isLocalCredentialValid),
+        error: 'Authentication failed.'
       };
     }
   }

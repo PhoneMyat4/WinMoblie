@@ -106,6 +106,7 @@ export interface StaffUser {
   email?: string;
   pin: string; // Security PIN for terminal switch
   password?: string; // Password for account authentication
+  credentialHash?: string; // Hashed credential fingerprint for cloud sync without storing plaintext
   active: boolean;
   avatarColor?: string;
   branchId?: string; // Assigned primary branch (e.g. 'loc_br_yangon_01')
@@ -589,6 +590,7 @@ export interface Sale {
   preOrderId?: string;
   preOrderNumber?: string;
   depositDeducted?: number;
+  syncState?: 'pending' | 'synced';
 }
 
 export type PreOrderStatus = 'Pending' | 'Stock Arrived' | 'Completed' | 'Cancelled';
@@ -874,12 +876,12 @@ export interface CashDrawerRecord {
   openingFloat: number;
   openingBalance?: number;
   cashSales: number;
-  cashInManual: { reason: string; amount: number; time: string }[];
-  cashOutManual: { reason: string; amount: number; time: string }[];
+  cashInManual: { reason: string; amount: number; time: string; entryType?: 'manual' | 'sale' | 'expense' | 'refund' }[];
+  cashOutManual: { reason: string; amount: number; time: string; entryType?: 'manual' | 'sale' | 'expense' | 'refund' }[];
   
   totalCashIn?: number;
   totalCashOut?: number;
-  transactions?: { id: string; timestamp: string; type: string; description: string; amount: number }[];
+  transactions?: { id: string; timestamp: string; type: string; description: string; amount: number; entryType?: 'manual' | 'sale' | 'expense' | 'refund' }[];
 
   expectedInDrawer: number;
   actualCounted?: number;

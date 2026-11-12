@@ -56,14 +56,14 @@ function initializeDatabase() {
     }
   }
 
-  // Populate default staff users if empty
+  // Populate default staff users if empty (PINs stored as SHA-256 hashes)
   var staffSheet = ss.getSheetByName('Staff');
   if (staffSheet.getLastRow() <= 1) {
     var defaultStaff = [
-      ['staff_1', 'owner', 'Ko Aung Kyaw (Owner)', 'Owner', '09-798123456', '1234', 'bg-purple-600', 'active'],
-      ['staff_2', 'manager', 'Ma Thandar (Manager)', 'Manager', '09-974567890', '2345', 'bg-blue-600', 'active'],
-      ['staff_3', 'cashier', 'Ko Min Thu (Cashier)', 'Cashier', '09-450112233', '3456', 'bg-emerald-600', 'active'],
-      ['staff_4', 'stock', 'Ko Zaw Zaw (Stock Controller)', 'Inventory_Staff', '09-250998877', '4567', 'bg-amber-600', 'active']
+      ['staff_1', 'owner', 'Ko Aung Kyaw (Owner)', 'Owner', '09-798123456', hashStaffPin('8492'), 'bg-purple-600', 'active'],
+      ['staff_2', 'manager', 'Ma Thandar (Manager)', 'Manager', '09-974567890', hashStaffPin('7381'), 'bg-blue-600', 'active'],
+      ['staff_3', 'cashier', 'Ko Min Thu (Cashier)', 'Cashier', '09-450112233', hashStaffPin('6274'), 'bg-emerald-600', 'active'],
+      ['staff_4', 'stock', 'Ko Zaw Zaw (Stock Controller)', 'Inventory_Staff', '09-250998877', hashStaffPin('5163'), 'bg-amber-600', 'active']
     ];
     for (var s = 0; s < defaultStaff.length; s++) {
       staffSheet.appendRow(defaultStaff[s]);
@@ -226,8 +226,20 @@ function getInitialData() {
   };
 }
 
+function hashStaffPin(rawPin) {
+  var raw = 'winmobile_gas_v1:' + String(rawPin || '').trim();
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, raw, Utilities.Charset.UTF_8);
+  var hex = '';
+  for (var i = 0; i < digest.length; i++) {
+    var b = (digest[i] + 256) % 256;
+    var h = b.toString(16);
+    hex += (h.length === 1 ? '0' : '') + h;
+  }
+  return 'sha256:' + hex;
+}
+
 /**
- * Validates staff authentication by Username and PIN
+ * Validates staff authentication by Username and PIN (supports SHA-256 hashed PINs and auto-upgrades legacy plaintext rows)
  */
 function verifyStaffCredentials(inputUsername, enteredPin) {
   var ss = getSpreadsheet();
@@ -236,16 +248,25 @@ function verifyStaffCredentials(inputUsername, enteredPin) {
 
   var data = staffSheet.getDataRange().getValues();
   var cleanUser = String(inputUsername || '').trim().toLowerCase();
+  var enteredStr = String(enteredPin || '').trim();
+  var enteredHash = hashStaffPin(enteredStr);
 
   for (var i = 1; i < data.length; i++) {
     var storedId = String(data[i][0]).toLowerCase();
     var storedUsername = String(data[i][1]).toLowerCase();
     var storedName = String(data[i][2]).toLowerCase();
-    var storedPin = String(data[i][5]);
+    var storedPin = String(data[i][5] || '').trim();
     var status = String(data[i][7] || 'active');
 
     if (status === 'active' && (storedUsername === cleanUser || storedName === cleanUser || storedId === cleanUser)) {
-      if (storedPin === String(enteredPin)) {
+      var isMatch = (storedPin.indexOf('sha256:') === 0)
+        ? (storedPin === enteredHash)
+        : (storedPin === enteredStr);
+
+      if (isMatch) {
+        if (storedPin.indexOf('sha256:') !== 0) {
+          staffSheet.getRange(i + 1, 6).setValue(enteredHash);
+        }
         return {
           success: true,
           user: {
@@ -286,75 +307,114 @@ function recordSaleTransaction(saleData) {
     var salesSheet = ss.getSheetByName('Sales');
     var productsSheet = ss.getSheetByName('Products');
     var customersSheet = ss.getSheetByName('Customers');
+    var settingsSheet = ss.getSheetByName('Settings');
 
-    var invoiceNumber = saleData.invoiceNumber || generateInvoiceNumber();
     var saleId = saleData.id || 'sale_' + new Date().getTime();
     var dateStr = saleData.date || new Date().toISOString();
 
-    // 1. Validate & Deduct Inventory + Snapshot Authoritative Cost Price from Products Sheet
+    if (!saleData.items || saleData.items.length === 0) {
+      throw new Error('Cannot record an empty sale transaction.');
+    }
+
+    // 1. PHASE 1 (READ & VALIDATE ALL ITEMS FIRST): Never mutate sheet rows until every line item passes stock, IMEI, and price checks
     var pData = productsSheet.getDataRange().getValues();
     var validatedItems = [];
     var recomputedSubtotal = 0;
+    var rowStockMap = {};
+    var rowImeiMap = {};
+    var touchedRows = {};
 
-    if (saleData.items && saleData.items.length > 0) {
-      for (var i = 0; i < saleData.items.length; i++) {
-        var item = saleData.items[i];
-        var matchedRow = -1;
-        for (var r = 1; r < pData.length; r++) {
-          if (String(pData[r][0]) === String(item.productId)) {
-            matchedRow = r;
-            break;
-          }
+    for (var i = 0; i < saleData.items.length; i++) {
+      var item = saleData.items[i];
+      var matchedRow = -1;
+      for (var r = 1; r < pData.length; r++) {
+        if (String(pData[r][0]) === String(item.productId)) {
+          matchedRow = r;
+          break;
         }
-        if (matchedRow === -1) {
-          throw new Error('Product "' + (item.name || item.productId) + '" not found in Products sheet.');
+      }
+      if (matchedRow === -1) {
+        throw new Error('Product "' + (item.name || item.productId) + '" not found in Products sheet.');
+      }
+
+      if (rowStockMap[matchedRow] === undefined) {
+        rowStockMap[matchedRow] = Number(pData[matchedRow][6]) || 0;
+        rowImeiMap[matchedRow] = parseJsonSafely(pData[matchedRow][9], []);
+      }
+
+      var currentStock = rowStockMap[matchedRow];
+      var reqQty = Math.max(1, Math.round(Number(item.quantity) || 1));
+      if (currentStock < reqQty) {
+        throw new Error('Insufficient stock for "' + pData[matchedRow][1] + '" (Available: ' + currentStock + ', Requested: ' + reqQty + ').');
+      }
+
+      var isSerialized = Boolean(pData[matchedRow][8] === true || pData[matchedRow][8] === 'TRUE' || pData[matchedRow][8] === 'true');
+      var availableImeis = rowImeiMap[matchedRow];
+      if (item.imei) {
+        var imeiIdx = availableImeis.indexOf(String(item.imei));
+        if (imeiIdx === -1) {
+          throw new Error('IMEI "' + item.imei + '" for "' + pData[matchedRow][1] + '" is not in stock (already sold or invalid).');
         }
+        availableImeis.splice(imeiIdx, 1);
+      } else if (isSerialized && availableImeis.length > 0) {
+        throw new Error('Product "' + pData[matchedRow][1] + '" requires a valid in-stock IMEI selection.');
+      }
 
-        var currentStock = Number(pData[matchedRow][6]) || 0;
-        var reqQty = Math.max(1, Math.round(Number(item.quantity) || 1));
-        if (currentStock < reqQty) {
-          throw new Error('Insufficient stock for "' + pData[matchedRow][1] + '" (Available: ' + currentStock + ', Requested: ' + reqQty + ').');
+      if (item.imei2) {
+        var imei2Idx = availableImeis.indexOf(String(item.imei2));
+        if (imei2Idx !== -1) {
+          availableImeis.splice(imei2Idx, 1);
         }
+      }
 
-        var sheetCostPrice = Math.round(Number(pData[matchedRow][4]) || 0);
-        var sheetSellingPrice = Math.round(Number(pData[matchedRow][5]) || 0);
-        var unitPrice = Math.round(Number(item.unitPrice) || sheetSellingPrice);
-        var discount = Math.round(Number(item.discount) || 0);
-        var finalPrice = Math.round(unitPrice * reqQty - discount);
-        recomputedSubtotal += finalPrice;
+      var sheetCostPrice = Math.round(Number(pData[matchedRow][4]) || 0);
+      var sheetSellingPrice = Math.round(Number(pData[matchedRow][5]) || 0);
+      // Authoritative server price enforcement: default to sheetSellingPrice and disallow selling below cost
+      var submittedPrice = Number(item.unitPrice);
+      var unitPrice = (!isNaN(submittedPrice) && submittedPrice >= sheetCostPrice)
+        ? Math.round(submittedPrice)
+        : sheetSellingPrice;
+      var discount = Math.max(0, Math.round(Number(item.discount) || 0));
+      var finalPrice = Math.round(unitPrice * reqQty - discount);
+      if (sheetCostPrice > 0 && finalPrice < sheetCostPrice * reqQty) {
+        throw new Error('Price below cost floor rejected for "' + pData[matchedRow][1] + '".');
+      }
 
-        var newStock = currentStock - reqQty;
-        pData[matchedRow][6] = newStock;
-        productsSheet.getRange(matchedRow + 1, 7).setValue(newStock);
+      recomputedSubtotal += finalPrice;
+      rowStockMap[matchedRow] = currentStock - reqQty;
+      touchedRows[matchedRow] = true;
 
-        // If serialized, verify and remove sold IMEI from the list
-        if (item.imei) {
-          var imeiList = parseJsonSafely(pData[matchedRow][9], []);
-          var filteredImeis = imeiList.filter(function(im) { return im !== item.imei && im !== item.imei2; });
-          pData[matchedRow][9] = JSON.stringify(filteredImeis);
-          productsSheet.getRange(matchedRow + 1, 10).setValue(pData[matchedRow][9]);
-        }
+      validatedItems.push({
+        productId: String(item.productId),
+        name: String(pData[matchedRow][1] || item.name),
+        costPrice: sheetCostPrice,
+        unitPrice: unitPrice,
+        quantity: reqQty,
+        discount: discount,
+        finalPrice: finalPrice,
+        imei: item.imei || '',
+        warrantyPeriod: item.warrantyPeriod || ''
+      });
+    }
 
-        validatedItems.push({
-          productId: String(item.productId),
-          name: String(pData[matchedRow][1] || item.name),
-          costPrice: sheetCostPrice,
-          unitPrice: unitPrice,
-          quantity: reqQty,
-          discount: discount,
-          finalPrice: finalPrice,
-          imei: item.imei || '',
-          warrantyPeriod: item.warrantyPeriod || ''
-        });
+    // 2. PHASE 2 (COMMIT INVENTORY WRITES): All items validated; now persist stock & IMEI updates
+    for (var rowKey in touchedRows) {
+      if (Object.prototype.hasOwnProperty.call(touchedRows, rowKey)) {
+        var rIdx = Number(rowKey);
+        productsSheet.getRange(rIdx + 1, 7).setValue(rowStockMap[rIdx]);
+        productsSheet.getRange(rIdx + 1, 10).setValue(JSON.stringify(rowImeiMap[rIdx]));
       }
     }
 
-    var discountTotal = Math.round(Number(saleData.discountTotal) || 0);
-    var taxTotal = Math.round(Number(saleData.taxTotal) || 0);
+    // 3. Allocate sequential invoice number under script lock
+    var invoiceNumber = allocateSequentialInvoiceNumber(settingsSheet);
+
+    var discountTotal = Math.max(0, Math.round(Number(saleData.discountTotal) || 0));
+    var taxTotal = Math.max(0, Math.round(Number(saleData.taxTotal) || 0));
     var grandTotal = Math.max(0, Math.round(recomputedSubtotal - discountTotal + taxTotal));
     var normalizedCustomerPhone = normalizeMyanmarPhone(saleData.customerPhone || '');
 
-    // 2. Append Sale
+    // 4. Append Sale
     salesSheet.appendRow([
       saleId,
       invoiceNumber,
@@ -371,9 +431,15 @@ function recordSaleTransaction(saleData) {
       JSON.stringify(validatedItems)
     ]);
 
-    // 3. Update Customer Record
-    if (saleData.customerPhone && saleData.customerPhone.trim().length > 3) {
-      updateOrAddCustomerRecord(customersSheet, saleData);
+    // 5. Update Customer Record with server-recomputed grandTotal
+    if (normalizedCustomerPhone && normalizedCustomerPhone.length > 3) {
+      updateOrAddCustomerRecord(customersSheet, {
+        customerName: saleData.customerName,
+        customerPhone: normalizedCustomerPhone,
+        customerAddress: saleData.customerAddress,
+        grandTotal: grandTotal,
+        date: dateStr
+      });
     }
 
     SpreadsheetApp.flush();
@@ -382,6 +448,9 @@ function recordSaleTransaction(saleData) {
       success: true,
       invoiceNumber: invoiceNumber,
       saleId: saleId,
+      subtotal: recomputedSubtotal,
+      grandTotal: grandTotal,
+      items: validatedItems,
       message: 'Sale recorded and inventory updated successfully'
     };
   } finally {
@@ -495,13 +564,44 @@ function parseJsonSafely(str, fallback) {
   }
 }
 
-function generateInvoiceNumber() {
+function allocateSequentialInvoiceNumber(settingsSheet) {
   var d = new Date();
   var y = d.getFullYear();
   var m = ('0' + (d.getMonth() + 1)).slice(-2);
   var day = ('0' + d.getDate()).slice(-2);
-  var randomCode = Math.floor(1000 + Math.random() * 9000);
-  return 'INV-' + y + m + day + '-' + randomCode;
+  var yyyymmdd = '' + y + m + day;
+  var counterKey = 'invoiceSeq_' + yyyymmdd;
+
+  if (!settingsSheet) {
+    return 'INV-' + yyyymmdd + '-0001';
+  }
+
+  var data = settingsSheet.getDataRange().getValues();
+  var foundRow = -1;
+  var currentSeq = 0;
+
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][0]) === counterKey) {
+      foundRow = r + 1;
+      currentSeq = parseInt(String(data[r][1]), 10) || 0;
+      break;
+    }
+  }
+
+  var nextSeq = currentSeq + 1;
+  if (foundRow > 0) {
+    settingsSheet.getRange(foundRow, 2).setValue(String(nextSeq));
+  } else {
+    settingsSheet.appendRow([counterKey, String(nextSeq)]);
+  }
+
+  var padded = ('0000' + nextSeq).slice(-4);
+  return 'INV-' + yyyymmdd + '-' + padded;
+}
+
+function generateInvoiceNumber() {
+  var ss = getSpreadsheet();
+  return allocateSequentialInvoiceNumber(ss ? ss.getSheetByName('Settings') : null);
 }
 
 function normalizeMyanmarPhone(rawPhone) {

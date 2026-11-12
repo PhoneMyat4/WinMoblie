@@ -1076,42 +1076,63 @@
         items: JSON.parse(JSON.stringify(cart))
       };
 
-      // Deduct local inventory
-      saleRecord.items.forEach(it => {
-        const p = appData.products.find(prod => prod.id === it.productId);
-        if (p) {
-          p.stock = Math.max(0, p.stock - it.quantity);
-          if (it.imei && p.imeiList) {
-            p.imeiList = p.imeiList.filter(im => im !== it.imei);
+      function commitLocalCheckoutSuccess(finalSale) {
+        // Deduct local inventory after server confirmation
+        finalSale.items.forEach(it => {
+          const p = appData.products.find(prod => prod.id === it.productId);
+          if (p) {
+            p.stock = Math.max(0, p.stock - it.quantity);
+            if (it.imei && p.imeiList) {
+              p.imeiList = p.imeiList.filter(im => im !== it.imei);
+            }
           }
-        }
-      });
+        });
 
-      appData.sales.unshift(saleRecord);
+        appData.sales.unshift(finalSale);
 
-      // Trigger GAS server sync
+        // Open Modal
+        currentActiveModalSale = finalSale;
+        modalPaperWidth = appData.settings.paperWidth || 'a5';
+        openInvoiceModal(finalSale);
+
+        // Reset cart
+        cart = [];
+        document.getElementById('cartCustomerName').value = '';
+        document.getElementById('cartCustomerPhone').value = '';
+        renderCart();
+        renderProductsGrid();
+        renderInventoryTable();
+        renderSalesTable();
+        renderReports();
+      }
+
+      // Trigger GAS server sync and wait for authoritative confirmation before mutating local state or showing receipt
       if (typeof google !== 'undefined' && google.script && google.script.run) {
         google.script.run
           .withSuccessHandler(function(res) {
-            console.log('Saved to Google Sheets:', res);
+            if (!res || res.success === false) {
+              alert('Checkout failed: ' + ((res && res.message) || 'Transaction rejected by server.'));
+              return;
+            }
+            if (res.invoiceNumber) {
+              saleRecord.invoiceNumber = res.invoiceNumber;
+            }
+            if (res.items) {
+              saleRecord.items = res.items;
+            }
+            if (typeof res.grandTotal === 'number') {
+              saleRecord.grandTotal = res.grandTotal;
+              saleRecord.subtotal = res.subtotal || res.grandTotal;
+            }
+            commitLocalCheckoutSuccess(saleRecord);
+          })
+          .withFailureHandler(function(err) {
+            alert('Checkout failed: ' + (err && err.message ? err.message : String(err)));
           })
           .recordSaleTransaction(saleRecord);
+      } else {
+        commitLocalCheckoutSuccess(saleRecord);
       }
-
-      // Open Modal
-      currentActiveModalSale = saleRecord;
-      modalPaperWidth = appData.settings.paperWidth || 'a5';
-      openInvoiceModal(saleRecord);
-
-      // Reset cart
-      cart = [];
-      document.getElementById('cartCustomerName').value = '';
-      document.getElementById('cartCustomerPhone').value = '';
-      renderCart();
-      renderProductsGrid();
-      renderInventoryTable();
-      renderSalesTable();
-      renderReports();
     }
 
     // Modal Presentation

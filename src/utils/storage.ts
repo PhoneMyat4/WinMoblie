@@ -1722,9 +1722,12 @@ export const StorageService = {
           }
         }
 
+        const maxLineRefund = Math.round(
+          ((targetSaleItem.finalPrice || (targetSaleItem.unitPrice * targetSaleItem.quantity)) / (targetSaleItem.quantity || 1)) * actualRefundQty
+        );
         const lineRefundAmount = refundReq.refundAmount > 0 
-          ? refundReq.refundAmount 
-          : Math.round(((targetSaleItem.finalPrice || (targetSaleItem.unitPrice * targetSaleItem.quantity)) / targetSaleItem.quantity) * actualRefundQty);
+          ? Math.min(Math.round(refundReq.refundAmount), maxLineRefund)
+          : maxLineRefund;
         computedRefundTotal += lineRefundAmount;
 
         refundItemsList.push({
@@ -1839,8 +1842,25 @@ export const StorageService = {
     sale.refundHistory = sale.refundHistory || [];
     sale.refundHistory.unshift(refundRecord);
 
-    // If credit sale, deduct customer outstanding credit balance
-    if (sale.paymentMethod === 'credit' && effectiveRefundAmount > 0) {
+    // If credit sale, deduct customer outstanding credit balance AND update creditSales record (Item M-b)
+    if ((sale.paymentMethod === 'credit' || sale.creditSaleId || sale.paymentDetails?.creditSaleId) && effectiveRefundAmount > 0) {
+      const creditSales = StorageService.getCreditSales();
+      const targetCredit = creditSales.find(
+        cs =>
+          (sale.creditSaleId && cs.id === sale.creditSaleId) ||
+          (sale.paymentDetails?.creditSaleId && cs.id === sale.paymentDetails.creditSaleId) ||
+          cs.saleId === sale.id ||
+          cs.invoiceNumber === sale.invoiceNumber
+      );
+      if (targetCredit) {
+        targetCredit.remainingBalance = Math.max(0, Math.round((targetCredit.remainingBalance || 0) - effectiveRefundAmount));
+        targetCredit.totalPayable = Math.max(0, Math.round((targetCredit.totalPayable || 0) - effectiveRefundAmount));
+        if (targetCredit.remainingBalance <= 0) {
+          targetCredit.status = 'paid';
+        }
+        StorageService.saveCreditSale(targetCredit);
+      }
+
       const customers = StorageService.getCustomers();
       const cust = customers.find(c => c.id === sale.customerId || c.phone === sale.customerPhone);
       if (cust && cust.outstandingCreditBalance) {
@@ -1860,7 +1880,10 @@ export const StorageService = {
       StorageService.recordCashTransaction(
         'out', 
         effectiveRefundAmount, 
-        `Refund Invoice #${sale.invoiceNumber} (${params.reason}) - ${refundItemsList.length} item(s) [Physical Cash Drawer]`
+        `Refund Invoice #${sale.invoiceNumber} (${params.reason}) - ${refundItemsList.length} item(s) [Physical Cash Drawer]`,
+        true,
+        `tx-ref-${refundRecord.id}`,
+        'refund'
       );
     }
 
@@ -2322,14 +2345,15 @@ export const StorageService = {
       StorageService.savePurchases(purchases);
     }
 
-    // If paid with cash, record outflow with deterministic idempotency key (only on new purchases to prevent re-booking on edits)
+    // If paid with cash, record outflow with deterministic idempotency key (and delta adjustment on edits - Item M-c)
     if (existingIndex === -1 && purchase.paymentMethod === 'cash' && purchase.amountPaid > 0 && purchase.status !== 'draft') {
       StorageService.recordCashTransaction(
         'out',
         purchase.amountPaid,
         `Purchase Order #${purchase.purchaseOrderNumber} to ${purchase.supplierName}`,
         triggerSync,
-        `tx-po-${purchase.id}`
+        `tx-po-${purchase.id}`,
+        'expense'
       );
     }
 
@@ -2367,12 +2391,15 @@ export const StorageService = {
     const target = purchases.find(p => p.id === purchaseId);
     if (!target) return;
 
+    const supplierGoodsTotal = Math.round(target.subtotal + (target.otherCosts || 0));
+    const paidAmt = Math.round(Number(data.amountPaid) || 0);
+
     target.status = 'confirmed';
     target.paymentMethod = data.paymentMethod;
     target.isFullyPaid = data.isFullyPaid;
-    target.amountPaid = data.amountPaid;
-    target.balanceDue = Math.max(0, target.grandTotal - data.amountPaid);
-    target.paymentStatus = data.amountPaid >= target.grandTotal ? 'paid' : data.amountPaid > 0 ? 'partial' : 'unpaid';
+    target.amountPaid = paidAmt;
+    target.balanceDue = Math.max(0, supplierGoodsTotal - paidAmt);
+    target.paymentStatus = target.balanceDue <= 0 ? 'paid' : paidAmt > 0 ? 'partial' : 'unpaid';
     target.paymentProofUrl = data.paymentProofUrl;
     target.paymentProofFileName = data.paymentProofFileName;
     target.approvalNotes = data.approvalNotes;
@@ -2688,6 +2715,8 @@ export const StorageService = {
     }
     const expenses = StorageService.getExpenses();
     const index = expenses.findIndex(e => e.id === expense.id);
+    const prevExpense = index >= 0 ? { ...expenses[index] } : null;
+
     if (index >= 0) {
       expenses[index] = expense;
     } else {
@@ -2695,7 +2724,7 @@ export const StorageService = {
     }
     StorageService.saveExpenses(expenses);
 
-    // If funding source is Cash Drawer (or deductFromCashDrawer is explicitly true and not revenue_cash), log cash drawer outflow (only on initial creation)
+    // Determine whether the expense deducts from the physical Cash Drawer
     const isNewExpense = index === -1;
     const isCashDrawerDeduction = expense.fundingSource === 'cash_drawer' || 
       (expense.fundingSource !== 'revenue_cash' && expense.deductFromCashDrawer);
@@ -2706,8 +2735,26 @@ export const StorageService = {
         expense.amount,
         `[Daily Sales Cash Deduction] Expense #${expense.voucherNumber}: ${expense.title}`,
         triggerSync,
-        `tx-exp-${expense.id}`
+        `tx-exp-${expense.id}`,
+        'expense'
       );
+    } else if (!isNewExpense && prevExpense) {
+      // Item M-c: If an existing expense's amount or fundingSource was edited, record the cash drawer delta
+      const wasCashDrawerDeduction = prevExpense.fundingSource === 'cash_drawer' ||
+        (prevExpense.fundingSource !== 'revenue_cash' && prevExpense.deductFromCashDrawer);
+      const prevDrawerAmount = wasCashDrawerDeduction ? Math.round(Number(prevExpense.amount) || 0) : 0;
+      const nextDrawerAmount = isCashDrawerDeduction ? Math.round(Number(expense.amount) || 0) : 0;
+      const delta = nextDrawerAmount - prevDrawerAmount;
+      if (delta !== 0) {
+        StorageService.recordCashTransaction(
+          delta > 0 ? 'out' : 'in',
+          Math.abs(delta),
+          `[Daily Sales Cash Deduction] Expense #${expense.voucherNumber} (Edited Delta): ${expense.title}`,
+          triggerSync,
+          `tx-exp-edit-${expense.id}-${Date.now()}`,
+          'expense'
+        );
+      }
     }
 
     if (triggerSync && activeStorageSyncHandler?.onExpenseUpsert) {
@@ -2885,7 +2932,14 @@ export const StorageService = {
     return raw || initialCashDrawer;
   },
   saveCashDrawer: (drawer: CashDrawerRecord, triggerSync = true) => setItem(STORAGE_KEYS.CASH_DRAWER, drawer, triggerSync),
-  recordCashTransaction: (type: string, amount: number, description: string, triggerSync = true, customTxId?: string) => {
+  recordCashTransaction: (
+    type: string,
+    amount: number,
+    description: string,
+    triggerSync = true,
+    customTxId?: string,
+    explicitEntryType?: 'manual' | 'sale' | 'expense' | 'refund'
+  ) => {
     const drawer = StorageService.getCashDrawer();
     if (!drawer.transactions) drawer.transactions = [];
     if (customTxId && drawer.transactions.some(t => t.id === customTxId)) {
@@ -2894,17 +2948,26 @@ export const StorageService = {
     const roundedAmount = Math.round(Number(amount) || 0);
     const now = new Date().toISOString();
     const isIn = type === 'in' || type === 'sale_cash';
+    const inferredEntryType: 'manual' | 'sale' | 'expense' | 'refund' =
+      explicitEntryType ||
+      (type === 'sale_cash' || customTxId?.startsWith('tx-sale-')
+        ? 'sale'
+        : customTxId?.startsWith('tx-exp-') || customTxId?.startsWith('tx-po-') || description.startsWith('[Daily Sales Cash Deduction]')
+        ? 'expense'
+        : customTxId?.startsWith('tx-ref-') || description.startsWith('Refund Invoice #')
+        ? 'refund'
+        : 'manual');
 
     if (isIn) {
       if (type === 'sale_cash') {
         drawer.cashSales = Math.round((drawer.cashSales || 0) + roundedAmount);
       } else {
-        drawer.cashInManual.push({ reason: description, amount: roundedAmount, time: now });
+        drawer.cashInManual.push({ reason: description, amount: roundedAmount, time: now, entryType: inferredEntryType });
       }
       drawer.expectedInDrawer = Math.round((drawer.expectedInDrawer || 0) + roundedAmount);
       drawer.totalCashIn = Math.round((drawer.totalCashIn || 0) + roundedAmount);
     } else {
-      drawer.cashOutManual.push({ reason: description, amount: roundedAmount, time: now });
+      drawer.cashOutManual.push({ reason: description, amount: roundedAmount, time: now, entryType: inferredEntryType });
       drawer.expectedInDrawer = Math.round((drawer.expectedInDrawer || 0) - roundedAmount);
       drawer.totalCashOut = Math.round((drawer.totalCashOut || 0) + roundedAmount);
     }
@@ -2913,6 +2976,7 @@ export const StorageService = {
       id: customTxId || `tx-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       timestamp: now,
       type: isIn ? 'in' : 'out',
+      entryType: inferredEntryType,
       description,
       amount: roundedAmount,
     });

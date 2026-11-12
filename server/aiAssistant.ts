@@ -601,10 +601,10 @@ export function executeQueryPosReports(args: any, context: PosDataContext): any 
   const purchases = context.purchases || [];
   const cashDrawer = context.cashDrawer;
 
-  // Verify Admin authorization for trade secrets (Cost, Profit, Supplier details)
+  // Verify Admin authorization for trade secrets (Cost, Profit, Supplier details) - never trust LLM args.isAdmin
   const hasAdminAuth =
     Boolean(process.env.ADMIN_AUDIT_KEY && admin_secret_key === process.env.ADMIN_AUDIT_KEY) ||
-    Boolean(args.isAdmin || (context as any)?.isAdmin || (context.settings as any)?.isAdmin);
+    Boolean((context as any)?.isAdmin || (context.settings as any)?.isAdmin);
 
   const relevantSales = filterByDateRange(sales, report_type === 'z_report' && !args.date_range ? 'today' : date_range);
 
@@ -1261,8 +1261,8 @@ export function executeQueryInventoryProducts(args: any, context: PosDataContext
   const brand = normalizeRetailQuery(args.brand || '');
   const excludeAccessories = args.exclude_accessories === true;
 
-  // Verify Admin authorization for trade secrets (Cost Price & Supplier Name)
-  const hasAdminAuth = Boolean(args.isAdmin || (context as any)?.isAdmin || (context.settings as any)?.isAdmin) ||
+  // Verify Admin authorization for trade secrets (Cost Price & Supplier Name) - never trust LLM args.isAdmin
+  const hasAdminAuth = Boolean((context as any)?.isAdmin || (context.settings as any)?.isAdmin) ||
     Boolean(process.env.ADMIN_AUDIT_KEY && args.admin_secret_key === process.env.ADMIN_AUDIT_KEY);
 
   let matched = products;
@@ -1373,9 +1373,30 @@ export function executeGeneratePdfReport(args: any, context: PosDataContext) {
   const settings = context.settings || { shopName: 'Mobile Store', currencySymbol: 'MMK' };
   const currency = settings.currencySymbol || 'Ks';
 
+  // Verify Admin authorization from server context only (never trust LLM args.isAdmin)
+  const hasAdminAuth =
+    Boolean((context as any)?.isAdmin || (context.settings as any)?.isAdmin) ||
+    Boolean(process.env.ADMIN_AUDIT_KEY && args.admin_secret_key === process.env.ADMIN_AUDIT_KEY);
+
+  const isConfidentialProfitReport = [
+    'daily_profit_dossier',
+    'daily_profit_statement',
+    'daily_profit_ledger',
+    'annual_profit_statement',
+    'annual_profit_dossier',
+  ].includes(report_type);
+
+  if (isConfidentialProfitReport && !hasAdminAuth) {
+    return {
+      success: false,
+      reportType: report_type,
+      error: 'Access Denied: Profit, COGS, and financial margin PDF dossiers are restricted to Owner and Manager roles.',
+    };
+  }
+
   const productCostMap = new Map<string, number>();
   products.forEach((p) => {
-    if (p.id) productCostMap.set(p.id, p.costPrice || 0);
+    if (p.id) productCostMap.set(p.id, hasAdminAuth ? (p.costPrice || 0) : 0);
   });
 
   // 1. Daily Profit Reports (Dossier, Statement, Ledger)

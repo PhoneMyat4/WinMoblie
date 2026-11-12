@@ -93,7 +93,7 @@ interface PointOfSaleProps {
   settings: ShopSettings;
   activePreOrderToFulfill?: PreOrder | null;
   onClearActivePreOrder?: () => void;
-  onCompleteSale: (sale: Sale, updatedProducts: Product[], updatedCustomer?: Customer) => void;
+  onCompleteSale: (sale: Sale, updatedProducts: Product[], updatedCustomer?: Customer, cloudCommitted?: boolean) => void;
   onAddNewCustomer: (customer: Customer) => void;
   currentStaffUser?: StaffUser | null;
   rolePermissions?: Record<string, any>;
@@ -1174,7 +1174,8 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
 
       const committedSale = checkoutResult.finalizedSale || newSale;
       const committedCreditRecord = checkoutResult.finalizedCreditRecord || creditRecord;
-      const shouldSyncFallback = typeof navigator !== 'undefined' && !navigator.onLine;
+      const cloudCommitted = Boolean(checkoutResult.cloudCommitted);
+      const shouldSyncFallback = !cloudCommitted;
 
       if (committedCreditRecord) {
         StorageService.saveCreditSale(committedCreditRecord, shouldSyncFallback);
@@ -1198,7 +1199,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
         }
       }
 
-      onCompleteSale(committedSale, checkoutResult.updatedProducts, updatedCust);
+      onCompleteSale(committedSale, checkoutResult.updatedProducts, updatedCust, cloudCommitted);
       setIsPaymentModalOpen(false);
       setCompletedSale(committedSale);
       setActivePreOrderFulfillment(null);

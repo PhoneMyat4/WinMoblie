@@ -3,7 +3,6 @@ import { collection, getDocs, doc, getDoc, setDoc, runTransaction } from 'fireba
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signInAnonymously,
 } from 'firebase/auth';
 import { db, auth } from '../src/lib/firebase';
 import type { PosDataContext } from './aiAssistant';
@@ -19,20 +18,19 @@ import type {
 /**
  * Ensures authentication with Firebase so that Firestore security rules
  * permit read and write operations from background/server processes.
+ * Item 3: Never fall back to hardcoded credentials or anonymous sign-in.
  */
 export async function ensureAuth() {
   if (auth.currentUser) {
     return auth.currentUser;
   }
 
-  const email =
-    process.env.MCP_AUTH_EMAIL ||
-    process.env.FIREBASE_AUTH_EMAIL ||
-    'mcp-agent@apexpos.internal';
-  const password =
-    process.env.MCP_AUTH_PASSWORD ||
-    process.env.FIREBASE_AUTH_PASSWORD ||
-    'password123456';
+  const email = (process.env.MCP_AUTH_EMAIL || process.env.FIREBASE_AUTH_EMAIL || '').trim();
+  const password = (process.env.MCP_AUTH_PASSWORD || process.env.FIREBASE_AUTH_PASSWORD || '').trim();
+
+  if (!email || !password) {
+    return null;
+  }
 
   try {
     const cred = await signInWithEmailAndPassword(auth, email, password);
@@ -48,19 +46,11 @@ export async function ensureAuth() {
         console.error(`[FirestoreService] Created & authenticated service account: ${newCred.user.email}`);
         return newCred.user;
       } catch (createErr: any) {
-        console.error('[FirestoreService] Service account creation fallback notice:', createErr.message);
+        console.error('[FirestoreService] Service account creation notice:', createErr.message);
       }
     } else {
       console.error('[FirestoreService] Sign-in notice:', signInErr.message);
     }
-  }
-
-  try {
-    const anon = await signInAnonymously(auth);
-    console.error('[FirestoreService] Authenticated with Firebase anonymously');
-    return anon.user;
-  } catch (err: any) {
-    console.warn('[FirestoreService] Firebase auth notice (queries will proceed with default credentials):', err.message);
     return null;
   }
 }
@@ -304,12 +294,8 @@ export async function claimTelegramMessageLock(lockKey: string, instanceId: stri
     inMemoryProcessedMessages.set(sanitizedKey, now);
     return claimed;
   } catch (err: any) {
-    // If Firestore transaction fails (e.g. offline/network glitch), fallback to memory lock
-    console.warn(`[FirestoreService] Distributed lock notice for ${sanitizedKey}:`, err?.message || err);
-    if (!inMemoryProcessedMessages.has(sanitizedKey)) {
-      inMemoryProcessedMessages.set(sanitizedKey, now);
-      return true;
-    }
+    // Item M-a: Fail closed on distributed lock failure so two instances never both process the same message
+    console.warn(`[FirestoreService] Distributed lock failed (failing closed) for ${sanitizedKey}:`, err?.message || err);
     return false;
   }
 }

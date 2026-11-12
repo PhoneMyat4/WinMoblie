@@ -472,17 +472,21 @@ export default function App() {
     setPreOrderToFulfillInPos(null);
   }, []);
 
-  const handleCompleteSale = (newSale: Sale, updatedProducts: Product[], updatedCustomer?: Customer) => {
-    const shouldSyncFallback = !FirebaseAuthService.isAuthenticated();
-    StorageService.saveSale(newSale, shouldSyncFallback);
-    StorageService.saveProducts(updatedProducts, false);
+  const handleCompleteSale = (newSale: Sale, updatedProducts: Product[], updatedCustomer?: Customer, cloudCommitted?: boolean) => {
+    const shouldSyncFallback = !cloudCommitted;
+    const saleToSave: Sale = {
+      ...newSale,
+      syncState: cloudCommitted ? 'synced' : 'pending',
+    };
+    StorageService.saveSale(saleToSave, shouldSyncFallback);
+    StorageService.saveProducts(updatedProducts, shouldSyncFallback);
     if (updatedCustomer) {
       StorageService.saveCustomer(updatedCustomer, shouldSyncFallback);
     }
     if (shouldSyncFallback) {
-      AuditLogger.logSale(newSale, currentActiveUser, false);
+      AuditLogger.logSale(saleToSave, currentActiveUser, false);
     }
-    setSelectedInvoiceToView(newSale);
+    setSelectedInvoiceToView(saleToSave);
   };
 
   const handleSaveProduct = (prod: Product) => {
@@ -627,7 +631,7 @@ export default function App() {
       }).filter(i => i.quantity > 0);
       const totalRefundAmount = itemsToRefund.reduce((sum, i) => sum + i.refundAmount, 0);
 
-      await firestoreSync.executeAtomicRefundTransaction({
+      const res = await firestoreSync.executeAtomicRefundTransaction({
         saleId,
         itemsToRefund,
         reason,
@@ -636,6 +640,10 @@ export default function App() {
         totalRefundAmount,
         staffName,
       });
+      if (!res.success) {
+        alert(res.error || 'Refund failed due to a cloud validation conflict.');
+        return;
+      }
     } else {
       StorageService.refundSale(saleId, reason, staffName);
     }
@@ -671,11 +679,19 @@ export default function App() {
     staffName: string;
     notes?: string;
   }) => {
-    await firestoreSync.executeAtomicRefundTransaction(params);
+    const res = await firestoreSync.executeAtomicRefundTransaction(params);
+    if (!res.success) {
+      alert(res.error || 'Refund failed due to a cloud validation conflict.');
+      return;
+    }
     // Refresh live cash drawer state so UI reacts immediately
     setCashDrawer(StorageService.getCashDrawer());
     setSales(StorageService.getSales());
     setProducts(StorageService.getProducts());
+    const updatedInvoice = StorageService.getSales().find(s => s.id === params.saleId);
+    if (updatedInvoice && selectedInvoiceToView?.id === params.saleId) {
+      setSelectedInvoiceToView(updatedInvoice);
+    }
     AuditLogger.logSale(
       { id: params.saleId, totalAmount: params.totalRefundAmount },
       currentActiveUser,
@@ -1312,6 +1328,7 @@ export default function App() {
           sale={selectedInvoiceToView}
           settings={settings}
           onClose={() => setSelectedInvoiceToView(null)}
+          onProcessRefund={handleProcessItemRefund}
         />
       )}
 
