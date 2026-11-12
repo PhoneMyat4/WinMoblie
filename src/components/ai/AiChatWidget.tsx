@@ -612,9 +612,16 @@ export const AiChatWidget: React.FC<AiChatWidgetProps> = ({
         }
       }
 
-      // If an inventory product price was updated by the tool call, persist update into StorageService!
+      // If an inventory product price was updated by the tool call, persist only the price update into StorageService!
       if (data.updatedProduct) {
-        StorageService.saveProduct(data.updatedProduct);
+        StorageService.updateProductPrice(
+          data.updatedProduct.id,
+          data.updatedProduct.sellingPrice,
+          data.updatedProduct.costPrice,
+          'market_adjustment',
+          'Updated via AI Assistant',
+          'AI Assistant'
+        );
       }
 
       // If a Facebook post was generated or published, trigger celebratory confetti

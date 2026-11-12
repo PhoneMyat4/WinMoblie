@@ -113,121 +113,21 @@ class SyncManager {
   }
 
   /**
-   * Push local localStorage state snapshot to server
+   * Push local localStorage state snapshot to server (Deprecated: Firestore is now the sole cross-device authority)
    */
   public async pushLocalStateToServer(): Promise<boolean> {
-    if (typeof window === 'undefined' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-      this.setStatus('offline');
-      return false;
-    }
-
-    // Safety Gate 1: Disallow unauthenticated client tabs from pushing state to the server.
-    // An unauthenticated terminal or newly opened browser/device must NEVER push blank/default data.
-    const isAuth = sessionStorage.getItem('mobileshop_session_auth') === 'true' || 
-                   localStorage.getItem('mobileshop_auth_active') === 'true';
-    if (!isAuth) {
-      return false;
-    }
-
-    // Safety Gate 2: Client must complete initial pull before it is ever allowed to push
-    if (!this.hasPerformedInitialPull) {
-      return false;
-    }
-
-    // Safety Gate 3: Never push an empty database over the server unless this is an explicit data reset
-    const prods = StorageService.getProducts();
-    const sales = StorageService.getSales();
-    const isFresh = StorageService.isFreshDatabase();
-    if (prods.length === 0 && sales.length === 0 && !isFresh) {
-      return false;
-    }
-
-    try {
-      this.setStatus('syncing');
-      const allData = StorageService.getAllData();
-      const localTs = StorageService.getLastUpdatedTimestamp() || Date.now();
-
-      const response = await authenticatedFetch('/api/sync-state', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          clientTabId: this.tabId,
-          clientTimestamp: localTs,
-          data: allData,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Sync server responded with status ${response.status}`);
-      }
-
-      const result = await response.json();
-      if (result.success) {
-        this.lastSyncedServerTimestamp = result.serverTimestamp || localTs;
-        this.lastKnownLocalTimestamp = this.lastSyncedServerTimestamp;
-        this.lastSyncTime = new Date();
-        this.lastWarningKey = '';
-        this.setStatus('synced');
-
-        // If server had newer data from another tab, apply it safely
-        if (result.hasNewerServerData && result.data && result.lastUpdatingTabId && result.lastUpdatingTabId !== this.tabId) {
-          StorageService.applyAllData(result.data, result.serverTimestamp);
-        }
-        return true;
-      }
-
-      this.setStatus('error');
-      return false;
-    } catch (error) {
-      this.logSyncWarning('[SyncManager] Push to server failed (operating in offline/local mode)', error);
-      this.setStatus('offline');
-      return false;
-    }
+    const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    this.setStatus(isOnline ? 'synced' : 'offline');
+    return isOnline;
   }
 
   /**
-   * Pull newer state from server if available
+   * Pull newer state from server if available (Deprecated: Firestore is now the sole cross-device authority)
    */
   public async pullServerState(): Promise<boolean> {
-    if (typeof window === 'undefined' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-      this.setStatus('offline');
-      return false;
-    }
-
-    try {
-      this.setStatus('syncing');
-      const response = await authenticatedFetch(`/api/sync-state?since=${this.lastSyncedServerTimestamp}`);
-
-      if (!response.ok) {
-        throw new Error(`Sync server responded with status ${response.status}`);
-      }
-
-      const result = await response.json();
-      if (result.success) {
-        this.lastSyncTime = new Date();
-        this.lastWarningKey = '';
-        
-        if (result.hasUpdates && result.data) {
-          this.lastSyncedServerTimestamp = result.serverTimestamp;
-          this.lastKnownLocalTimestamp = result.serverTimestamp;
-          StorageService.applyAllData(result.data, result.serverTimestamp);
-        } else if (result.serverTimestamp) {
-          this.lastSyncedServerTimestamp = Math.max(this.lastSyncedServerTimestamp, result.serverTimestamp);
-        }
-
-        this.setStatus('synced');
-        return true;
-      }
-
-      this.setStatus('error');
-      return false;
-    } catch (error) {
-      this.logSyncWarning('[SyncManager] Pull from server failed', error);
-      this.setStatus('offline');
-      return false;
-    }
+    const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    this.setStatus(isOnline ? 'synced' : 'offline');
+    return isOnline;
   }
 
   /**
@@ -341,32 +241,10 @@ class SyncManager {
    * to guarantee the in-memory server snapshot does not re-contaminate this or other tabs.
    */
   public async resetServerState(): Promise<boolean> {
-    try {
-      const allData = StorageService.getAllData();
-      const localTs = Date.now();
-
-      const response = await authenticatedFetch('/api/sync-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientTabId: this.tabId,
-          clientTimestamp: localTs,
-          data: allData,
-          isReset: true,
-        }),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        this.lastSyncedServerTimestamp = result.serverTimestamp || localTs;
-        this.lastKnownLocalTimestamp = this.lastSyncedServerTimestamp;
-        return true;
-      }
-      return false;
-    } catch (e) {
-      console.warn('[SyncManager] Failed to notify server of data reset:', e);
-      return false;
-    }
+    const localTs = Date.now();
+    this.lastSyncedServerTimestamp = localTs;
+    this.lastKnownLocalTimestamp = localTs;
+    return true;
   }
 }
 

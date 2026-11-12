@@ -266,16 +266,23 @@ export const ProductHistoryModal: React.FC<ProductHistoryModalProps> = ({
 
   // Handle Confirmed Price Change
   const handleConfirmPriceChange = (priceRecord: PriceChangeRecord, updatedProduct: Product) => {
-    StorageService.recordPriceChange(priceRecord);
-    StorageService.saveProduct(updatedProduct);
+    const res = StorageService.updateProductPrice(
+      updatedProduct.id,
+      updatedProduct.sellingPrice,
+      updatedProduct.costPrice,
+      priceRecord.reason,
+      priceRecord.reasonNotes,
+      priceRecord.changedBy
+    );
+    const freshUpdated = res.product || updatedProduct;
 
-    setCurrentProduct(updatedProduct);
+    setCurrentProduct(freshUpdated);
     setLocalPriceChanges(StorageService.getPriceChanges());
     if (onProductUpdated) {
-      onProductUpdated(updatedProduct);
+      onProductUpdated(freshUpdated);
     }
     const delta = priceRecord.priceDelta;
-    showToast(`Price updated to ${updatedProduct.sellingPrice.toLocaleString()} Ks (${delta >= 0 ? '+' : ''}${delta.toLocaleString()} Ks). Activity recorded in history.`);
+    showToast(`Price updated to ${freshUpdated.sellingPrice.toLocaleString()} Ks (${delta >= 0 ? '+' : ''}${delta.toLocaleString()} Ks). Activity recorded in history.`);
   };
 
   // Handle Confirmed Stock Quarantine (Damaged / Lost Unit)

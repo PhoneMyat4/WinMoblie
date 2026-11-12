@@ -132,135 +132,66 @@ async function startServer() {
   // In-memory State Store for Periodic localStorage-to-Server and Multi-Tab Synchronization
   let serverStateSnapshot: Record<string, any> | null = null;
   let lastServerStateTimestamp = 0;
-  let lastUpdatingTabId = '';
-
-  // Register snapshot getter for Telegram Bot and background POS data context
-  registerServerStateSnapshotGetter(() => serverStateSnapshot);
-
-  // GET /api/sync-state - Check if server has newer state or fetch current state
-  app.get('/api/sync-state', (req, res) => {
-    const since = Number(req.query.since) || 0;
-    
-    if (serverStateSnapshot && lastServerStateTimestamp > since) {
-      return res.json({
-        success: true,
-        hasUpdates: true,
-        serverTimestamp: lastServerStateTimestamp,
-        lastUpdatingTabId,
-        data: serverStateSnapshot,
-      });
+  // Per-IP sliding-window rate limiter on /api/* endpoints to prevent brute-force & abuse (H13)
+  const apiRateBuckets = new Map<string, { count: number; resetAt: number }>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, bucket] of apiRateBuckets.entries()) {
+      if (now > bucket.resetAt) {
+        apiRateBuckets.delete(key);
+      }
     }
+  }, 60_000);
 
+  app.use('/api', (req, res, next) => {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'local';
+    const isSensitiveRoute =
+      req.path.startsWith('/archive-data') ||
+      req.path.startsWith('/ai-assistant') ||
+      req.path.startsWith('/extract-box-specs');
+    const bucketKey = `${ip}:${isSensitiveRoute ? 'sensitive' : 'general'}`;
+    const limitMax = isSensitiveRoute ? 40 : 240;
+    const windowMs = 60_000;
+    const now = Date.now();
+
+    const current = apiRateBuckets.get(bucketKey);
+    if (!current || now > current.resetAt) {
+      apiRateBuckets.set(bucketKey, { count: 1, resetAt: now + windowMs });
+    } else {
+      current.count += 1;
+      if (current.count > limitMax) {
+        return res.status(429).json({
+          success: false,
+          error: 'Too many requests. Please wait a moment before trying again.',
+        });
+      }
+    }
+    next();
+  });
+
+  // Register empty snapshot getter (Firestore is now the sole authoritative store - H8)
+  registerServerStateSnapshotGetter(() => null);
+
+  // GET /api/sync-state - Deprecated (Firestore is the sole cross-device authority)
+  app.get('/api/sync-state', (_req, res) => {
     return res.json({
       success: true,
+      deprecated: true,
       hasUpdates: false,
-      serverTimestamp: lastServerStateTimestamp,
-      lastUpdatingTabId,
+      serverTimestamp: Date.now(),
+      lastUpdatingTabId: '',
       data: null,
     });
   });
 
-  // POST /api/sync-state - Push latest localStorage state snapshot from client tab to server
-  app.post('/api/sync-state', (req, res) => {
-    try {
-      const { clientTimestamp, data, clientTabId, isReset } = req.body;
-      const incomingTimestamp = Number(clientTimestamp) || Date.now();
-
-      if (isReset) {
-        serverStateSnapshot = data && typeof data === 'object' ? { ...data } : null;
-        lastServerStateTimestamp = Math.max(incomingTimestamp, Date.now());
-        lastUpdatingTabId = clientTabId || 'unknown';
-
-        return res.json({
-          success: true,
-          updated: true,
-          serverTimestamp: lastServerStateTimestamp,
-        });
-      }
-
-      if (data && typeof data === 'object') {
-        const incomingHasData = Boolean(
-          (Array.isArray(data.products) && data.products.length > 0) ||
-          (Array.isArray(data.sales) && data.sales.length > 0) ||
-          (Array.isArray(data.purchases) && data.purchases.length > 0) ||
-          (Array.isArray(data.expenses) && data.expenses.length > 0) ||
-          (Array.isArray(data.customers) && data.customers.length > 0)
-        );
-
-        const serverHasData = Boolean(
-          serverStateSnapshot &&
-          ((Array.isArray(serverStateSnapshot.products) && serverStateSnapshot.products.length > 0) ||
-           (Array.isArray(serverStateSnapshot.sales) && serverStateSnapshot.sales.length > 0) ||
-           (Array.isArray(serverStateSnapshot.purchases) && serverStateSnapshot.purchases.length > 0) ||
-           (Array.isArray(serverStateSnapshot.expenses) && serverStateSnapshot.expenses.length > 0) ||
-           (Array.isArray(serverStateSnapshot.customers) && serverStateSnapshot.customers.length > 0))
-        );
-
-        // CRITICAL DATA PROTECTION:
-        // If the server already has real store data and an incoming client pushes empty data (e.g. newly opened browser/device),
-        // NEVER allow the empty client to wipe the server state unless isReset is explicitly true.
-        // Instead, return the existing server state back to the client so it can hydrate!
-        if (serverHasData && !incomingHasData && !isReset) {
-          return res.json({
-            success: true,
-            updated: false,
-            serverTimestamp: lastServerStateTimestamp,
-            hasNewerServerData: true,
-            data: serverStateSnapshot,
-          });
-        }
-
-        // If server has no state yet, or incoming has data and is newer/same tab
-        if (!serverStateSnapshot || incomingTimestamp >= (lastServerStateTimestamp - 3000) || (clientTabId && clientTabId === lastUpdatingTabId)) {
-          if (serverStateSnapshot) {
-            serverStateSnapshot = {
-              ...serverStateSnapshot,
-              ...data,
-              // Never replace existing populated collections with empty arrays
-              products: (Array.isArray(data.products) && data.products.length > 0) ? data.products : (serverStateSnapshot.products || []),
-              sales: (Array.isArray(data.sales) && data.sales.length > 0) ? data.sales : (serverStateSnapshot.sales || []),
-              creditSales: (Array.isArray(data.creditSales) && data.creditSales.length > 0) ? data.creditSales : (serverStateSnapshot.creditSales || []),
-              purchases: (Array.isArray(data.purchases) && data.purchases.length > 0) ? data.purchases : (serverStateSnapshot.purchases || []),
-              expenses: (Array.isArray(data.expenses) && data.expenses.length > 0) ? data.expenses : (serverStateSnapshot.expenses || []),
-              customers: (Array.isArray(data.customers) && data.customers.length > 0) ? data.customers : (serverStateSnapshot.customers || []),
-              suppliers: (Array.isArray(data.suppliers) && data.suppliers.length > 0) ? data.suppliers : (serverStateSnapshot.suppliers || []),
-              settings: data.settings ? {
-                ...serverStateSnapshot.settings,
-                ...data.settings,
-                shopName: data.settings.shopName || serverStateSnapshot.settings?.shopName || 'Win Mobile & Gadgets',
-                logoUrl: data.settings.logoUrl || serverStateSnapshot.settings?.logoUrl || '',
-                invoiceLogoUrl: data.settings.invoiceLogoUrl || serverStateSnapshot.settings?.invoiceLogoUrl || '',
-                faviconUrl: data.settings.faviconUrl || serverStateSnapshot.settings?.faviconUrl || '',
-              } : serverStateSnapshot.settings,
-            };
-          } else {
-            serverStateSnapshot = { ...data };
-          }
-          lastServerStateTimestamp = Math.max(incomingTimestamp, Date.now());
-          lastUpdatingTabId = clientTabId || 'unknown';
-
-          return res.json({
-            success: true,
-            updated: true,
-            serverTimestamp: lastServerStateTimestamp,
-          });
-        } else {
-          // Server has newer state, return latest state for client to merge
-          return res.json({
-            success: true,
-            updated: false,
-            serverTimestamp: lastServerStateTimestamp,
-            hasNewerServerData: true,
-            data: serverStateSnapshot,
-          });
-        }
-      }
-
-      return res.status(400).json({ success: false, error: 'Invalid sync payload' });
-    } catch (err: any) {
-      console.error('Error in /api/sync-state:', err);
-      return res.status(500).json({ success: false, error: err.message });
-    }
+  // POST /api/sync-state - Deprecated no-op (prevents stale browser tabs from resurrecting deleted records in memory)
+  app.post('/api/sync-state', (_req, res) => {
+    return res.json({
+      success: true,
+      deprecated: true,
+      updated: false,
+      serverTimestamp: Date.now(),
+    });
   });
 
   // Multimodal Vision Extraction for Phone Packaging Boxes and Barcode / IMEI Stickers
@@ -935,7 +866,6 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
           }
 
           if (isAdmin) {
-            parsedArgs.admin_secret_key = 'WIN_ADMIN_UNMASK_2026';
             parsedArgs.isAdmin = true;
           }
 

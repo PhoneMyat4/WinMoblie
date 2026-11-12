@@ -569,10 +569,10 @@
       sales: [],
       customers: [],
       staffUsers: [
-        { id: 'staff_1', name: 'Ko Aung Kyaw', role: 'Owner', pin: '1234', avatarColor: 'bg-purple-600' },
-        { id: 'staff_2', name: 'Ma Thandar', role: 'Manager', pin: '2345', avatarColor: 'bg-blue-600' },
-        { id: 'staff_3', name: 'Ko Min Thu', role: 'Cashier', pin: '3456', avatarColor: 'bg-emerald-600' },
-        { id: 'staff_4', name: 'Ko Zaw Zaw', role: 'Inventory_Staff', pin: '4567', avatarColor: 'bg-amber-600' }
+        { id: 'staff_1', name: 'Ko Aung Kyaw', role: 'Owner', avatarColor: 'bg-purple-600' },
+        { id: 'staff_2', name: 'Ma Thandar', role: 'Manager', avatarColor: 'bg-blue-600' },
+        { id: 'staff_3', name: 'Ko Min Thu', role: 'Cashier', avatarColor: 'bg-emerald-600' },
+        { id: 'staff_4', name: 'Ko Zaw Zaw', role: 'Inventory_Staff', avatarColor: 'bg-amber-600' }
       ],
       settings: {
         shopName: 'Golden Star Mobile',
@@ -620,7 +620,7 @@
       const firstStaff = appData.staffUsers[0];
       if (firstStaff) {
         document.getElementById('loginInputUsername').value = firstStaff.username || 'owner';
-        document.getElementById('loginInputPin').value = firstStaff.pin || '1234';
+        document.getElementById('loginInputPin').value = '';
       }
       document.getElementById('loginScreen').classList.remove('hidden');
     }
@@ -633,7 +633,7 @@
         return `
           <button 
             type="button" 
-            onclick="quickFillStaffLogin('${usernameDisplay}', '${user.pin}')" 
+            onclick="quickSelectStaffLogin('${usernameDisplay}')" 
             class="p-2 rounded-xl text-left border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-300 transition-all cursor-pointer flex items-center gap-2"
           >
             <div class="w-7 h-7 rounded-lg ${user.avatarColor || 'bg-indigo-600'} text-white font-bold text-xs flex items-center justify-center shrink-0">
@@ -641,7 +641,7 @@
             </div>
             <div class="min-w-0">
               <p class="text-xs font-bold text-slate-900 truncate">@${usernameDisplay}</p>
-              <p class="text-[9px] text-indigo-700 font-semibold truncate capitalize">${user.role.replace('_', ' ')} (PIN: ${user.pin})</p>
+              <p class="text-[9px] text-indigo-700 font-semibold truncate capitalize">${user.role.replace('_', ' ')}</p>
             </div>
           </button>
         `;
@@ -649,10 +649,10 @@
       lucide.createIcons();
     }
 
-    function quickFillStaffLogin(username, pin) {
+    function quickSelectStaffLogin(username) {
       document.getElementById('loginInputUsername').value = username;
-      document.getElementById('loginInputPin').value = pin;
-      enteredPin = pin;
+      document.getElementById('loginInputPin').value = '';
+      enteredPin = '';
       hidePinError();
     }
 
@@ -720,18 +720,38 @@
         return;
       }
 
-      if (matched.pin === pinInput || pinInput === '1234') {
+      // Verify credentials securely via server
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler(function(res) {
+            if (res && res.success && res.user) {
+              currentUser = res.user;
+              isTerminalLocked = false;
+              document.getElementById('loginScreen').classList.add('hidden');
+              document.getElementById('headerStaffName').textContent = currentUser.name;
+              document.getElementById('headerStaffRole').textContent = currentUser.role.replace('_', ' ');
+              document.getElementById('headerStaffAvatar').textContent = currentUser.name.slice(0, 1);
+              enforceRolePermissions();
+              keypadClear();
+            } else {
+              showPinError(res && res.message ? res.message : 'Incorrect PIN. Please try again.');
+            }
+          })
+          .withFailureHandler(function(err) {
+            showPinError(err && err.message ? err.message : 'Authentication failed.');
+          })
+          .verifyStaffCredentials(usernameInput, pinInput);
+        return;
+      }
+
+      if (matched.pin && matched.pin === pinInput) {
         // Successful login
         currentUser = matched;
         isTerminalLocked = false;
         document.getElementById('loginScreen').classList.add('hidden');
-        
-        // Update header operator info
         document.getElementById('headerStaffName').textContent = currentUser.name;
         document.getElementById('headerStaffRole').textContent = currentUser.role.replace('_', ' ');
         document.getElementById('headerStaffAvatar').textContent = currentUser.name.slice(0, 1);
-        
-        // Enforce tab permissions
         enforceRolePermissions();
         keypadClear();
       } else {
@@ -897,26 +917,46 @@
         return;
       }
 
-      const existing = cart.find(i => i.productId === prodId);
-      if (existing) {
-        if (existing.quantity >= product.stock) {
-          alert(`Only ${product.stock} items available in stock.`);
-          return;
-        }
-        existing.quantity += 1;
-        existing.finalPrice = existing.quantity * existing.unitPrice;
-      } else {
-        const availableImei = product.isSerialized && product.imeiList && product.imeiList.length > 0 ? product.imeiList[0] : '';
+      const currentQtyInCart = cart
+        .filter(i => i.productId === prodId)
+        .reduce((sum, i) => sum + (Number(i.quantity) || 1), 0);
+      if (currentQtyInCart >= product.stock) {
+        alert(`Only ${product.stock} items available in stock.`);
+        return;
+      }
+
+      if (product.isSerialized) {
+        const usedImeis = new Set(cart.filter(i => i.productId === prodId && i.imei).map(i => i.imei));
+        const availableImei = (product.imeiList || []).find(im => !usedImeis.has(im)) || '';
         cart.push({
           productId: product.id,
           name: product.name,
-          unitPrice: product.sellingPrice,
+          costPrice: Math.round(Number(product.costPrice) || 0),
+          unitPrice: Math.round(Number(product.sellingPrice) || 0),
           quantity: 1,
           discount: 0,
-          finalPrice: product.sellingPrice,
+          finalPrice: Math.round(Number(product.sellingPrice) || 0),
           imei: availableImei,
-          warrantyPeriod: product.isSerialized ? '1 Year Official Warranty' : '1 Month Warranty'
+          warrantyPeriod: '1 Year Official Warranty'
         });
+      } else {
+        const existing = cart.find(i => i.productId === prodId);
+        if (existing) {
+          existing.quantity += 1;
+          existing.finalPrice = Math.round(existing.quantity * existing.unitPrice);
+        } else {
+          cart.push({
+            productId: product.id,
+            name: product.name,
+            costPrice: Math.round(Number(product.costPrice) || 0),
+            unitPrice: Math.round(Number(product.sellingPrice) || 0),
+            quantity: 1,
+            discount: 0,
+            finalPrice: Math.round(Number(product.sellingPrice) || 0),
+            imei: '',
+            warrantyPeriod: '1 Month Warranty'
+          });
+        }
       }
       renderCart();
     }

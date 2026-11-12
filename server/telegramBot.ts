@@ -15,6 +15,7 @@ import {
 import {
   fetchPosDataContext,
   persistProductToFirestore,
+  persistProductPriceUpdateToFirestore,
   updateSettingSecretInFirestore,
   claimTelegramMessageLock,
   acquireTelegramPollingLease,
@@ -1218,7 +1219,6 @@ TELEGRAM BOT SPECIFIC MANDATES & STRICT SAFEGUARDS:
             parsedArgs = {};
           }
 
-          parsedArgs.admin_secret_key = 'WIN_ADMIN_UNMASK_2026';
           parsedArgs.isAdmin = true;
 
           console.log(`[TelegramBot] Executing Tool Call: ${functionName} with args:`, parsedArgs);
@@ -1291,7 +1291,11 @@ TELEGRAM BOT SPECIFIC MANDATES & STRICT SAFEGUARDS:
             const updateResult = executeUpdateProductPrice(parsedArgs, context);
             executionResult = updateResult;
             if (updateResult.updatedProduct) {
-              await persistProductToFirestore(updateResult.updatedProduct);
+              await persistProductPriceUpdateToFirestore(
+                updateResult.updatedProduct.id,
+                updateResult.updatedProduct.sellingPrice,
+                updateResult.updatedProduct.costPrice
+              );
             }
           } else if (functionName === 'post_product_ad_to_facebook') {
             executionResult = await executePostProductAdToFacebook(

@@ -218,7 +218,6 @@ function getInitialData() {
         name: String(row[2]),
         role: String(row[3]),
         phone: String(row[4] || ''),
-        pin: String(row[5] || '1234'),
         avatarColor: String(row[6] || 'bg-purple-600'),
         status: String(row[7] || 'active')
       };
@@ -246,7 +245,7 @@ function verifyStaffCredentials(inputUsername, enteredPin) {
     var status = String(data[i][7] || 'active');
 
     if (status === 'active' && (storedUsername === cleanUser || storedName === cleanUser || storedId === cleanUser)) {
-      if (storedPin === String(enteredPin) || String(enteredPin) === '1234') {
+      if (storedPin === String(enteredPin)) {
         return {
           success: true,
           user: {
@@ -277,66 +276,117 @@ function verifyStaffCredentials(inputUsername, enteredPin) {
  * 3. Updates Customer loyalty points and lifetime spending.
  */
 function recordSaleTransaction(saleData) {
-  var ss = getSpreadsheet();
-  var salesSheet = ss.getSheetByName('Sales');
-  var productsSheet = ss.getSheetByName('Products');
-  var customersSheet = ss.getSheetByName('Customers');
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    throw new Error('Server busy with another transaction. Please try again in a few seconds.');
+  }
 
-  var invoiceNumber = saleData.invoiceNumber || generateInvoiceNumber();
-  var saleId = saleData.id || 'sale_' + new Date().getTime();
-  var dateStr = saleData.date || new Date().toISOString();
+  try {
+    var ss = getSpreadsheet();
+    var salesSheet = ss.getSheetByName('Sales');
+    var productsSheet = ss.getSheetByName('Products');
+    var customersSheet = ss.getSheetByName('Customers');
 
-  // 1. Append Sale
-  salesSheet.appendRow([
-    saleId,
-    invoiceNumber,
-    dateStr,
-    saleData.customerName || 'Walk-in Customer',
-    saleData.customerPhone || '',
-    saleData.subtotal || 0,
-    saleData.discountTotal || 0,
-    saleData.taxTotal || 0,
-    saleData.grandTotal || 0,
-    saleData.paymentMethod || 'kpay',
-    saleData.soldBy || 'Staff',
-    'completed',
-    JSON.stringify(saleData.items || [])
-  ]);
+    var invoiceNumber = saleData.invoiceNumber || generateInvoiceNumber();
+    var saleId = saleData.id || 'sale_' + new Date().getTime();
+    var dateStr = saleData.date || new Date().toISOString();
 
-  // 2. Deduct Inventory & Serial IMEIs
-  if (saleData.items && saleData.items.length > 0) {
+    // 1. Validate & Deduct Inventory + Snapshot Authoritative Cost Price from Products Sheet
     var pData = productsSheet.getDataRange().getValues();
-    for (var i = 0; i < saleData.items.length; i++) {
-      var item = saleData.items[i];
-      for (var r = 1; r < pData.length; r++) {
-        if (String(pData[r][0]) === String(item.productId)) {
-          var currentStock = Number(pData[r][6]) || 0;
-          var newStock = Math.max(0, currentStock - (item.quantity || 1));
-          productsSheet.getRange(r + 1, 7).setValue(newStock); // Stock column
+    var validatedItems = [];
+    var recomputedSubtotal = 0;
 
-          // If serialized, remove sold IMEI from the list
-          if (item.imei) {
-            var imeiList = parseJsonSafely(pData[r][9], []);
-            var filteredImeis = imeiList.filter(function(im) { return im !== item.imei && im !== item.imei2; });
-            productsSheet.getRange(r + 1, 10).setValue(JSON.stringify(filteredImeis));
+    if (saleData.items && saleData.items.length > 0) {
+      for (var i = 0; i < saleData.items.length; i++) {
+        var item = saleData.items[i];
+        var matchedRow = -1;
+        for (var r = 1; r < pData.length; r++) {
+          if (String(pData[r][0]) === String(item.productId)) {
+            matchedRow = r;
+            break;
           }
-          break;
         }
+        if (matchedRow === -1) {
+          throw new Error('Product "' + (item.name || item.productId) + '" not found in Products sheet.');
+        }
+
+        var currentStock = Number(pData[matchedRow][6]) || 0;
+        var reqQty = Math.max(1, Math.round(Number(item.quantity) || 1));
+        if (currentStock < reqQty) {
+          throw new Error('Insufficient stock for "' + pData[matchedRow][1] + '" (Available: ' + currentStock + ', Requested: ' + reqQty + ').');
+        }
+
+        var sheetCostPrice = Math.round(Number(pData[matchedRow][4]) || 0);
+        var sheetSellingPrice = Math.round(Number(pData[matchedRow][5]) || 0);
+        var unitPrice = Math.round(Number(item.unitPrice) || sheetSellingPrice);
+        var discount = Math.round(Number(item.discount) || 0);
+        var finalPrice = Math.round(unitPrice * reqQty - discount);
+        recomputedSubtotal += finalPrice;
+
+        var newStock = currentStock - reqQty;
+        pData[matchedRow][6] = newStock;
+        productsSheet.getRange(matchedRow + 1, 7).setValue(newStock);
+
+        // If serialized, verify and remove sold IMEI from the list
+        if (item.imei) {
+          var imeiList = parseJsonSafely(pData[matchedRow][9], []);
+          var filteredImeis = imeiList.filter(function(im) { return im !== item.imei && im !== item.imei2; });
+          pData[matchedRow][9] = JSON.stringify(filteredImeis);
+          productsSheet.getRange(matchedRow + 1, 10).setValue(pData[matchedRow][9]);
+        }
+
+        validatedItems.push({
+          productId: String(item.productId),
+          name: String(pData[matchedRow][1] || item.name),
+          costPrice: sheetCostPrice,
+          unitPrice: unitPrice,
+          quantity: reqQty,
+          discount: discount,
+          finalPrice: finalPrice,
+          imei: item.imei || '',
+          warrantyPeriod: item.warrantyPeriod || ''
+        });
       }
     }
-  }
 
-  // 3. Update Customer Record
-  if (saleData.customerPhone && saleData.customerPhone.trim().length > 3) {
-    updateOrAddCustomerRecord(customersSheet, saleData);
-  }
+    var discountTotal = Math.round(Number(saleData.discountTotal) || 0);
+    var taxTotal = Math.round(Number(saleData.taxTotal) || 0);
+    var grandTotal = Math.max(0, Math.round(recomputedSubtotal - discountTotal + taxTotal));
+    var normalizedCustomerPhone = normalizeMyanmarPhone(saleData.customerPhone || '');
 
-  return {
-    success: true,
-    invoiceNumber: invoiceNumber,
-    saleId: saleId,
-    message: 'Sale recorded and inventory updated successfully'
-  };
+    // 2. Append Sale
+    salesSheet.appendRow([
+      saleId,
+      invoiceNumber,
+      dateStr,
+      saleData.customerName || 'Walk-in Customer',
+      normalizedCustomerPhone,
+      recomputedSubtotal,
+      discountTotal,
+      taxTotal,
+      grandTotal,
+      saleData.paymentMethod || 'kpay',
+      saleData.soldBy || 'Staff',
+      'completed',
+      JSON.stringify(validatedItems)
+    ]);
+
+    // 3. Update Customer Record
+    if (saleData.customerPhone && saleData.customerPhone.trim().length > 3) {
+      updateOrAddCustomerRecord(customersSheet, saleData);
+    }
+
+    SpreadsheetApp.flush();
+
+    return {
+      success: true,
+      invoiceNumber: invoiceNumber,
+      saleId: saleId,
+      message: 'Sale recorded and inventory updated successfully'
+    };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
@@ -454,13 +504,23 @@ function generateInvoiceNumber() {
   return 'INV-' + y + m + day + '-' + randomCode;
 }
 
+function normalizeMyanmarPhone(rawPhone) {
+  var digits = String(rawPhone || '').replace(/\D/g, '');
+  if (digits.indexOf('959') === 0) {
+    digits = '0' + digits.slice(2);
+  } else if (digits.indexOf('9') === 0 && digits.length >= 8) {
+    digits = '0' + digits;
+  }
+  return digits;
+}
+
 function updateOrAddCustomerRecord(sheet, saleData) {
   var data = sheet.getDataRange().getValues();
   var foundRow = -1;
-  var phone = String(saleData.customerPhone).trim();
+  var phone = normalizeMyanmarPhone(saleData.customerPhone);
 
   for (var r = 1; r < data.length; r++) {
-    if (String(data[r][2]).trim() === phone) {
+    if (normalizeMyanmarPhone(data[r][2]) === phone) {
       foundRow = r + 1;
       break;
     }

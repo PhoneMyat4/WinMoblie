@@ -473,12 +473,15 @@ export default function App() {
   }, []);
 
   const handleCompleteSale = (newSale: Sale, updatedProducts: Product[], updatedCustomer?: Customer) => {
-    StorageService.saveSale(newSale);
-    StorageService.saveProducts(updatedProducts);
+    const shouldSyncFallback = !FirebaseAuthService.isAuthenticated();
+    StorageService.saveSale(newSale, shouldSyncFallback);
+    StorageService.saveProducts(updatedProducts, false);
     if (updatedCustomer) {
-      StorageService.saveCustomer(updatedCustomer);
+      StorageService.saveCustomer(updatedCustomer, shouldSyncFallback);
     }
-    AuditLogger.logSale(newSale, currentActiveUser, false);
+    if (shouldSyncFallback) {
+      AuditLogger.logSale(newSale, currentActiveUser, false);
+    }
     setSelectedInvoiceToView(newSale);
   };
 
@@ -605,9 +608,40 @@ export default function App() {
     StorageService.resetExpenseCategories();
   };
 
-  const handleRefundSale = (saleId: string, reason: string, staffName: string) => {
+  const handleRefundSale = async (saleId: string, reason: string, staffName: string) => {
     const sale = StorageService.getSales().find(s => s.id === saleId);
-    StorageService.refundSale(saleId, reason, staffName);
+    if (sale) {
+      const itemsToRefund = sale.items.map(item => {
+        const returnableQty = item.quantity - (item.refundedQuantity || 0);
+        const unitFinal = item.quantity > 0 ? item.finalPrice / item.quantity : item.unitPrice;
+        return {
+          productId: item.productId,
+          name: item.name,
+          quantity: Math.max(0, returnableQty),
+          unitPrice: item.unitPrice,
+          finalPrice: item.finalPrice,
+          refundAmount: Math.round(Math.max(0, returnableQty) * unitFinal),
+          imei: item.imei,
+          imei2: item.imei2,
+        };
+      }).filter(i => i.quantity > 0);
+      const totalRefundAmount = itemsToRefund.reduce((sum, i) => sum + i.refundAmount, 0);
+
+      await firestoreSync.executeAtomicRefundTransaction({
+        saleId,
+        itemsToRefund,
+        reason,
+        refundMethod: sale.paymentMethod || 'cash',
+        restockItems: true,
+        totalRefundAmount,
+        staffName,
+      });
+    } else {
+      StorageService.refundSale(saleId, reason, staffName);
+    }
+    setCashDrawer(StorageService.getCashDrawer());
+    setSales(StorageService.getSales());
+    setProducts(StorageService.getProducts());
     AuditLogger.logSale(
       sale || { id: saleId, totalAmount: 0 },
       currentActiveUser,
@@ -616,7 +650,7 @@ export default function App() {
     );
   };
 
-  const handleProcessItemRefund = (params: {
+  const handleProcessItemRefund = async (params: {
     saleId: string;
     itemsToRefund: {
       productId: string;
@@ -637,7 +671,7 @@ export default function App() {
     staffName: string;
     notes?: string;
   }) => {
-    StorageService.processItemRefund(params);
+    await firestoreSync.executeAtomicRefundTransaction(params);
     // Refresh live cash drawer state so UI reacts immediately
     setCashDrawer(StorageService.getCashDrawer());
     setSales(StorageService.getSales());

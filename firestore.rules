@@ -1,55 +1,130 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // 1. Activity Logs & System Audit Logs
+
+    function isSignedIn() {
+      return request.auth != null && 
+        request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    // 1. Activity Logs & System Audit Logs: Append-only for authenticated staff; never mutable or deletable
     match /activityLogs/{logId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
     }
 
     match /auditLogs/{logId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
     }
 
     // 2. POS Terminal Identity, Staff Credentials, & Store Configurations
     match /staffUsers/{staffId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     match /settings/{docId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     match /rolePermissions/{docId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // 3. Multi-Branch & Logistics Architecture collections
     match /locations/{locId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     match /branch_inventory/{docId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     match /stock_transfers/{transferId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     match /device_units/{imei} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
-    // 4. Standard POS & Inventory management collections
+    // 4. Sales & Invoices: Append and update only; no hard delete
+    match /sales/{saleId} {
+      allow read, create, update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    match /creditSales/{creditId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 5. Products & Inventory
+    match /products/{prodId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 6. Purchases, Customers, Expenses, Cash Drawer
+    match /purchases/{purchaseId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /customers/{customerId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /suppliers/{supplierId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /expenses/{expenseId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /cashDrawer/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /preOrders/{preOrderId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /priceChanges/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /stockAdjustments/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /damageLogs/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /stockAudits/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /counters/{counterId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /telegram_bot_state/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /telegram_processed_messages/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Catch-all: requires authenticated staff session
     match /{collection}/{docId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
-    // Sub-collections catch-all
     match /{collection}/{docId}/{subCollection}/{subDocId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
   }
 }
-

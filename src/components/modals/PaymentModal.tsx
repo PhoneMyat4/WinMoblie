@@ -202,6 +202,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       return;
     }
 
+    if (method === 'split' && (splitCash + splitDigitalAmount) !== finalPayable) {
+      alert(`Split payment total (${(splitCash + splitDigitalAmount).toLocaleString()} ${settings.currencySymbol}) must equal the total payable amount (${finalPayable.toLocaleString()} ${settings.currencySymbol}). For partial payments, please select Credit Sale.`);
+      return;
+    }
+
     try {
       confetti({
         particleCount: 65,
@@ -239,8 +244,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         [`${splitDigitalMethod}Amount`]: splitDigitalAmount,
         transactionRef: splitTxRef,
       };
-      amountPaid = splitCash + splitDigitalAmount;
-      balanceDue = Math.max(0, finalPayable - amountPaid);
+      amountPaid = finalPayable;
+      balanceDue = 0;
     } else if (method === 'credit') {
       paymentDetails = {
         downPayment: creditDownPayment,

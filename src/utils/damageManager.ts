@@ -119,13 +119,18 @@ export function quarantineItem(params: QuarantineParams): {
       }
     }
 
-    // Add to product quarantinedImeis list
+    // Add to product quarantinedImeis list and remove from active sellable imeiList
     const currentQuarantinedImeis = new Set(product.quarantinedImeis || []);
     currentQuarantinedImeis.add(cleanSerial);
     if (matchedPair?.imei2) {
       currentQuarantinedImeis.add(matchedPair.imei2);
     }
     product.quarantinedImeis = Array.from(currentQuarantinedImeis);
+    if (product.imeiList) {
+      product.imeiList = product.imeiList.filter(
+        im => im !== cleanSerial && (!matchedPair?.imei2 || im !== matchedPair.imei2)
+      );
+    }
   }
 
   // Deduct sellable stock and increment quarantined counter
@@ -136,6 +141,8 @@ export function quarantineItem(params: QuarantineParams): {
   if (product.stock === 0) {
     product.itemStatus = 'Quarantined';
   }
+
+  const activeLocId = StorageService.getActiveLocationId();
 
   // Generate new DamageLog record (Phase 1)
   const newLog: DamageLog = {
@@ -150,9 +157,10 @@ export function quarantineItem(params: QuarantineParams): {
     barcode: product.barcode,
     serialOrImei: params.serialOrImei || (matchedPair ? matchedPair.imei1 : undefined),
     imei2: params.imei2 || (matchedPair ? matchedPair.imei2 : undefined),
-    costImpact: product.costPrice, // Read-only pulling original unit cost from database
-    originalSellingPrice: product.sellingPrice,
+    costImpact: product.costPrice * qtyToQuarantine,
+    originalSellingPrice: product.sellingPrice * qtyToQuarantine,
     quarantinedQuantity: qtyToQuarantine,
+    locationId: activeLocId,
     status: 'Quarantined',
     phase: 'quarantine',
     reportedAt: new Date().toISOString(),
@@ -170,15 +178,19 @@ export function quarantineItem(params: QuarantineParams): {
     previousStock: previousStock,
     newStock: newStock,
     reason: 'damaged',
-    reasonNotes: `Quarantined 1 unit${newLog.serialOrImei ? ` (SN/IMEI: ${newLog.serialOrImei})` : ''} by ${params.reporterName}. Deducted from active sellable inventory. Cost impact: ${product.costPrice}. Log: ${newLog.logNumber}`,
+    reasonNotes: `Quarantined ${qtyToQuarantine} unit(s)${newLog.serialOrImei ? ` (SN/IMEI: ${newLog.serialOrImei})` : ''} by ${params.reporterName}. Deducted from active sellable inventory. Cost impact: ${product.costPrice * qtyToQuarantine}. Log: ${newLog.logNumber}`,
     timestamp: new Date().toISOString(),
     adjustedBy: params.reporterName || 'Staff Member',
     imeiList: newLog.serialOrImei ? [newLog.serialOrImei] : undefined,
   };
 
-  // Persist updates
-  products[productIndex] = product;
-  StorageService.saveProducts(products);
+  // Persist updates (save single product instead of full catalog overwrite, and update branch inventory)
+  StorageService.saveProduct(product, params.reporterName, true);
+  try {
+    StorageService.updateBranchStock(product.id, activeLocId, -qtyToQuarantine);
+  } catch (e) {
+    console.warn('Failed to update branch stock during quarantine:', e);
+  }
   StorageService.addDamageLog(newLog);
   StorageService.recordStockAdjustment(stockAdjustment);
 
@@ -295,8 +307,7 @@ export function executeDispositionRma(params: DispositionRmaParams): {
         prod.imeiPairs = updatedPairs;
       }
     }
-    products[prodIndex] = prod;
-    StorageService.saveProducts(products);
+    StorageService.saveProduct(prod, params.resolvedBy, true);
     updatedProduct = prod;
   }
 
@@ -376,8 +387,7 @@ export function executeDispositionWriteOff(params: DispositionWriteOffParams): {
       prod.itemStatus = 'Written-Off';
     }
 
-    products[prodIndex] = prod;
-    StorageService.saveProducts(products);
+    StorageService.saveProduct(prod, params.authorizedBy, true);
     updatedProduct = prod;
   }
 
@@ -462,10 +472,18 @@ export function executeDispositionBStock(params: DispositionBStockParams): {
       if (prod.quarantinedImeis) {
         prod.quarantinedImeis = prod.quarantinedImeis.filter(im => im !== log.serialOrImei);
       }
+      if (!prod.imeiList) prod.imeiList = [];
+      if (!prod.imeiList.includes(log.serialOrImei)) {
+        prod.imeiList.push(log.serialOrImei);
+      }
     }
 
-    products[prodIndex] = prod;
-    StorageService.saveProducts(products);
+    StorageService.saveProduct(prod, params.resolvedBy, true);
+    try {
+      StorageService.updateBranchStock(prod.id, log.locationId || StorageService.getActiveLocationId(), 1);
+    } catch (e) {
+      console.warn('Failed to update branch stock during B-stock restock:', e);
+    }
     updatedProduct = prod;
   }
 
@@ -670,17 +688,14 @@ export function processCustomerDefectiveReturn(params: CustomerReturnParams): {
     product.quarantinedStock = previousQuarantined + 1;
 
     // Handle serialized IMEI assignment for replacement unit
-    if (params.replacementImei && product.imeiPairs && product.imeiPairs.length > 0) {
-      const repIdx = product.imeiPairs.findIndex(
-        p => p.imei1 === params.replacementImei || p.imei2 === params.replacementImei
-      );
-      if (repIdx !== -1) {
-        const updatedPairs = [...product.imeiPairs];
-        updatedPairs[repIdx] = {
-          ...updatedPairs[repIdx],
-          status: 'Sold',
-        };
-        product.imeiPairs = updatedPairs;
+    if (params.replacementImei) {
+      if (product.imeiList) {
+        product.imeiList = product.imeiList.filter(im => im !== params.replacementImei);
+      }
+      if (product.imeiPairs && product.imeiPairs.length > 0) {
+        product.imeiPairs = product.imeiPairs.filter(
+          p => p.imei1 !== params.replacementImei && p.imei2 !== params.replacementImei
+        );
       }
     }
 
@@ -708,6 +723,12 @@ export function processCustomerDefectiveReturn(params: CustomerReturnParams): {
           product.imeiPairs = updatedPairs;
         }
       }
+    }
+
+    try {
+      StorageService.updateBranchStock(product.id, StorageService.getActiveLocationId(), -1);
+    } catch (e) {
+      console.warn('Failed to update branch stock for replacement unit:', e);
     }
   } else {
     // 'return_to_vendor'
@@ -742,6 +763,7 @@ export function processCustomerDefectiveReturn(params: CustomerReturnParams): {
     costImpact: product.costPrice,
     originalSellingPrice: product.sellingPrice,
     quarantinedQuantity: 1,
+    locationId: StorageService.getActiveLocationId(),
     status: isVendorRma ? 'Pending RMA' : 'Quarantined',
     phase: 'quarantine',
     damageReason: params.defectReason || 'Customer return',
@@ -779,8 +801,7 @@ export function processCustomerDefectiveReturn(params: CustomerReturnParams): {
     imeiList: params.defectiveSerialOrImei ? [params.defectiveSerialOrImei] : undefined,
   };
 
-  products[productIndex] = product;
-  StorageService.saveProducts(products);
+  StorageService.saveProduct(product, params.processedBy, true);
   StorageService.addDamageLog(newLog);
   StorageService.recordStockAdjustment(stockAdjustment);
 

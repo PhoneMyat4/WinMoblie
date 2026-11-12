@@ -62,8 +62,28 @@ function extractTimestamp(rawDate: any): number | null {
 }
 
 /**
- * Normalizes date bounds from the request.
+ * Normalizes date bounds from the request using Myanmar Standard Time (UTC+06:30)
+ * so sales between 00:00 and 06:30 MMT are never shifted into the previous UTC day.
  */
+function parseMyanmarDateBound(rawDateStr: string, isEndOfDay: boolean): number | null {
+  const clean = rawDateStr.trim();
+  const datePart = clean.split('T')[0];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    const isoWithMmt = `${datePart}T${isEndOfDay ? '23:59:59.999' : '00:00:00.000'}+06:30`;
+    const parsed = new Date(isoWithMmt);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.getTime();
+    }
+  }
+  const fallback = new Date(clean);
+  if (!isNaN(fallback.getTime())) {
+    if (isEndOfDay) fallback.setHours(23, 59, 59, 999);
+    else fallback.setHours(0, 0, 0, 0);
+    return fallback.getTime();
+  }
+  return null;
+}
+
 function parseDateBounds(options: ArchiveRequestOptions): { startTime: number; endTime: number; startStr: string; endStr: string } {
   let startTime = 0;
   let endTime = Infinity;
@@ -71,37 +91,32 @@ function parseDateBounds(options: ArchiveRequestOptions): { startTime: number; e
   let endStr = '';
 
   if (options.olderThanDate) {
-    const parsed = new Date(options.olderThanDate);
-    if (!isNaN(parsed.getTime())) {
-      parsed.setHours(23, 59, 59, 999);
-      endTime = parsed.getTime();
-      endStr = options.olderThanDate;
+    const t = parseMyanmarDateBound(options.olderThanDate, true);
+    if (t !== null) {
+      endTime = t;
+      endStr = options.olderThanDate.split('T')[0];
     }
   }
 
   if (options.startDate) {
-    const parsedStart = new Date(options.startDate);
-    if (!isNaN(parsedStart.getTime())) {
-      // Midnight start of that day
-      parsedStart.setHours(0, 0, 0, 0);
-      startTime = parsedStart.getTime();
+    const t = parseMyanmarDateBound(options.startDate, false);
+    if (t !== null) {
+      startTime = t;
       startStr = options.startDate.split('T')[0];
     }
   }
 
   if (options.endDate) {
-    const parsedEnd = new Date(options.endDate);
-    if (!isNaN(parsedEnd.getTime())) {
-      // End of day (23:59:59.999)
-      parsedEnd.setHours(23, 59, 59, 999);
-      endTime = parsedEnd.getTime();
+    const t = parseMyanmarDateBound(options.endDate, true);
+    if (t !== null) {
+      endTime = t;
       endStr = options.endDate.split('T')[0];
     }
   }
 
   if (endTime === Infinity) {
     endTime = Date.now();
-    endStr = new Date().toISOString().split('T')[0];
+    endStr = new Date(Date.now() + 6.5 * 3600 * 1000).toISOString().split('T')[0];
   }
 
   return { startTime, endTime, startStr, endStr };
@@ -176,26 +191,17 @@ export async function archiveSalesData(options: ArchiveRequestOptions): Promise<
 
   snapshot.forEach((docSnap) => {
     const data = docSnap.data() as Sale;
+    if ((data as any).archived === true || (data as any).status === 'voided') {
+      return;
+    }
     const ts = extractTimestamp(data.date || (data as any).createdAt);
-    if (ts !== null) {
-      if (ts >= startTime && ts <= endTime) {
-        matchingDocs.push({
-          id: docSnap.id,
-          ref: docSnap.ref,
-          data: { ...data, id: docSnap.id },
-          timestamp: ts,
-        });
-      }
-    } else {
-      // If document doesn't have valid date, check if date range is open or olderThan
-      if (startTime === 0 && endTime >= Date.now()) {
-        matchingDocs.push({
-          id: docSnap.id,
-          ref: docSnap.ref,
-          data: { ...data, id: docSnap.id },
-          timestamp: 0,
-        });
-      }
+    if (ts !== null && ts >= startTime && ts <= endTime) {
+      matchingDocs.push({
+        id: docSnap.id,
+        ref: docSnap.ref,
+        data: { ...data, id: docSnap.id },
+        timestamp: ts,
+      });
     }
   });
 
@@ -303,26 +309,40 @@ export async function archiveSalesData(options: ArchiveRequestOptions): Promise<
     );
   }
 
-  // 6. ONLY AFTER SUCCESSFUL STORAGE UPLOAD: Batch delete documents from Firestore
-  console.log(`[ArchiveService] Storage upload verified. Starting batched deletion of ${count} records from Firestore...`);
+  // 6. ONLY AFTER SUCCESSFUL STORAGE UPLOAD: Atomically copy to sales_archive and mark sales docs as archived
+  console.log(`[ArchiveService] Storage upload verified. Starting batched archive marking of ${count} records in Firestore...`);
 
-  const BATCH_SIZE = 400; // Safe threshold under Firestore's 500 limit
+  const BATCH_SIZE = 200; // 2 writes per item (sales_archive copy + sales archived flag) = 400 ops per batch
   const deletedIds: string[] = [];
+  const archivedAtIso = now.toISOString();
 
   for (let i = 0; i < matchingDocs.length; i += BATCH_SIZE) {
     const batchChunk = matchingDocs.slice(i, i + BATCH_SIZE);
     const batch = writeBatch(db);
 
     batchChunk.forEach((item) => {
-      batch.delete(item.ref);
+      const archiveRef = doc(db, 'sales_archive', item.id);
+      batch.set(archiveRef, {
+        ...item.data,
+        archived: true,
+        archivedAt: archivedAtIso,
+        archiveStoragePath: storagePath,
+      }, { merge: true });
+
+      batch.set(item.ref, {
+        archived: true,
+        archivedAt: archivedAtIso,
+        archiveStoragePath: storagePath,
+      }, { merge: true });
+
       deletedIds.push(item.id);
     });
 
     await batch.commit();
-    console.log(`[ArchiveService] Deleted batch ${Math.floor(i / BATCH_SIZE) + 1} (${batchChunk.length} docs). Total so far: ${deletedIds.length}/${count}`);
+    console.log(`[ArchiveService] Archived batch ${Math.floor(i / BATCH_SIZE) + 1} (${batchChunk.length} docs). Total so far: ${deletedIds.length}/${count}`);
   }
 
-  console.log(`[ArchiveService] Archiving and cleanup completed successfully! Purged ${deletedIds.length} sales from Firestore.`);
+  console.log(`[ArchiveService] Archiving completed successfully! Archived ${deletedIds.length} sales in Firestore.`);
 
   return {
     success: true,

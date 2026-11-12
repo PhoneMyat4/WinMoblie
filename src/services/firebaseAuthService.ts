@@ -81,6 +81,10 @@ export class FirebaseAuthService {
     const primaryEmail = this.getAuthEmail(staff);
     const internalEmail = this.getInternalAuthEmail(staff);
     const password = enteredPassword.length >= 6 ? enteredPassword : `${enteredPassword}123456`.slice(0, 12);
+    const isLocalCredentialValid = Boolean(
+      (staff.password && staff.password === enteredPassword) ||
+      (staff.pin && staff.pin === enteredPassword)
+    );
 
     try {
       // 1. Attempt primary email/password sign-in
@@ -100,10 +104,12 @@ export class FirebaseAuthService {
           } catch {}
         }
 
-        // If user doesn't exist yet in Firebase Auth, create account
+        // Only auto-provision Firebase Auth account when the staff user's local credential was explicitly verified
         if (
-          signInErr.code === 'auth/user-not-found' ||
-          signInErr.code === 'auth/invalid-email'
+          isLocalCredentialValid &&
+          (signInErr.code === 'auth/user-not-found' ||
+           signInErr.code === 'auth/invalid-email' ||
+           signInErr.code === 'auth/invalid-credential')
         ) {
           try {
             const newCred = await createUserWithEmailAndPassword(auth, internalEmail, password);
@@ -111,27 +117,21 @@ export class FirebaseAuthService {
             await this.syncStaffProfileToFirestore(staff, newCred.user.uid);
             return { success: true, user: newCred.user };
           } catch (createErr: any) {
-            console.warn('[FirebaseAuthService] Creation notice, attempting anonymous fallback:', createErr.message);
+            console.warn('[FirebaseAuthService] Staff Firebase Auth creation notice:', createErr.message);
           }
         }
       }
 
-      // 2. Anonymous authentication fallback to ensure Firestore database access
-      try {
-        const anonCred = await signInAnonymously(auth);
-        this.currentUser = anonCred.user;
-        await this.syncStaffProfileToFirestore(staff, anonCred.user.uid);
-        return { success: true, user: anonCred.user };
-      } catch (anonErr: any) {
-        console.warn('[FirebaseAuthService] Anonymous auth unavailable:', anonErr.message);
+      if (!isLocalCredentialValid) {
+        return { success: false, error: 'Invalid staff credentials.' };
       }
 
-      // 3. Fallback: Authenticated at terminal level
+      // 2. Fallback: Authenticated at terminal level after local credential verification
       return { success: true };
     } catch (err: any) {
       console.warn('[FirebaseAuthService] Firebase authentication notice:', err?.message || err);
       return { 
-        success: true // Allow terminal access even if Firebase Auth service is in fallback mode
+        success: isLocalCredentialValid
       };
     }
   }

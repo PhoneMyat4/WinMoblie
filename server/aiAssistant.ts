@@ -376,7 +376,7 @@ CORE SAFEGUARDS & MANDATORY OPERATIONAL RULES:
 2. PRICE CONFIDENTIALITY (CRITICAL SAFEGUARD):
    - NEVER reveal 'Cost Price', 'Profit Margin', 'Profit Amount', 'Purchase Cost', or 'Supplier Name' under ANY circumstances in chat or customer-facing messages.
    - ONLY show the 'Selling Price' (retail price) to users.
-   - STRICT FORBIDDEN OUTPUT: It is strictly forbidden to output cost metrics, store profit margins, or supplier names unless the user explicitly provides the secret admin authentication override key: 'WIN_ADMIN_UNMASK_2026'.
+   - STRICT FORBIDDEN OUTPUT: It is strictly forbidden to output cost metrics, store profit margins, or supplier names unless the user has verified administrative access.
    - If a user asks "What is your cost?", "How much profit do you make?", or "Who is your supplier?", politely inform them: "I can only share official retail selling prices and product availability. Cost and supplier details are strictly confidential."
 
 3. OUT-OF-STOCK FILTERING (AVAILABILITY RULES):
@@ -603,7 +603,6 @@ export function executeQueryPosReports(args: any, context: PosDataContext): any 
 
   // Verify Admin authorization for trade secrets (Cost, Profit, Supplier details)
   const hasAdminAuth =
-    admin_secret_key === 'WIN_ADMIN_UNMASK_2026' ||
     Boolean(process.env.ADMIN_AUDIT_KEY && admin_secret_key === process.env.ADMIN_AUDIT_KEY) ||
     Boolean(args.isAdmin || (context as any)?.isAdmin || (context.settings as any)?.isAdmin);
 
@@ -954,7 +953,7 @@ export function executeQueryPosReports(args: any, context: PosDataContext): any 
             if (!categoryMap[cat]) {
               categoryMap[cat] = { units: 0, revenue: 0, cogs: 0, profit: 0, orderCount: 0, topModels: {} };
             }
-            const itemRev = item.finalPrice * item.quantity;
+            const itemRev = typeof item.finalPrice === 'number' ? item.finalPrice : ((item.unitPrice || 0) * (item.quantity || 1));
             const itemCost = (item.costPrice || 0) * item.quantity;
             categoryMap[cat].units += item.quantity;
             categoryMap[cat].revenue += itemRev;
@@ -1029,16 +1028,42 @@ export function executeAddInventoryItem(args: any, context: PosDataContext): { s
     .map((im: any) => String(im).replace(/[^0-9]/g, ''))
     .filter((im: string) => im.length >= 14 && im.length <= 16);
 
-  if (category === 'new_phones' || category === 'used_phones') {
+  const isSerialized = category === 'new_phones' || category === 'used_phones';
+  if (isSerialized) {
     if (cleanedImeis.length === 0) {
       return {
         success: false,
         message: 'No valid 15-digit IMEI provided. Every phone unit must have a 15-digit IMEI number.',
       };
     }
+    const requestedQty = Number(quantity);
+    if (!isNaN(requestedQty) && requestedQty > 0 && cleanedImeis.length !== requestedQty) {
+      return {
+        success: false,
+        message: `Quantity mismatch: Provided ${cleanedImeis.length} IMEI(s) but requested quantity was ${requestedQty}. Each serialized phone unit must have exactly one corresponding IMEI.`,
+      };
+    }
+
+    if (context.products) {
+      const existingImeis = new Set<string>();
+      context.products.forEach(p => {
+        p.imeiList?.forEach(im => existingImeis.add(im));
+        p.imeiPairs?.forEach(pair => {
+          if (pair.imei1) existingImeis.add(pair.imei1);
+          if (pair.imei2) existingImeis.add(pair.imei2);
+        });
+      });
+      const dup = cleanedImeis.find(im => existingImeis.has(im));
+      if (dup) {
+        return {
+          success: false,
+          message: `IMEI conflict: IMEI "${dup}" is already registered in store inventory! Duplicate IMEIs are not allowed.`,
+        };
+      }
+    }
   }
 
-  const finalQty = Math.max(1, Number(quantity) || cleanedImeis.length || 1);
+  const finalQty = isSerialized ? cleanedImeis.length : Math.max(1, Number(quantity) || 1);
   const now = new Date();
   const timestamp = Date.now();
   const cleanBrand = String(brand).trim();
@@ -1237,7 +1262,7 @@ export function executeQueryInventoryProducts(args: any, context: PosDataContext
   const excludeAccessories = args.exclude_accessories === true;
 
   // Verify Admin authorization for trade secrets (Cost Price & Supplier Name)
-  const hasAdminAuth = args.admin_secret_key === 'WIN_ADMIN_UNMASK_2026' ||
+  const hasAdminAuth = Boolean(args.isAdmin || (context as any)?.isAdmin || (context.settings as any)?.isAdmin) ||
     Boolean(process.env.ADMIN_AUDIT_KEY && args.admin_secret_key === process.env.ADMIN_AUDIT_KEY);
 
   let matched = products;

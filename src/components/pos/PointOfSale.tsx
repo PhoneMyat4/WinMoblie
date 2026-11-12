@@ -1029,8 +1029,8 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
       quantity: item.quantity,
       unitPrice: item.isFoc ? 0 : (item.customPrice ?? item.product.sellingPrice),
       costPrice: item.product.costPrice,
-      discount: item.isFoc ? 0 : item.discount,
-      finalPrice: item.isFoc ? 0 : Number(((item.customPrice ?? item.product.sellingPrice) * item.quantity - item.discount).toFixed(2)),
+      discount: item.isFoc ? 0 : Math.round(item.discount || 0),
+      finalPrice: item.isFoc ? 0 : Math.round((item.customPrice ?? item.product.sellingPrice) * item.quantity - (item.discount || 0)),
       warrantyPeriod: item.warrantyPeriod,
       isFoc: item.isFoc,
       focReason: item.focReason,
@@ -1038,7 +1038,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
     }));
 
     const newSale: Sale = {
-      id: `sale-${Date.now()}`,
+      id: `sale-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       invoiceNumber,
       date: new Date().toISOString(),
       customerId: selectedCustomer?.id,
@@ -1089,7 +1089,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
       const dueDate = paymentInfo.paymentDetails?.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
       creditRecord = {
-        id: `credit-${Date.now()}`,
+        id: `credit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         creditNumber,
         saleId: newSale.id,
         invoiceNumber: newSale.invoiceNumber,
@@ -1157,6 +1157,7 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
         creditRecord,
         cartItems: cart,
         updatedCustomer: updatedCust,
+        preOrderId: activePreOrderFulfillment?.id,
       });
 
       if (!checkoutResult.success) {
@@ -1171,26 +1172,35 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
         return;
       }
 
-      if (creditRecord) {
-        StorageService.saveCreditSale(creditRecord);
+      const committedSale = checkoutResult.finalizedSale || newSale;
+      const committedCreditRecord = checkoutResult.finalizedCreditRecord || creditRecord;
+      const shouldSyncFallback = typeof navigator !== 'undefined' && !navigator.onLine;
+
+      if (committedCreditRecord) {
+        StorageService.saveCreditSale(committedCreditRecord, shouldSyncFallback);
       }
 
       // Fulfill pre-order in storage if active
       if (activePreOrderFulfillment) {
-        StorageService.updatePreOrderStatus(activePreOrderFulfillment.id, 'Completed', {
-          fulfilledSaleId: newSale.id,
-          fulfilledInvoiceNumber: newSale.invoiceNumber,
-          fulfilledBy: settings.currentStaffName || 'Cashier',
-        });
+        StorageService.updatePreOrderStatus(
+          activePreOrderFulfillment.id,
+          'Completed',
+          {
+            fulfilledSaleId: committedSale.id,
+            fulfilledInvoiceNumber: committedSale.invoiceNumber,
+            fulfilledBy: settings.currentStaffName || 'Cashier',
+          },
+          shouldSyncFallback
+        );
         refreshPreOrdersFromStorage();
         if (onClearActivePreOrder) {
           onClearActivePreOrder();
         }
       }
 
-      onCompleteSale(newSale, checkoutResult.updatedProducts, updatedCust);
+      onCompleteSale(committedSale, checkoutResult.updatedProducts, updatedCust);
       setIsPaymentModalOpen(false);
-      setCompletedSale(newSale);
+      setCompletedSale(committedSale);
       setActivePreOrderFulfillment(null);
       lastFulfilledPreOrderIdRef.current = null;
       setCart([]);

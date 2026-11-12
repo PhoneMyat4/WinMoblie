@@ -811,6 +811,7 @@ export interface ExpenseRecord {
   paymentRef?: string;
   paidTo?: string;
   recordedBy: string;
+  recordedById?: string;
   deductFromCashDrawer: boolean;
   fundingSource?: ExpenseFundingSource; // 'cash_drawer' (deducts from daily counter sales) | 'revenue_cash' (deducts from total remaining cash)
   revenueCashChannel?: PaymentMethod | string; // e.g. 'kpay' | 'wave' | 'kbz' | 'aya' | 'cb' | 'yoma' | 'cash'

@@ -701,18 +701,28 @@ export function calculateShiftReconciliation(
     }
   });
 
-  // 2. Cash In / Cash Out from manual vouchers on that date
+  // 2. Cash In / Cash Out from manual vouchers on that date (exclude auto-booked sales, expenses, and refunds to prevent double-counting)
   let manualCashInTotal = 0;
-  cashDrawer.cashInManual.forEach(tx => {
-    if (tx.time.slice(0, 10) === targetDate) {
-      manualCashInTotal += tx.amount;
+  (cashDrawer.cashInManual || []).forEach(tx => {
+    const reason = tx.reason || '';
+    const isAutoSaleIn =
+      reason.startsWith('POS Invoice #') ||
+      reason.startsWith('Credit Down Payment #') ||
+      reason.startsWith('Credit Debt Collection #');
+    if (tx.time && tx.time.slice(0, 10) === targetDate && !isAutoSaleIn) {
+      manualCashInTotal += Math.round(Number(tx.amount) || 0);
     }
   });
 
   let manualCashOutTotal = 0;
-  cashDrawer.cashOutManual.forEach(tx => {
-    if (tx.time.slice(0, 10) === targetDate) {
-      manualCashOutTotal += tx.amount;
+  (cashDrawer.cashOutManual || []).forEach(tx => {
+    const reason = tx.reason || '';
+    const isAutoExpenseOrRefundOut =
+      reason.startsWith('[Daily Sales Cash Deduction] Expense #') ||
+      reason.startsWith('Cash Refund for Invoice #') ||
+      reason.startsWith('Refund Outflow');
+    if (tx.time && tx.time.slice(0, 10) === targetDate && !isAutoExpenseOrRefundOut) {
+      manualCashOutTotal += Math.round(Number(tx.amount) || 0);
     }
   });
 
@@ -722,8 +732,8 @@ export function calculateShiftReconciliation(
     const isDrawerExpense = exp.fundingSource === 'cash_drawer' || 
       (exp.fundingSource !== 'revenue_cash' && (exp.paymentMethod === 'cash' || exp.deductFromCashDrawer));
 
-    if (exp.date.slice(0, 10) === targetDate && isDrawerExpense) {
-      expensesCashTotal += exp.amount;
+    if (exp.date && exp.date.slice(0, 10) === targetDate && isDrawerExpense) {
+      expensesCashTotal += Math.round(Number(exp.amount) || 0);
     }
   });
 
@@ -731,28 +741,28 @@ export function calculateShiftReconciliation(
   let refundsCashTotal = 0;
   dayRefunds.forEach(ref => {
     if (ref.paymentMethod === 'cash' || ref.paymentDetails?.cashAmount) {
-      refundsCashTotal += (ref.paymentDetails?.cashAmount || ref.amountPaid);
+      refundsCashTotal += Math.round(Number(ref.paymentDetails?.cashAmount || ref.amountPaid) || 0);
     }
   });
 
-  const openingFloat = cashDrawer.openingBalance || 200000;
-  const expectedCashTotal = Math.max(0, 
+  const openingFloat = Math.round(Number(cashDrawer.openingBalance ?? (cashDrawer as any).openingFloat ?? 0));
+  const expectedCashTotal = Math.max(0, Math.round(
     openingFloat + cashSalesTotal + manualCashInTotal - manualCashOutTotal - expensesCashTotal - refundsCashTotal
-  );
+  ));
 
   // Calculate actual counted from denominations or direct input
   let actualCashCounted = actualCountedInput !== undefined 
-    ? actualCountedInput 
-    : (cashDrawer.actualCounted || expectedCashTotal);
+    ? Math.round(Number(actualCountedInput) || 0)
+    : Math.round(Number(cashDrawer.actualCounted ?? expectedCashTotal));
 
   if (denominationsInput && denominationsInput.length > 0) {
-    const denomSum = denominationsInput.reduce((acc, d) => acc + d.total, 0);
+    const denomSum = denominationsInput.reduce((acc, d) => acc + Math.round(Number(d.total) || 0), 0);
     if (denomSum > 0) {
       actualCashCounted = denomSum;
     }
   }
 
-  const variance = Number((actualCashCounted - expectedCashTotal).toFixed(2));
+  const variance = Math.round(actualCashCounted - expectedCashTotal);
   let varianceStatus: 'balanced' | 'overage' | 'shortage' = 'balanced';
   if (variance > 0) varianceStatus = 'overage';
   if (variance < 0) varianceStatus = 'shortage';

@@ -207,8 +207,43 @@ function setItem<T>(key: string, value: T, notify = true): void {
         tabBroadcastChannel.postMessage({ type: 'DATA_UPDATED', key, timestamp: now });
       }
     }
-  } catch (err) {
-    console.error(`Error writing ${key} to storage:`, err);
+  } catch (err: any) {
+    const isQuotaError =
+      err &&
+      (err.name === 'QuotaExceededError' ||
+        err.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+        err.code === 22 ||
+        err.code === 1014);
+    if (isQuotaError) {
+      console.warn(`[StorageService] QuotaExceededError while writing ${key}. Pruning old logs and retrying...`);
+      try {
+        const rawAudit = localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS);
+        if (rawAudit) {
+          const parsedAudit = JSON.parse(rawAudit);
+          if (Array.isArray(parsedAudit) && parsedAudit.length > 200) {
+            localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(parsedAudit.slice(0, 200)));
+          }
+        }
+        const rawChat = localStorage.getItem(STORAGE_KEYS.CHAT_MESSAGES);
+        if (rawChat) {
+          const parsedChat = JSON.parse(rawChat);
+          if (Array.isArray(parsedChat) && parsedChat.length > 100) {
+            localStorage.setItem(STORAGE_KEYS.CHAT_MESSAGES, JSON.stringify(parsedChat.slice(-100)));
+          }
+        }
+        localStorage.setItem(key, JSON.stringify(value));
+        return;
+      } catch (retryErr) {
+        console.error(`[StorageService] Storage quota still exceeded for ${key}:`, retryErr);
+        window.dispatchEvent(
+          new CustomEvent('mobileshop_storage_quota_warning', {
+            detail: { key, message: 'Browser local storage is full. Please run System Optimization or Archive old records.' },
+          })
+        );
+      }
+    } else {
+      console.error(`Error writing ${key} to storage:`, err);
+    }
   }
 }
 
@@ -263,6 +298,23 @@ export interface StorageChangeHandler {
   onStockAdjustmentUpsert?: (adjustment: StockAdjustment) => void;
   onStockAdjustmentsBatch?: (adjustments: StockAdjustment[]) => void;
   onStockAdjustmentDelete?: (id: string) => void;
+  onProductPriceUpdate?: (productId: string, sellingPrice: number, costPrice?: number) => void;
+  onMonthlyCapitalSnapshotUpsert?: (snapshot: MonthlyCapitalSnapshot) => void;
+  onCashTransfersBatch?: (transfers: CapitalCashTransfer[]) => void;
+  onFocDistributionUpsert?: (record: FocDistributionRecord) => void;
+  onFocDistributionDelete?: (id: string) => void;
+  onStockTransferDeviceSync?: (params: {
+    transferId: string;
+    transferNumber: string;
+    action: 'dispatch' | 'receive';
+    locationId: string;
+    locationName: string;
+    imeiList: string[];
+    missingImeis?: string[];
+  }) => void;
+  onAuditLogUpsert?: (entry: AuditLogEntry) => void;
+  onCashDrawerShiftClosed?: (shift: CashDrawerRecord) => void;
+  onSocialMarketingStateUpsert?: (state: SocialMarketingState) => void;
 }
 
 let activeStorageSyncHandler: StorageChangeHandler | null = null;
@@ -693,14 +745,18 @@ export const StorageService = {
     let finalProducts = list.filter(Boolean).map(p => ({
       ...p,
       stock: typeof p.stock === 'number' && !isNaN(p.stock) ? p.stock : 0,
-      costPrice: typeof p.costPrice === 'number' && !isNaN(p.costPrice) ? p.costPrice : 0,
-      sellingPrice: typeof p.sellingPrice === 'number' && !isNaN(p.sellingPrice) ? p.sellingPrice : 0,
+      costPrice: typeof p.costPrice === 'number' && !isNaN(p.costPrice) ? Math.round(p.costPrice) : 0,
+      sellingPrice: typeof p.sellingPrice === 'number' && !isNaN(p.sellingPrice) ? Math.round(p.sellingPrice) : 0,
       minStockAlert: typeof p.minStockAlert === 'number' && !isNaN(p.minStockAlert) ? p.minStockAlert : 0,
       category: canonicalCategory(p.category),
       model: p.model || p.name || '',
+      rom: p.rom || p.storage || '',
+      storage: p.storage || p.rom || '',
+      childCategory: p.childCategory || p.variant || '',
+      variant: p.variant || p.childCategory || '',
       imeiList: Array.isArray(p.imeiList) ? p.imeiList : [],
       imeiPairs: Array.isArray(p.imeiPairs) ? p.imeiPairs : [],
-    }));
+    })).filter(p => !(p as any).archived);
 
     // Filter out any locally deleted product tombstones so remote snapshots or stale cache never resurrect them
     const deletedProductIds = new Set(StorageService.getDeletedProductIds());
@@ -712,7 +768,7 @@ export const StorageService = {
   },
   saveProducts: (products: Product[], triggerSync = true) => {
     const deletedProductIds = new Set(StorageService.getDeletedProductIds());
-    const filtered = (products || []).filter(p => p && p.id && !deletedProductIds.has(p.id));
+    const filtered = (products || []).filter(p => p && p.id && !deletedProductIds.has(p.id) && !(p as any).archived);
     setItem(STORAGE_KEYS.PRODUCTS, filtered, triggerSync);
     if (triggerSync && activeStorageSyncHandler?.onProductsBatch) {
       activeStorageSyncHandler.onProductsBatch(filtered);
@@ -722,6 +778,12 @@ export const StorageService = {
     StorageService.unrecordDeletedProductId(product.id);
     const stampedProduct: Product = {
       ...product,
+      costPrice: Math.round(Number(product.costPrice) || 0),
+      sellingPrice: Math.round(Number(product.sellingPrice) || 0),
+      rom: product.rom || product.storage || '',
+      storage: product.storage || product.rom || '',
+      childCategory: product.childCategory || product.variant || '',
+      variant: product.variant || product.childCategory || '',
       updatedAt: product.updatedAt || new Date().toISOString(),
     };
     const products = StorageService.getProducts();
@@ -784,7 +846,7 @@ export const StorageService = {
     } else {
       products.unshift(stampedProduct);
     }
-    StorageService.saveProducts(products, triggerSync);
+    StorageService.saveProducts(products, false);
 
     if (triggerSync && activeStorageSyncHandler?.onProductUpsert) {
       activeStorageSyncHandler.onProductUpsert(stampedProduct);
@@ -922,7 +984,7 @@ export const StorageService = {
     return (Array.isArray(raw) ? raw : []).filter(l => l && !isMockAuditLog(l));
   },
   saveAuditLogs: (logs: AuditLogEntry[], triggerSync = true) => setItem(STORAGE_KEYS.AUDIT_LOGS, logs, triggerSync),
-  addAuditLog: (entry: AuditLogEntry | (Partial<AuditLogEntry> & { actionType: AuditActionType; category: AuditCategory; severity: AuditSeverity; summary: string })): AuditLogEntry => {
+  addAuditLog: (entry: AuditLogEntry | (Partial<AuditLogEntry> & { actionType: AuditActionType; category: AuditCategory; severity: AuditSeverity; summary: string }), triggerSync = true): AuditLogEntry => {
     const fullEntry: AuditLogEntry = {
       id: entry.id || `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       timestamp: entry.timestamp || new Date().toISOString(),
@@ -943,7 +1005,10 @@ export const StorageService = {
     if (logs.length > 1500) {
       logs.length = 1500;
     }
-    StorageService.saveAuditLogs(logs);
+    StorageService.saveAuditLogs(logs, false);
+    if (triggerSync && activeStorageSyncHandler?.onAuditLogUpsert) {
+      activeStorageSyncHandler.onAuditLogUpsert(fullEntry);
+    }
     return fullEntry;
   },
   clearAuditLogs: () => {
@@ -1067,11 +1132,18 @@ export const StorageService = {
 
     StorageService.recordPriceChange(priceRecord);
 
-    prod.sellingPrice = newSellingPrice;
+    prod.sellingPrice = Math.round(Number(newSellingPrice) || 0);
     if (newCostPrice !== undefined) {
-      prod.costPrice = newCostPrice;
+      prod.costPrice = Math.round(Number(newCostPrice) || 0);
     }
-    StorageService.saveProducts(products);
+    prod.updatedAt = new Date().toISOString();
+    StorageService.saveProducts(products, false);
+
+    if (activeStorageSyncHandler?.onProductPriceUpdate) {
+      activeStorageSyncHandler.onProductPriceUpdate(prod.id, prod.sellingPrice, prod.costPrice);
+    } else if (activeStorageSyncHandler?.onProductUpsert) {
+      activeStorageSyncHandler.onProductUpsert(prod);
+    }
 
     return { success: true, product: prod, priceRecord };
   },
@@ -1410,7 +1482,8 @@ export const StorageService = {
       selectedImei?: string;
       selectedImei2?: string;
     }>,
-    locationIdOverride?: string
+    locationIdOverride?: string,
+    commitBranchUpdate = false
   ): { success: boolean; error?: string; updatedProducts: Product[] } => {
     // 1. Fetch FRESH current products directly from storage to eliminate stale React component state
     const currentProducts = StorageService.getProducts();
@@ -1434,7 +1507,13 @@ export const StorageService = {
         .reduce((sum, c) => sum + c.quantity, 0);
 
       const quarantined = currentProd.quarantinedStock || 0;
-      const sellableStock = Math.max(0, currentProd.stock - quarantined);
+      // Note: quarantineItem and processCustomerDefectiveReturn already deduct quarantined units from currentProd.stock.
+      // Therefore currentProd.stock represents active sellable stock unless the entire item is marked non-sellable.
+      const isBlockedStatus =
+        currentProd.itemStatus === 'Quarantined' ||
+        currentProd.itemStatus === 'Pending RMA' ||
+        currentProd.itemStatus === 'Written-Off';
+      const sellableStock = isBlockedStatus ? 0 : Math.max(0, currentProd.stock);
 
       if (totalQtyNeeded > sellableStock) {
         return {
@@ -1446,8 +1525,15 @@ export const StorageService = {
 
       // Check serialized IMEIs
       if (item.selectedImei) {
+        if (currentProd.quarantinedImeis?.includes(item.selectedImei)) {
+          return {
+            success: false,
+            error: `IMEI Conflict: IMEI "${item.selectedImei}" for "${currentProd.name}" is currently Quarantined and cannot be sold!`,
+            updatedProducts: currentProducts,
+          };
+        }
         const hasImei1 = currentProd.imeiList?.includes(item.selectedImei) ||
-          currentProd.imeiPairs?.some(p => p.imei1 === item.selectedImei);
+          currentProd.imeiPairs?.some(p => p.imei1 === item.selectedImei && p.status !== 'Quarantined' && p.status !== 'Pending RMA' && p.status !== 'Written-Off');
         if (!hasImei1) {
           return {
             success: false,
@@ -1470,13 +1556,15 @@ export const StorageService = {
       }
     }
 
-    // 3. Apply deductions cleanly to updatedProducts
-    for (const item of cartItems) {
-      const prodIndex = updatedProducts.findIndex(p => p.id === item.product.id);
+    // 3. Apply deductions cleanly to updatedProducts (grouped by distinct product ID to prevent double deduction)
+    const distinctProductIds = Array.from(new Set(cartItems.map(c => c.product.id)));
+
+    for (const productId of distinctProductIds) {
+      const prodIndex = updatedProducts.findIndex(p => p.id === productId);
       if (prodIndex === -1) continue;
 
       const prod = updatedProducts[prodIndex];
-      const soldItemsOfProd = cartItems.filter(c => c.product.id === prod.id);
+      const soldItemsOfProd = cartItems.filter(c => c.product.id === productId);
       const totalQtySold = soldItemsOfProd.reduce((s, i) => s + i.quantity, 0);
       const usedImeis = soldItemsOfProd.map(i => i.selectedImei).filter(Boolean) as string[];
       const usedImei2s = soldItemsOfProd.map(i => i.selectedImei2).filter(Boolean) as string[];
@@ -1495,11 +1583,13 @@ export const StorageService = {
         updatedAt: new Date().toISOString(),
       };
 
-      // 4. Also atomically decrement localized branch_inventory ledger for targetLocId
-      try {
-        StorageService.updateBranchStock(prod.id, targetLocId, -totalQtySold, 0, true);
-      } catch (branchStockErr) {
-        console.warn('Failed to update local branch stock:', branchStockErr);
+      // 4. Only decrement localized branch_inventory ledger if commitBranchUpdate is explicitly requested
+      if (commitBranchUpdate) {
+        try {
+          StorageService.updateBranchStock(prod.id, targetLocId, -totalQtySold, 0, true);
+        } catch (branchStockErr) {
+          console.warn('Failed to update local branch stock:', branchStockErr);
+        }
       }
     }
 
@@ -1515,14 +1605,46 @@ export const StorageService = {
     }
   },
   saveSale: (sale: Sale, triggerSync = true) => {
+    const settings = StorageService.getSettings();
+    let resolvedCustomerId = sale.customerId;
+    if (!resolvedCustomerId && sale.customerPhone) {
+      const matchedCust = StorageService.getCustomers().find(c => c.phone === sale.customerPhone);
+      if (matchedCust) resolvedCustomerId = matchedCust.id;
+    }
+    const normalizedSale: Sale = {
+      ...sale,
+      subtotal: Math.round(Number(sale.subtotal) || 0),
+      discountTotal: Math.round(Number(sale.discountTotal) || 0),
+      taxTotal: Math.round(Number(sale.taxTotal) || 0),
+      grandTotal: Math.round(Number(sale.grandTotal) || 0),
+      amountPaid: Math.round(Number(sale.amountPaid) || 0),
+      balanceDue: Math.round(Number(sale.balanceDue) || 0),
+      ...(resolvedCustomerId ? { customerId: resolvedCustomerId } : {}),
+      ...(settings.currentStaffId && !sale.soldById ? { soldById: settings.currentStaffId } : {}),
+    };
+    Object.assign(sale, normalizedSale);
     const sales = StorageService.getSales();
     sales.unshift(sale);
     StorageService.saveSales(sales, false);
 
-    // If cash paid, auto-record in cash drawer
-    if (sale.paymentMethod === 'cash' || sale.paymentDetails?.cashAmount) {
-      const cashAmt = sale.paymentDetails?.cashAmount || sale.amountPaid;
-      StorageService.recordCashTransaction('sale_cash', cashAmt, `POS Invoice #${sale.invoiceNumber} (${sale.customerName})`);
+    // If cash paid (including credit down payments in cash, protected by idempotency key tx-sale-{sale.id}), auto-record in cash drawer
+    let cashAmt = 0;
+    if (sale.paymentMethod === 'cash') {
+      cashAmt = sale.amountPaid || sale.grandTotal || 0;
+    } else if (sale.paymentMethod === 'credit' && sale.paymentDetails?.downPaymentMethod === 'cash' && sale.paymentDetails?.downPayment) {
+      cashAmt = sale.paymentDetails.downPayment;
+    } else if (sale.paymentMethod !== 'credit' && sale.paymentDetails?.cashAmount) {
+      cashAmt = sale.paymentDetails.cashAmount;
+    }
+
+    if (cashAmt > 0) {
+      StorageService.recordCashTransaction(
+        'sale_cash',
+        cashAmt,
+        `POS Invoice #${sale.invoiceNumber} (${sale.customerName})`,
+        triggerSync,
+        `tx-sale-${sale.id}`
+      );
     }
 
     if (triggerSync && activeStorageSyncHandler?.onSaleUpsert) {
@@ -1575,6 +1697,9 @@ export const StorageService = {
 
     const refundItemsList: RefundItem[] = [];
 
+    const targetLocId = sale.locationId || StorageService.getActiveLocationId();
+    let computedRefundTotal = 0;
+
     params.itemsToRefund.forEach(refundReq => {
       if (refundReq.quantity <= 0) return;
 
@@ -1585,65 +1710,81 @@ export const StorageService = {
       ) || sale.items.find(i => i.productId === refundReq.productId);
 
       if (targetSaleItem) {
-        targetSaleItem.refundedQuantity = (targetSaleItem.refundedQuantity || 0) + refundReq.quantity;
+        const remainingQty = (targetSaleItem.quantity || 1) - (targetSaleItem.refundedQuantity || 0);
+        if (remainingQty <= 0) return;
+        const actualRefundQty = Math.min(refundReq.quantity, remainingQty);
+
+        targetSaleItem.refundedQuantity = (targetSaleItem.refundedQuantity || 0) + actualRefundQty;
         if (refundReq.imei) {
           targetSaleItem.refundedImeis = targetSaleItem.refundedImeis || [];
           if (!targetSaleItem.refundedImeis.includes(refundReq.imei)) {
             targetSaleItem.refundedImeis.push(refundReq.imei);
           }
         }
-      }
 
-      refundItemsList.push({
-        productId: refundReq.productId,
-        name: refundReq.name,
-        quantity: refundReq.quantity,
-        unitPrice: refundReq.unitPrice,
-        finalPrice: refundReq.finalPrice,
-        refundAmount: refundReq.refundAmount,
-        imei: refundReq.imei,
-        imei2: refundReq.imei2,
-        restocked: params.restockItems,
-      });
+        const lineRefundAmount = refundReq.refundAmount > 0 
+          ? refundReq.refundAmount 
+          : Math.round(((targetSaleItem.finalPrice || (targetSaleItem.unitPrice * targetSaleItem.quantity)) / targetSaleItem.quantity) * actualRefundQty);
+        computedRefundTotal += lineRefundAmount;
 
-      // If restock items is enabled, return goods to inventory
-      if (params.restockItems) {
-        const prod = products.find(p => p.id === refundReq.productId);
-        if (prod) {
-          prod.stock += refundReq.quantity;
-          
-          // Re-insert IMEI to available pool
-          if (refundReq.imei) {
-            prod.imeiList = prod.imeiList || [];
-            if (!prod.imeiList.includes(refundReq.imei)) {
-              prod.imeiList.push(refundReq.imei);
-            }
+        refundItemsList.push({
+          productId: refundReq.productId,
+          name: refundReq.name,
+          quantity: actualRefundQty,
+          unitPrice: refundReq.unitPrice,
+          finalPrice: refundReq.finalPrice,
+          refundAmount: lineRefundAmount,
+          imei: refundReq.imei,
+          imei2: refundReq.imei2,
+          restocked: params.restockItems,
+        });
 
-            // Update serialized item status if exists
-            if (prod.serializedItems) {
-              const serialItem = prod.serializedItems.find(si => si.imei === refundReq.imei);
-              if (serialItem) {
-                serialItem.status = 'In Stock';
-                serialItem.soldInvoiceNumber = undefined;
-                serialItem.soldDate = undefined;
-                serialItem.history.push({
-                  id: `hist-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                  timestamp: new Date().toISOString(),
-                  action: 'refunded',
-                  details: `Returned from invoice #${sale.invoiceNumber} (${params.reason}). Restocked.`,
-                  performedBy: params.staffName,
-                  referenceDoc: sale.invoiceNumber,
-                });
+        // If restock items is enabled, return goods to both catalog and branch inventory
+        if (params.restockItems) {
+          const prod = products.find(p => p.id === refundReq.productId);
+          if (prod) {
+            prod.stock += actualRefundQty;
+            
+            // Re-insert IMEI to available pool
+            if (refundReq.imei) {
+              prod.imeiList = prod.imeiList || [];
+              if (!prod.imeiList.includes(refundReq.imei)) {
+                prod.imeiList.push(refundReq.imei);
+              }
+
+              // Update serialized item status if exists
+              if (prod.serializedItems) {
+                const serialItem = prod.serializedItems.find(si => si.imei === refundReq.imei);
+                if (serialItem) {
+                  serialItem.status = 'In Stock';
+                  serialItem.soldInvoiceNumber = undefined;
+                  serialItem.soldDate = undefined;
+                  serialItem.history.push({
+                    id: `hist-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                    timestamp: new Date().toISOString(),
+                    action: 'refunded',
+                    details: `Returned from invoice #${sale.invoiceNumber} (${params.reason}). Restocked.`,
+                    performedBy: params.staffName,
+                    referenceDoc: sale.invoiceNumber,
+                  });
+                }
+              }
+
+              // Update imeiPairs if exists
+              if (prod.imeiPairs) {
+                const pair = prod.imeiPairs.find(p => p.imei1 === refundReq.imei);
+                if (pair) {
+                  pair.status = 'In Stock';
+                }
               }
             }
+          }
 
-            // Update imeiPairs if exists
-            if (prod.imeiPairs) {
-              const pair = prod.imeiPairs.find(p => p.imei1 === refundReq.imei);
-              if (pair) {
-                pair.status = 'In Stock';
-              }
-            }
+          // Also increment branch inventory ledger
+          try {
+            StorageService.updateBranchStock(refundReq.productId, targetLocId, actualRefundQty, 0, true);
+          } catch (branchRestockErr) {
+            console.warn('Failed to restock branch inventory on refund:', branchRestockErr);
           }
         }
       }
@@ -1652,6 +1793,8 @@ export const StorageService = {
     if (params.restockItems) {
       StorageService.saveProducts(products);
     }
+
+    if (refundItemsList.length === 0) return;
 
     // Determine overall status
     const totalSoldQty = sale.items.reduce((sum, item) => sum + item.quantity, 0);
@@ -1662,7 +1805,16 @@ export const StorageService = {
     sale.refundReason = params.reason;
     sale.refundedAt = new Date().toISOString();
     sale.refundedBy = params.staffName;
-    sale.totalRefundedAmount = (sale.totalRefundedAmount || 0) + params.totalRefundAmount;
+
+    // Enforce capped refund amount against grandTotal
+    const currentRefundedSum = (sale.refundHistory || []).reduce((acc, r) => acc + (r.totalRefundAmount || 0), 0);
+    const maxRefundableAmount = Math.max(0, (sale.grandTotal || 0) - currentRefundedSum);
+    const effectiveRefundAmount = Math.min(
+      params.totalRefundAmount > 0 ? params.totalRefundAmount : computedRefundTotal,
+      maxRefundableAmount
+    );
+
+    sale.totalRefundedAmount = currentRefundedSum + effectiveRefundAmount;
 
     const fundingSource = params.refundFundingSource || 
       (params.refundMethod && params.refundMethod.toLowerCase().includes('cash') && !params.refundMethod.toLowerCase().includes('kpay') ? 'cash_drawer' : 'digital_cash_pool');
@@ -1679,13 +1831,23 @@ export const StorageService = {
       refundFundingSource: fundingSource,
       digitalChannel: params.digitalChannel || (fundingSource === 'digital_cash_pool' ? params.refundMethod : undefined),
       restockItems: params.restockItems,
-      totalRefundAmount: params.totalRefundAmount,
+      totalRefundAmount: effectiveRefundAmount,
       refundedBy: params.staffName,
       notes: params.notes,
     };
 
     sale.refundHistory = sale.refundHistory || [];
     sale.refundHistory.unshift(refundRecord);
+
+    // If credit sale, deduct customer outstanding credit balance
+    if (sale.paymentMethod === 'credit' && effectiveRefundAmount > 0) {
+      const customers = StorageService.getCustomers();
+      const cust = customers.find(c => c.id === sale.customerId || c.phone === sale.customerPhone);
+      if (cust && cust.outstandingCreditBalance) {
+        cust.outstandingCreditBalance = Math.max(0, cust.outstandingCreditBalance - effectiveRefundAmount);
+        StorageService.saveCustomer(cust);
+      }
+    }
 
     sales[saleIndex] = sale;
     StorageService.saveSales(sales, false);
@@ -1694,11 +1856,11 @@ export const StorageService = {
     }
 
     // If funding source is Cash Drawer, deduct from daily shift Cash Register Drawer
-    if (fundingSource === 'cash_drawer') {
+    if (fundingSource === 'cash_drawer' && effectiveRefundAmount > 0) {
       StorageService.recordCashTransaction(
         'out', 
-        params.totalRefundAmount, 
-        `Refund Invoice #${sale.invoiceNumber} (${params.reason}) - ${params.itemsToRefund.length} item(s) [Physical Cash Drawer]`
+        effectiveRefundAmount, 
+        `Refund Invoice #${sale.invoiceNumber} (${params.reason}) - ${refundItemsList.length} item(s) [Physical Cash Drawer]`
       );
     }
 
@@ -1791,6 +1953,9 @@ export const StorageService = {
 
   // Standalone FOC Gifts / Promotions Distribution
   getFocDistributions: (): FocDistributionRecord[] => getItem(STORAGE_KEYS.FOC_DISTRIBUTIONS, []),
+  saveFocDistributions: (records: FocDistributionRecord[], triggerSync = false) => {
+    setItem(STORAGE_KEYS.FOC_DISTRIBUTIONS, records, triggerSync);
+  },
   saveFocDistribution: (record: FocDistributionRecord, triggerSync = true) => {
     const list = StorageService.getFocDistributions();
     const existingIndex = list.findIndex(r => r.id === record.id);
@@ -1802,10 +1967,16 @@ export const StorageService = {
       updated = [record, ...list];
     }
     setItem(STORAGE_KEYS.FOC_DISTRIBUTIONS, updated, triggerSync);
+    if (triggerSync && activeStorageSyncHandler?.onFocDistributionUpsert) {
+      activeStorageSyncHandler.onFocDistributionUpsert(record);
+    }
   },
   deleteFocDistribution: (id: string, triggerSync = true) => {
     const list = StorageService.getFocDistributions().filter(r => r.id !== id);
     setItem(STORAGE_KEYS.FOC_DISTRIBUTIONS, list, triggerSync);
+    if (triggerSync && activeStorageSyncHandler?.onFocDistributionDelete) {
+      activeStorageSyncHandler.onFocDistributionDelete(id);
+    }
   },
   generateNextGiftVoucherNumber: (prefix = 'GIFT'): string => {
     const records = StorageService.getFocDistributions();
@@ -1884,6 +2055,21 @@ export const StorageService = {
     }
   },
   savePurchase: (purchase: PurchaseRecord, triggerSync = true) => {
+    let resolvedSupplierId = purchase.supplierId;
+    if (!resolvedSupplierId && purchase.supplierName) {
+      const matchedSupplier = StorageService.getSuppliers().find(
+        s => s.name.trim().toLowerCase() === purchase.supplierName.trim().toLowerCase()
+      );
+      if (matchedSupplier) resolvedSupplierId = matchedSupplier.id;
+    }
+    purchase.supplierId = resolvedSupplierId || purchase.supplierId;
+    purchase.subtotal = Math.round(Number(purchase.subtotal) || 0);
+    purchase.grandTotal = Math.round(Number(purchase.grandTotal) || 0);
+    purchase.amountPaid = Math.round(Number(purchase.amountPaid) || 0);
+    purchase.balanceDue = Math.round(Number(purchase.balanceDue) || 0);
+    if (purchase.deliveryCharges !== undefined) purchase.deliveryCharges = Math.round(Number(purchase.deliveryCharges) || 0);
+    if (purchase.shippingFee !== undefined) purchase.shippingFee = Math.round(Number(purchase.shippingFee) || 0);
+
     const purchases = StorageService.getPurchases();
     const existingIndex = purchases.findIndex(p => p.id === purchase.id);
     
@@ -2136,9 +2322,15 @@ export const StorageService = {
       StorageService.savePurchases(purchases);
     }
 
-    // If paid with cash, record outflow
-    if (purchase.paymentMethod === 'cash' && purchase.amountPaid > 0 && purchase.status !== 'draft') {
-      StorageService.recordCashTransaction('out', purchase.amountPaid, `Purchase Order #${purchase.purchaseOrderNumber} to ${purchase.supplierName}`);
+    // If paid with cash, record outflow with deterministic idempotency key (only on new purchases to prevent re-booking on edits)
+    if (existingIndex === -1 && purchase.paymentMethod === 'cash' && purchase.amountPaid > 0 && purchase.status !== 'draft') {
+      StorageService.recordCashTransaction(
+        'out',
+        purchase.amountPaid,
+        `Purchase Order #${purchase.purchaseOrderNumber} to ${purchase.supplierName}`,
+        triggerSync,
+        `tx-po-${purchase.id}`
+      );
     }
 
     if (triggerSync && activeStorageSyncHandler?.onPurchaseUpsert) {
@@ -2194,7 +2386,13 @@ export const StorageService = {
     }
 
     if (data.paymentMethod === 'cash' && data.amountPaid > 0) {
-      StorageService.recordCashTransaction('out', data.amountPaid, `PO #${target.purchaseOrderNumber} Payment to ${target.supplierName}`);
+      StorageService.recordCashTransaction(
+        'out',
+        data.amountPaid,
+        `PO #${target.purchaseOrderNumber} Payment to ${target.supplierName}`,
+        true,
+        `tx-po-conf-${target.id}`
+      );
     }
 
     if (data.amountPaid > 0) {
@@ -2241,14 +2439,13 @@ export const StorageService = {
     target.receivedAt = data.receivedDate || new Date().toISOString();
     target.receivingNotes = data.receivingNotes;
 
-    // Recalculate balance if fully paid or recalculate with delivery charges
-    if (target.isFullyPaid) {
-      target.amountPaid = target.grandTotal;
-      target.balanceDue = 0;
-      target.paymentStatus = 'paid';
-    } else {
-      target.balanceDue = Math.max(0, target.grandTotal - target.amountPaid);
+    // Preserve actual supplier payment recorded at Stage 2 confirmation; delivery charges are booked separately via syncPurchaseDeliveryExpense
+    const supplierGoodsTotal = Math.round(target.subtotal + (target.otherCosts || 0));
+    if (target.isFullyPaid && (!target.amountPaid || target.amountPaid < supplierGoodsTotal)) {
+      target.amountPaid = supplierGoodsTotal;
     }
+    target.balanceDue = Math.max(0, supplierGoodsTotal - Math.round(target.amountPaid || 0));
+    target.paymentStatus = target.balanceDue <= 0 ? 'paid' : (target.amountPaid || 0) > 0 ? 'partial' : 'unpaid';
 
     StorageService.savePurchase(target);
   },
@@ -2358,8 +2555,32 @@ export const StorageService = {
       }
 
       if (targetProduct) {
+        // Guard against rolling back units or IMEIs that have already been sold
+        const requiredQty = Number(item.quantity) || 0;
+        if ((targetProduct.stock || 0) < requiredQty) {
+          throw new Error(
+            `Cannot rollback PO #${purchase.purchaseOrderNumber}: "${targetProduct.name}" only has ${targetProduct.stock || 0} unit(s) in stock, but PO added ${requiredQty}. Some units were already sold.`
+          );
+        }
+        const expectedImeis = [
+          ...(item.imeiList || []),
+          ...(item.imeiPairs || []).map(p => p.imei1).filter(Boolean),
+        ];
+        if (expectedImeis.length > 0) {
+          const currentImeis = new Set([
+            ...(targetProduct.imeiList || []),
+            ...(targetProduct.imeiPairs || []).map(p => p.imei1).filter(Boolean),
+          ]);
+          const missingSoldImei = expectedImeis.find(im => !currentImeis.has(im));
+          if (missingSoldImei) {
+            throw new Error(
+              `Cannot rollback PO #${purchase.purchaseOrderNumber}: IMEI "${missingSoldImei}" for "${targetProduct.name}" is no longer in stock (already sold or transferred).`
+            );
+          }
+        }
+
         // Decrease stock
-        targetProduct.stock = Math.max(0, targetProduct.stock - item.quantity);
+        targetProduct.stock = targetProduct.stock - requiredQty;
 
         // Remove item's IMEIs from product
         if (item.imeiPairs && item.imeiPairs.length > 0) {
@@ -2460,6 +2681,11 @@ export const StorageService = {
   },
   saveExpenses: (expenses: ExpenseRecord[], triggerSync = true) => setItem(STORAGE_KEYS.EXPENSES, expenses, triggerSync),
   saveExpense: (expense: ExpenseRecord, triggerSync = true) => {
+    const settings = StorageService.getSettings();
+    expense.amount = Math.round(Number(expense.amount) || 0);
+    if (!expense.recordedById && settings.currentStaffId) {
+      expense.recordedById = settings.currentStaffId;
+    }
     const expenses = StorageService.getExpenses();
     const index = expenses.findIndex(e => e.id === expense.id);
     if (index >= 0) {
@@ -2469,12 +2695,19 @@ export const StorageService = {
     }
     StorageService.saveExpenses(expenses);
 
-    // If funding source is Cash Drawer (or deductFromCashDrawer is explicitly true and not revenue_cash), log cash drawer outflow
+    // If funding source is Cash Drawer (or deductFromCashDrawer is explicitly true and not revenue_cash), log cash drawer outflow (only on initial creation)
+    const isNewExpense = index === -1;
     const isCashDrawerDeduction = expense.fundingSource === 'cash_drawer' || 
       (expense.fundingSource !== 'revenue_cash' && expense.deductFromCashDrawer);
 
-    if (isCashDrawerDeduction) {
-      StorageService.recordCashTransaction('out', expense.amount, `[Daily Sales Cash Deduction] Expense #${expense.voucherNumber}: ${expense.title}`);
+    if (isCashDrawerDeduction && isNewExpense) {
+      StorageService.recordCashTransaction(
+        'out',
+        expense.amount,
+        `[Daily Sales Cash Deduction] Expense #${expense.voucherNumber}: ${expense.title}`,
+        triggerSync,
+        `tx-exp-${expense.id}`
+      );
     }
 
     if (triggerSync && activeStorageSyncHandler?.onExpenseUpsert) {
@@ -2652,41 +2885,55 @@ export const StorageService = {
     return raw || initialCashDrawer;
   },
   saveCashDrawer: (drawer: CashDrawerRecord, triggerSync = true) => setItem(STORAGE_KEYS.CASH_DRAWER, drawer, triggerSync),
-  recordCashTransaction: (type: string, amount: number, description: string) => {
+  recordCashTransaction: (type: string, amount: number, description: string, triggerSync = true, customTxId?: string) => {
     const drawer = StorageService.getCashDrawer();
+    if (!drawer.transactions) drawer.transactions = [];
+    if (customTxId && drawer.transactions.some(t => t.id === customTxId)) {
+      return;
+    }
+    const roundedAmount = Math.round(Number(amount) || 0);
     const now = new Date().toISOString();
     const isIn = type === 'in' || type === 'sale_cash';
 
     if (isIn) {
-      if (type === 'sale_cash') drawer.cashSales = (drawer.cashSales || 0) + amount;
-      drawer.cashInManual.push({ reason: description, amount, time: now });
-      drawer.expectedInDrawer = Number(((drawer.expectedInDrawer || 0) + amount).toFixed(2));
-      drawer.totalCashIn = (drawer.totalCashIn || 0) + amount;
+      if (type === 'sale_cash') {
+        drawer.cashSales = Math.round((drawer.cashSales || 0) + roundedAmount);
+      } else {
+        drawer.cashInManual.push({ reason: description, amount: roundedAmount, time: now });
+      }
+      drawer.expectedInDrawer = Math.round((drawer.expectedInDrawer || 0) + roundedAmount);
+      drawer.totalCashIn = Math.round((drawer.totalCashIn || 0) + roundedAmount);
     } else {
-      drawer.cashOutManual.push({ reason: description, amount, time: now });
-      drawer.expectedInDrawer = Number(((drawer.expectedInDrawer || 0) - amount).toFixed(2));
-      drawer.totalCashOut = (drawer.totalCashOut || 0) + amount;
+      drawer.cashOutManual.push({ reason: description, amount: roundedAmount, time: now });
+      drawer.expectedInDrawer = Math.round((drawer.expectedInDrawer || 0) - roundedAmount);
+      drawer.totalCashOut = Math.round((drawer.totalCashOut || 0) + roundedAmount);
     }
 
-    if (!drawer.transactions) drawer.transactions = [];
     drawer.transactions.unshift({
-      id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      id: customTxId || `tx-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       timestamp: now,
       type: isIn ? 'in' : 'out',
       description,
-      amount,
+      amount: roundedAmount,
     });
 
-    StorageService.saveCashDrawer(drawer);
+    StorageService.saveCashDrawer(drawer, triggerSync);
   },
   closeCashDrawerShift: (actualCounted: number, notes: string) => {
     const drawer = StorageService.getCashDrawer();
+    const roundedCounted = Math.round(Number(actualCounted) || 0);
     drawer.status = 'closed';
     drawer.closedAt = new Date().toISOString();
-    drawer.actualCounted = actualCounted;
-    drawer.variance = Number((actualCounted - drawer.expectedInDrawer).toFixed(2));
+    drawer.actualCounted = roundedCounted;
+    drawer.variance = Math.round(roundedCounted - Math.round(drawer.expectedInDrawer || 0));
     drawer.closingNotes = notes;
     StorageService.saveCashDrawer(drawer);
+    if (activeStorageSyncHandler?.onCashDrawerShiftClosed) {
+      activeStorageSyncHandler.onCashDrawerShiftClosed({
+        ...drawer,
+        id: drawer.id || `shift-${drawer.date || new Date().toISOString().slice(0, 10)}-${Date.now()}`,
+      });
+    }
   },
 
   // Monthly Capital Snapshots
@@ -2698,18 +2945,29 @@ export const StorageService = {
     return snapshots[monthYM] || null;
   },
 
-  saveMonthlyCapitalSnapshot: (snapshot: MonthlyCapitalSnapshot) => {
+  saveMonthlyCapitalSnapshots: (snapshots: Record<string, MonthlyCapitalSnapshot>, triggerSync = false) => {
+    setItem(STORAGE_KEYS.MONTHLY_CAPITAL_SNAPSHOTS, snapshots, triggerSync);
+  },
+
+  saveMonthlyCapitalSnapshot: (snapshot: MonthlyCapitalSnapshot, triggerSync = true) => {
     const snapshots = StorageService.getMonthlyCapitalSnapshots();
     snapshots[snapshot.monthYM] = snapshot;
-    setItem(STORAGE_KEYS.MONTHLY_CAPITAL_SNAPSHOTS, snapshots);
+    setItem(STORAGE_KEYS.MONTHLY_CAPITAL_SNAPSHOTS, snapshots, triggerSync);
+    if (triggerSync && activeStorageSyncHandler?.onMonthlyCapitalSnapshotUpsert) {
+      activeStorageSyncHandler.onMonthlyCapitalSnapshotUpsert(snapshot);
+    }
   },
 
   // Capital Cash Transfers (Physical Drawer <-> Digital Cash Pool)
   getCashTransfers: (): CapitalCashTransfer[] => 
     getItem<CapitalCashTransfer[]>(STORAGE_KEYS.CASH_TRANSFERS, []),
 
-  saveCashTransfers: (transfers: CapitalCashTransfer[]) => 
-    setItem(STORAGE_KEYS.CASH_TRANSFERS, transfers),
+  saveCashTransfers: (transfers: CapitalCashTransfer[], triggerSync = true) => {
+    setItem(STORAGE_KEYS.CASH_TRANSFERS, transfers, triggerSync);
+    if (triggerSync && activeStorageSyncHandler?.onCashTransfersBatch) {
+      activeStorageSyncHandler.onCashTransfersBatch(transfers);
+    }
+  },
 
   getHideFinancialDigits: (): boolean => 
     getItem<boolean>(STORAGE_KEYS.HIDE_FINANCIAL_DIGITS, false),
@@ -2878,7 +3136,8 @@ export const StorageService = {
       fulfilledInvoiceNumber?: string; 
       fulfilledBy?: string;
       notes?: string;
-    }
+    },
+    triggerSync = true
   ) => {
     const orders = StorageService.getPreOrders();
     const index = orders.findIndex(o => o.id === id);
@@ -2894,7 +3153,7 @@ export const StorageService = {
         } : {}),
         ...(fulfillmentData?.notes ? { notes: fulfillmentData.notes } : {})
       };
-      StorageService.savePreOrders(orders);
+      StorageService.savePreOrders(orders, triggerSync);
     }
   },
   allocatePreOrderToInventoryItem: (
@@ -3133,7 +3392,7 @@ export const StorageService = {
   // ==========================================
   getCreditSales: (): CreditSaleRecord[] => getItem<CreditSaleRecord[]>(STORAGE_KEYS.CREDIT_SALES, initialCreditSales),
   saveCreditSales: (creditSales: CreditSaleRecord[], triggerSync = true) => setItem(STORAGE_KEYS.CREDIT_SALES, creditSales, triggerSync),
-  saveCreditSale: (creditSale: CreditSaleRecord) => {
+  saveCreditSale: (creditSale: CreditSaleRecord, triggerSync = true) => {
     const list = StorageService.getCreditSales();
     const index = list.findIndex(c => c.id === creditSale.id);
     if (index >= 0) {
@@ -3141,39 +3400,43 @@ export const StorageService = {
     } else {
       list.unshift(creditSale);
     }
-    StorageService.saveCreditSales(list);
+    StorageService.saveCreditSales(list, triggerSync);
 
     // If downpayment was paid in cash, record in cash drawer
     if (creditSale.downPayment && creditSale.downPayment > 0 && creditSale.downPaymentMethod === 'cash') {
       StorageService.recordCashTransaction(
         'sale_cash',
         creditSale.downPayment,
-        `Credit Down Payment #${creditSale.creditNumber} (${creditSale.customerName})`
+        `Credit Down Payment #${creditSale.creditNumber} (${creditSale.customerName})`,
+        triggerSync,
+        `tx-sale-${creditSale.saleId || creditSale.id}`
       );
     }
 
     // Auto-update customer outstanding balance & profile
     if (creditSale.customerId) {
-      StorageService.recalculateCustomerCreditBalance(creditSale.customerId);
+      StorageService.recalculateCustomerCreditBalance(creditSale.customerId, triggerSync);
     }
 
-    // Record audit log
-    StorageService.addAuditLog({
-      actionType: index >= 0 ? 'CREDIT_SALE_UPDATED' : 'CREDIT_SALE_CREATED',
-      category: 'sales',
-      severity: 'info',
-      summary: `${index >= 0 ? 'Updated' : 'Approved new'} credit installment plan #${creditSale.creditNumber} for ${creditSale.customerName} (${(creditSale.totalSaleAmount || creditSale.totalPayable || 0).toLocaleString()} Ks)`,
-      details: {
-        targetId: creditSale.id,
-        invoiceNumber: creditSale.invoiceNumber,
-        customerName: creditSale.customerName,
-        amount: creditSale.totalSaleAmount || creditSale.totalPayable,
-        notes: `Down payment: ${creditSale.downPayment || 0} Ks | Term: ${creditSale.installmentCount || 1} installments`
-      },
-      staffId: creditSale.createdById || 'staff-admin',
-      staffName: creditSale.approvedBy || creditSale.createdBy || 'Store Manager',
-      staffRole: 'Manager'
-    });
+    if (triggerSync) {
+      // Record audit log
+      StorageService.addAuditLog({
+        actionType: index >= 0 ? 'CREDIT_SALE_UPDATED' : 'CREDIT_SALE_CREATED',
+        category: 'sales',
+        severity: 'info',
+        summary: `${index >= 0 ? 'Updated' : 'Approved new'} credit installment plan #${creditSale.creditNumber} for ${creditSale.customerName} (${(creditSale.totalSaleAmount || creditSale.totalPayable || 0).toLocaleString()} Ks)`,
+        details: {
+          targetId: creditSale.id,
+          invoiceNumber: creditSale.invoiceNumber,
+          customerName: creditSale.customerName,
+          amount: creditSale.totalSaleAmount || creditSale.totalPayable,
+          notes: `Down payment: ${creditSale.downPayment || 0} Ks | Term: ${creditSale.installmentCount || 1} installments`
+        },
+        staffId: creditSale.createdById || 'staff-admin',
+        staffName: creditSale.approvedBy || creditSale.createdBy || 'Store Manager',
+        staffRole: 'Manager'
+      });
+    }
   },
   recordCreditRepayment: (repayment: CreditRepaymentRecord) => {
     const list = StorageService.getCreditSales();
@@ -3181,9 +3444,17 @@ export const StorageService = {
     if (index === -1) return;
 
     const creditSale = { ...list[index] };
-    const prevBalance = creditSale.remainingBalance;
-    const newRemaining = Math.max(0, prevBalance - repayment.amount);
-    const newTotalPaid = (creditSale.totalPaid || 0) + repayment.amount;
+    const prevBalance = Math.round(Number(creditSale.remainingBalance) || 0);
+    const repayAmt = Math.round(Number(repayment.amount) || 0);
+    if (repayAmt <= 0) {
+      throw new Error('Repayment amount must be greater than 0 Ks.');
+    }
+    if (repayAmt > prevBalance) {
+      throw new Error(`Repayment amount (${repayAmt.toLocaleString()} Ks) exceeds remaining balance (${prevBalance.toLocaleString()} Ks).`);
+    }
+    repayment.amount = repayAmt;
+    const newRemaining = prevBalance - repayAmt;
+    const newTotalPaid = Math.round((creditSale.totalPaid || 0) + repayAmt);
 
     repayment.previousBalance = prevBalance;
     repayment.newBalance = newRemaining;
@@ -3295,7 +3566,7 @@ export const StorageService = {
       });
     }
   },
-  recalculateCustomerCreditBalance: (customerId: string) => {
+  recalculateCustomerCreditBalance: (customerId: string, triggerSync = true) => {
     const customers = StorageService.getCustomers();
     const custIdx = customers.findIndex(c => c.id === customerId);
     if (custIdx === -1) return;
@@ -3316,7 +3587,7 @@ export const StorageService = {
     }
 
     customers[custIdx] = customer;
-    StorageService.saveCustomers(customers);
+    StorageService.saveCustomers(customers, triggerSync);
   },
 
   // ==========================================
@@ -4221,8 +4492,11 @@ export const StorageService = {
   getSocialMarketingState: (): SocialMarketingState | null => {
     return getItem<SocialMarketingState | null>(STORAGE_KEYS.SOCIAL_MARKETING_STATE, null);
   },
-  saveSocialMarketingState: (state: SocialMarketingState) => {
-    setItem(STORAGE_KEYS.SOCIAL_MARKETING_STATE, state);
+  saveSocialMarketingState: (state: SocialMarketingState, triggerSync = true) => {
+    setItem(STORAGE_KEYS.SOCIAL_MARKETING_STATE, state, triggerSync);
+    if (triggerSync && activeStorageSyncHandler?.onSocialMarketingStateUpsert) {
+      activeStorageSyncHandler.onSocialMarketingStateUpsert(state);
+    }
   },
   clearSocialMarketingState: () => {
     removeItem(STORAGE_KEYS.SOCIAL_MARKETING_STATE);
@@ -4623,6 +4897,7 @@ export const StorageService = {
 
     // Atomic rule on Dispatch:
     // Deduct onHandStock and release reservedStock from origin branch
+    const allDispatchedImeis: string[] = [];
     for (const item of updatedItems) {
       StorageService.updateBranchStock(
         item.productId,
@@ -4630,6 +4905,9 @@ export const StorageService = {
         -item.dispatchedQty,
         -item.requestedQty
       );
+      if (item.imeiList && item.imeiList.length > 0) {
+        allDispatchedImeis.push(...item.imeiList);
+      }
     }
 
     const dateStr = new Date().toISOString();
@@ -4645,6 +4923,18 @@ export const StorageService = {
 
     transfers[idx] = updated;
     StorageService.saveStockTransfers(transfers);
+
+    if (allDispatchedImeis.length > 0 && activeStorageSyncHandler?.onStockTransferDeviceSync) {
+      activeStorageSyncHandler.onStockTransferDeviceSync({
+        transferId: updated.id,
+        transferNumber: updated.transferNumber,
+        action: 'dispatch',
+        locationId: updated.fromLocationId,
+        locationName: updated.fromLocationName,
+        imeiList: allDispatchedImeis,
+      });
+    }
+
     return updated;
   },
 
@@ -4663,21 +4953,11 @@ export const StorageService = {
       throw new Error(`Cannot receive transfer in status: ${transfer.status}`);
     }
 
-    let hasAnyDiscrepancy = false;
-    let totalDiscrepancyUnits = 0;
-    let firstDiscrepantProdId = '';
-
     const updatedItems = transfer.items.map(item => {
       const match = receivedDetails.find(r => r.productId === item.productId);
-      const receivedQty = match !== undefined ? match.receivedQty : item.dispatchedQty;
+      const receivedQty = match !== undefined ? Math.max(0, Math.min(item.dispatchedQty, match.receivedQty)) : item.dispatchedQty;
       const receivedImeis = match?.verifiedImeis || item.imeiList || [];
       const discrepancyQty = Math.max(0, item.dispatchedQty - receivedQty);
-
-      if (discrepancyQty > 0) {
-        hasAnyDiscrepancy = true;
-        totalDiscrepancyUnits += discrepancyQty;
-        if (!firstDiscrepantProdId) firstDiscrepantProdId = item.productId;
-      }
 
       return {
         ...item,
@@ -4690,43 +4970,89 @@ export const StorageService = {
     const totalReceivedQty = updatedItems.reduce((sum, i) => sum + i.receivedQty, 0);
 
     // Atomic rule on Receive: Increment onHandStock at destination branch
+    const allReceivedImeis: string[] = [];
+    const allMissingImeis: string[] = [];
     for (const item of updatedItems) {
       StorageService.updateBranchStock(item.productId, transfer.toLocationId, item.receivedQty);
+      if (item.receivedImeiList && item.receivedImeiList.length > 0) {
+        allReceivedImeis.push(...item.receivedImeiList);
+      }
+      if (item.imeiList && item.imeiList.length > 0) {
+        const missing = item.imeiList.filter(im => !(item.receivedImeiList || []).includes(im));
+        allMissingImeis.push(...missing);
+      }
     }
 
     let damageLogCreated: DamageLog | undefined = undefined;
     const dateStr = new Date().toISOString();
 
-    // Discrepancy handling: Auto-create DamageLog/Shrinkage record
-    if (hasAnyDiscrepancy && firstDiscrepantProdId) {
-      const prod = StorageService.getProducts().find(p => p.id === firstDiscrepantProdId);
-      const damageId = `dmg_trf_${Date.now()}`;
-      damageLogCreated = {
-        id: damageId,
-        logNumber: `DMG-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-        productId: firstDiscrepantProdId,
-        productName: prod?.name || 'Device Transit Discrepancy',
-        brand: prod?.brand || 'Brand',
-        category: prod?.category || 'accessories_gadgets',
-        sku: prod?.sku || 'SKU',
-        barcode: prod?.barcode || 'BARCODE',
-        costImpact: (prod?.costPrice || 0) * totalDiscrepancyUnits,
-        originalSellingPrice: (prod?.sellingPrice || 0) * totalDiscrepancyUnits,
-        quarantinedQuantity: totalDiscrepancyUnits,
-        locationId: transfer.toLocationId,
-        locationName: transfer.toLocationName,
-        transferId: transfer.id,
-        status: 'Quarantined',
-        phase: 'assessment',
-        reportedAt: dateStr,
-        reportedBy: staff.name,
-        damageReason: 'Customer return',
-        quarantineNotes: `Transit shrinkage: ${totalDiscrepancyUnits} unit(s) missing on receipt for ${transfer.transferNumber}. Note: ${discrepancyReason || 'Discrepancy reported on delivery arrival'}`,
-      };
+    // Discrepancy handling: Deduct missing transit units from global sellable stock, isolate into quarantinedStock, and create DamageLog
+    const discrepantItems = updatedItems.filter(i => (i.discrepancyQty || 0) > 0);
+    if (discrepantItems.length > 0) {
+      const products = StorageService.getProducts();
+      const damageLogs = StorageService.getDamageLogs();
+
+      for (const discItem of discrepantItems) {
+        const discQty = discItem.discrepancyQty || 0;
+        if (discQty <= 0) continue;
+
+        const prodIdx = products.findIndex(p => p.id === discItem.productId);
+        const prod = prodIdx >= 0 ? { ...products[prodIdx] } : undefined;
+        const missingItemImeis = (discItem.imeiList || []).filter(
+          im => !(discItem.receivedImeiList || []).includes(im)
+        );
+
+        if (prod && prodIdx >= 0) {
+          prod.stock = Math.max(0, prod.stock - discQty);
+          prod.quarantinedStock = (prod.quarantinedStock || 0) + discQty;
+          if (missingItemImeis.length > 0) {
+            prod.imeiList = (prod.imeiList || []).filter(im => !missingItemImeis.includes(im));
+            const qSet = new Set(prod.quarantinedImeis || []);
+            missingItemImeis.forEach(im => qSet.add(im));
+            prod.quarantinedImeis = Array.from(qSet);
+            if (prod.imeiPairs) {
+              prod.imeiPairs = prod.imeiPairs.map(pair =>
+                missingItemImeis.includes(pair.imei1) || (pair.imei2 && missingItemImeis.includes(pair.imei2))
+                  ? { ...pair, status: 'Quarantined' }
+                  : pair
+              );
+            }
+          }
+          StorageService.saveProduct(prod, staff.name, true);
+        }
+
+        const damageId = `dmg_trf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const dmgLog: DamageLog = {
+          id: damageId,
+          logNumber: `DMG-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+          productId: discItem.productId,
+          productName: prod?.name || discItem.productName || 'Device Transit Discrepancy',
+          brand: prod?.brand || discItem.brand || 'Brand',
+          category: prod?.category || 'accessories_gadgets',
+          sku: prod?.sku || discItem.sku || 'SKU',
+          barcode: prod?.barcode || 'BARCODE',
+          serialOrImei: missingItemImeis[0],
+          costImpact: (prod?.costPrice || 0) * discQty,
+          originalSellingPrice: (prod?.sellingPrice || 0) * discQty,
+          quarantinedQuantity: discQty,
+          locationId: transfer.toLocationId,
+          locationName: transfer.toLocationName,
+          transferId: transfer.id,
+          status: 'Quarantined',
+          phase: 'assessment',
+          reportedAt: dateStr,
+          reportedBy: staff.name,
+          damageReason: 'Customer return',
+          quarantineNotes: `Transit shrinkage: ${discQty} unit(s) missing on receipt for ${transfer.transferNumber}. Note: ${discrepancyReason || 'Discrepancy reported on delivery arrival'}`,
+        };
+
+        damageLogs.unshift(dmgLog);
+        if (!damageLogCreated) {
+          damageLogCreated = dmgLog;
+        }
+      }
 
       try {
-        const damageLogs = StorageService.getDamageLogs();
-        damageLogs.unshift(damageLogCreated);
         StorageService.saveDamageLogs(damageLogs);
       } catch (err) {
         console.warn('Failed to auto-log transit damage:', err);
@@ -4747,6 +5073,19 @@ export const StorageService = {
 
     transfers[idx] = updated;
     StorageService.saveStockTransfers(transfers);
+
+    if ((allReceivedImeis.length > 0 || allMissingImeis.length > 0) && activeStorageSyncHandler?.onStockTransferDeviceSync) {
+      activeStorageSyncHandler.onStockTransferDeviceSync({
+        transferId: updated.id,
+        transferNumber: updated.transferNumber,
+        action: 'receive',
+        locationId: updated.toLocationId,
+        locationName: updated.toLocationName,
+        imeiList: allReceivedImeis,
+        missingImeis: allMissingImeis,
+      });
+    }
+
     return { transfer: updated, damageLogCreated };
   },
 

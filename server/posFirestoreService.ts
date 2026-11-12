@@ -110,7 +110,10 @@ export async function fetchPosDataContext(): Promise<PosDataContext> {
   let sales: Sale[] = [];
   if (salesSnap.status === 'fulfilled') {
     salesSnap.value.forEach((d) => {
-      sales.push({ id: d.id, ...(d.data() as any) });
+      const data = d.data() as any;
+      if (data && !data.archived && data.status !== 'voided') {
+        sales.push({ id: d.id, ...data });
+      }
     });
   } else {
     console.error('[FirestoreService] Failed to load sales collection:', salesSnap.reason);
@@ -144,25 +147,25 @@ export async function fetchPosDataContext(): Promise<PosDataContext> {
     cashDrawer = cashDrawerSnap.value.data() as CashDrawerRecord;
   }
 
-  // 1. Merge with active in-memory server state snapshot (synced from client POS via /api/sync-state)
+  // Firestore is the authoritative source of truth; fall back to in-memory server state snapshot only if Firestore returned empty
   const serverState = getServerStateSnapshot();
   if (serverState) {
-    if (Array.isArray(serverState.sales) && serverState.sales.length > sales.length) {
+    if (sales.length === 0 && Array.isArray(serverState.sales) && serverState.sales.length > 0) {
       sales = serverState.sales;
     }
-    if (Array.isArray(serverState.products) && serverState.products.length > products.length) {
+    if (products.length === 0 && Array.isArray(serverState.products) && serverState.products.length > 0) {
       products = serverState.products;
     }
-    if (Array.isArray(serverState.expenses) && serverState.expenses.length > expenses.length) {
+    if (expenses.length === 0 && Array.isArray(serverState.expenses) && serverState.expenses.length > 0) {
       expenses = serverState.expenses;
     }
-    if (Array.isArray(serverState.purchases) && serverState.purchases.length > purchases.length) {
+    if (purchases.length === 0 && Array.isArray(serverState.purchases) && serverState.purchases.length > 0) {
       purchases = serverState.purchases;
     }
-    if (serverState.settings && (!settings || Object.keys(settings).length === 0)) {
+    if (!settings && serverState.settings) {
       settings = serverState.settings;
     }
-    if (serverState.cashDrawer && !cashDrawer) {
+    if (!cashDrawer && serverState.cashDrawer) {
       cashDrawer = serverState.cashDrawer;
     }
   }
@@ -190,6 +193,36 @@ export async function persistProductToFirestore(product: Product): Promise<boole
     return true;
   } catch (err: any) {
     console.error(`[FirestoreService] Failed to persist product to Firestore:`, err.message);
+    return false;
+  }
+}
+
+/**
+ * Updates only a product's pricing fields in Firestore so concurrent stock or IMEI mutations are never overwritten.
+ */
+export async function persistProductPriceUpdateToFirestore(
+  productId: string,
+  sellingPrice: number,
+  costPrice?: number
+): Promise<boolean> {
+  try {
+    await ensureAuth();
+    if (!productId) return false;
+    const nowIso = new Date().toISOString();
+    await setDoc(
+      doc(db, 'products', productId),
+      {
+        sellingPrice: Math.round(Number(sellingPrice) || 0),
+        ...(costPrice !== undefined ? { costPrice: Math.round(Number(costPrice) || 0) } : {}),
+        updatedAt: nowIso,
+        syncedAt: nowIso,
+      },
+      { merge: true }
+    );
+    console.log(`[FirestoreService] Successfully updated price for product (${productId}) in Firestore.`);
+    return true;
+  } catch (err: any) {
+    console.error(`[FirestoreService] Failed to update product price in Firestore:`, err.message);
     return false;
   }
 }
@@ -316,8 +349,8 @@ export async function acquireTelegramPollingLease(
       return { isLeader: true, leaderId: instanceId };
     });
   } catch (err: any) {
-    // On unexpected error, default to leader so bot doesn't freeze
-    return { isLeader: true, leaderId: instanceId };
+    console.warn('[TelegramBot] Failed to acquire polling lease from Firestore:', err?.message || err);
+    return { isLeader: false, leaderId: '' };
   }
 }
 

@@ -67,8 +67,8 @@ export class AuditLogger {
         expireAt: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString(), // 180-day TTL expiration
       };
 
-      // Save locally
-      StorageService.addAuditLog(entry);
+      // Save locally (AuditLogger handles cloud push directly below)
+      StorageService.addAuditLog(entry, false);
 
       // Trigger Cloud Sync or secure offline queueing
       try {
