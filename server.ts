@@ -119,22 +119,16 @@ async function startServer() {
 
       let resolvedRole = customRole;
       if (!resolvedRole) {
-        if (email === 'phonemyatpaing950@gmail.com' || email === 'owner@apexpos.internal') {
+        if (email === 'phonemyatpaing950@gmail.com' && userInfo.emailVerified === true) {
           resolvedRole = 'Owner';
         } else {
           try {
+            await ensureAuth();
             const { doc, getDoc } = await import('firebase/firestore');
             const { db } = await import('./src/lib/firebase');
             const accessSnap = await getDoc(doc(db, 'staffAccess', uid));
             if (accessSnap.exists() && accessSnap.data()?.role) {
               resolvedRole = String(accessSnap.data()?.role);
-            } else {
-              const staffPrefixMatch = email.match(/^staff_(.+)@apexpos\.internal$/i);
-              const staffIdCandidate = staffPrefixMatch ? staffPrefixMatch[1] : uid;
-              const staffSnap = await getDoc(doc(db, 'staffUsers', staffIdCandidate));
-              if (staffSnap.exists() && staffSnap.data()?.role) {
-                resolvedRole = String(staffSnap.data()?.role);
-              }
             }
           } catch {
             // Firestore lookup fallback
@@ -145,7 +139,7 @@ async function startServer() {
       const caller: VerifiedCaller = {
         uid,
         email,
-        role: resolvedRole || 'Cashier',
+        role: resolvedRole || 'none',
         expiresAt: Date.now() + 60_000,
       };
       verifiedTokenCache.set(token, caller);
@@ -153,6 +147,21 @@ async function startServer() {
     } catch {
       return null;
     }
+  }
+
+  const VALID_STAFF_ROLES = new Set(['Cashier', 'Inventory_Staff', 'Manager', 'Owner']);
+
+  function requireRole(...allowedRoles: string[]) {
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const callerRole = String((req as any).user?.role || 'none');
+      if (!allowedRoles.includes(callerRole)) {
+        return res.status(403).json({
+          success: false,
+          error: `Forbidden: Requires one of the following roles: ${allowedRoles.join(', ')}.`,
+        });
+      }
+      next();
+    };
   }
 
   app.use('/api', async (req, res, next) => {
@@ -175,6 +184,13 @@ async function startServer() {
       return res.status(401).json({
         success: false,
         error: 'Unauthorized: Valid Firebase authentication token required.',
+      });
+    }
+
+    if (!VALID_STAFF_ROLES.has(verifiedUser.role)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Account does not have an assigned staff role.',
       });
     }
 
@@ -237,6 +253,166 @@ async function startServer() {
       hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
       hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
     });
+  });
+
+  // Owner-only staff account creation & role provisioning endpoint (Critical #1, #2, #4)
+  app.post('/api/staff', requireRole('Owner'), async (req, res) => {
+    const { id, email, password, name, role, staffUser, firebaseUid } = req.body || {};
+
+    // Case A: Updating staffUsers / staffAccess documents directly when staffUser object is supplied
+    if (staffUser && staffUser.id && staffUser.role && !email && !password) {
+      try {
+        const cleanStaffRole = String(staffUser.role).trim();
+        if (!VALID_STAFF_ROLES.has(cleanStaffRole)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid staff role specified.',
+          });
+        }
+        await ensureAuth();
+        const { doc, setDoc, deleteField } = await import('firebase/firestore');
+        const { db } = await import('./src/lib/firebase');
+        const sanitizedStaff = { ...staffUser };
+        delete sanitizedStaff.pin;
+        delete sanitizedStaff.password;
+        await setDoc(
+          doc(db, 'staffUsers', String(staffUser.id)),
+          {
+            ...sanitizedStaff,
+            pin: deleteField(),
+            password: deleteField(),
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+        const targetUid = firebaseUid || staffUser.firebaseUid;
+        if (targetUid) {
+          await setDoc(
+            doc(db, 'staffAccess', String(targetUid)),
+            {
+              uid: String(targetUid),
+              staffId: String(staffUser.id),
+              role: cleanStaffRole,
+              name: String(staffUser.name || ''),
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        }
+        return res.json({ success: true, uid: targetUid ? String(targetUid) : undefined });
+      } catch (err: any) {
+        return res.status(500).json({
+          success: false,
+          error: err?.message || 'Failed to provision staff role.',
+        });
+      }
+    }
+
+    // Case B: Creating/provisioning Firebase Auth account + binding /staffAccess/{uid} on the server
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanPass = String(password || '').trim();
+    const cleanRole = String(role || 'Cashier').trim();
+
+    if (!cleanEmail || !cleanPass || cleanPass.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'Valid staff email and derived password are required.',
+      });
+    }
+
+    if (!VALID_STAFF_ROLES.has(cleanRole)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid staff role specified.',
+      });
+    }
+
+    if (!firebaseWebApiKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'Server Firebase configuration is missing apiKey.',
+      });
+    }
+
+    try {
+      let provisionedUid = '';
+
+      // 1. Create account via Identity Toolkit REST API on the server
+      const signUpRes = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(firebaseWebApiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: cleanEmail,
+            password: cleanPass,
+            displayName: String(name || id || cleanEmail),
+            returnSecureToken: true,
+          }),
+        }
+      );
+      const signUpData = (await signUpRes.json().catch(() => ({}))) as any;
+
+      if (signUpRes.ok && signUpData?.localId) {
+        provisionedUid = String(signUpData.localId);
+      } else {
+        // 2. If account already exists in Firebase Auth with this password, look up its UID
+        const signInRes = await fetch(
+          `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(firebaseWebApiKey)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: cleanEmail,
+              password: cleanPass,
+              returnSecureToken: true,
+            }),
+          }
+        );
+        const signInData = (await signInRes.json().catch(() => ({}))) as any;
+        if (signInRes.ok && signInData?.localId) {
+          provisionedUid = String(signInData.localId);
+        }
+      }
+
+      if (!provisionedUid) {
+        return res.status(400).json({
+          success: false,
+          error: signUpData?.error?.message || 'Could not provision staff account in Firebase Auth.',
+        });
+      }
+
+      // 3. Persist /staffAccess/{uid} on the server using the Owner service account
+      try {
+        await ensureAuth();
+        const { doc, setDoc } = await import('firebase/firestore');
+        const { db } = await import('./src/lib/firebase');
+        await setDoc(
+          doc(db, 'staffAccess', provisionedUid),
+          {
+            uid: provisionedUid,
+            staffId: String(id || provisionedUid),
+            role: cleanRole,
+            name: String(name || id || cleanEmail),
+            email: cleanEmail,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      } catch (accessErr) {
+        console.warn('[API /api/staff] Notice: staffAccess write deferred to client Owner session:', accessErr);
+      }
+
+      return res.json({
+        success: true,
+        uid: provisionedUid,
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Internal error provisioning staff account.',
+      });
+    }
   });
 
   // In-memory State Store for Periodic localStorage-to-Server and Multi-Tab Synchronization
@@ -707,17 +883,17 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
     });
   });
 
-  app.get('/api/setup-telegram-webhook', handleSetupTelegramWebhook);
-  app.post('/api/setup-telegram-webhook', handleSetupTelegramWebhook);
-  app.get('/api/telegram-webhook-info', handleTelegramWebhookInfo);
+  app.get('/api/setup-telegram-webhook', requireRole('Owner'), handleSetupTelegramWebhook);
+  app.post('/api/setup-telegram-webhook', requireRole('Owner'), handleSetupTelegramWebhook);
+  app.get('/api/telegram-webhook-info', requireRole('Owner'), handleTelegramWebhookInfo);
 
-  // Direct Telegram Bot Polling Control
-  app.post('/api/telegram-polling/start', (req, res) => {
+  // Direct Telegram Bot Polling Control (Owner only)
+  app.post('/api/telegram-polling/start', requireRole('Owner'), (req, res) => {
     startTelegramPolling(getOpenAI, getGenAI);
     res.json({ success: true, message: 'Telegram bot long-polling started.' });
   });
 
-  app.post('/api/telegram-polling/stop', (req, res) => {
+  app.post('/api/telegram-polling/stop', requireRole('Owner'), (req, res) => {
     stopTelegramPolling();
     res.json({ success: true, message: 'Telegram bot long-polling stopped.' });
   });
@@ -1120,8 +1296,8 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
     }
   });
 
-  // Dedicated endpoint: Post product advertisement to Facebook
-  app.post('/api/facebook/post-ad', async (req, res) => {
+  // Dedicated endpoint: Post product advertisement to Facebook (Owner/Manager only)
+  app.post('/api/facebook/post-ad', requireRole('Owner', 'Manager'), async (req, res) => {
     try {
       const { productId, productQuery, customAdGoal, tone, imageMode, context } = req.body;
       let openai: OpenAI | null = null;
@@ -1158,7 +1334,7 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
   // =========================================================================
 
   // Step 3: AI Copywriting with Few-Shot Competitor Training & Custom Prompts
-  app.post('/api/social-marketing/generate-copy', async (req, res) => {
+  app.post('/api/social-marketing/generate-copy', requireRole('Owner', 'Manager'), async (req, res) => {
     try {
       const { product, trainingText, promptInstruction, tone = 'exciting_retail', model, settings } = req.body;
 
@@ -1455,7 +1631,7 @@ Write directly in engaging bilingual (Burmese & English) or fluent English suite
   });
 
   // Step 2: Media Management - Analyze Reference Photo for AI Prompt Optimization
-  app.post('/api/social-marketing/analyze-reference-photo', async (req, res) => {
+  app.post('/api/social-marketing/analyze-reference-photo', requireRole('Owner', 'Manager'), async (req, res) => {
     try {
       const { image, product, settings } = req.body;
       if (!image) {
@@ -1534,7 +1710,7 @@ Output a JSON response with:
   });
 
   // Step 2: Media Management - AI Image Generation (DALL-E / Studio Visual with Reference Support)
-  app.post('/api/social-marketing/generate-image', async (req, res) => {
+  app.post('/api/social-marketing/generate-image', requireRole('Owner', 'Manager'), async (req, res) => {
     try {
       const { product, prompt: customPrompt, settings, referenceImageUrl, model } = req.body;
 
@@ -1774,7 +1950,7 @@ Output a JSON response with:
   });
 
   // Step 2.5: Media Management - AI Image Editing with Text Prompts (gemini-3.1-flash-image-preview)
-  app.post('/api/social-marketing/edit-image', async (req, res) => {
+  app.post('/api/social-marketing/edit-image', requireRole('Owner', 'Manager'), async (req, res) => {
     try {
       const { image, prompt, model, product } = req.body;
       if (!image) {
@@ -2309,7 +2485,7 @@ Ensure all numbers are integers without commas.`;
   });
 
   // Step 5: Publishing to Facebook Graph API
-  app.post('/api/social-marketing/publish', async (req, res) => {
+  app.post('/api/social-marketing/publish', requireRole('Owner', 'Manager'), async (req, res) => {
     try {
       const { product, caption, selectedImages = [], pageId: customPageId, pageAccessToken: customToken, settings } = req.body;
 
@@ -2428,8 +2604,8 @@ Ensure all numbers are integers without commas.`;
     }
   });
 
-  // Dedicated endpoint: Test Facebook Page credentials
-  app.post('/api/facebook/test-connection', async (req, res) => {
+  // Dedicated endpoint: Test Facebook Page credentials (Owner/Manager only)
+  app.post('/api/facebook/test-connection', requireRole('Owner', 'Manager'), async (req, res) => {
     try {
       const { pageId, pageAccessToken } = req.body;
       const targetPageId = pageId || process.env.FB_PAGE_ID;
@@ -2457,7 +2633,7 @@ Ensure all numbers are integers without commas.`;
   });
 
   // Status check for server-level Facebook environment credentials
-  app.get('/api/facebook/status', (req, res) => {
+  app.get('/api/facebook/status', requireRole('Owner', 'Manager'), (req, res) => {
     const hasEnvPageId = Boolean(process.env.FB_PAGE_ID);
     const hasEnvToken = Boolean(process.env.FB_PAGE_ACCESS_TOKEN);
     res.json({
@@ -2466,8 +2642,8 @@ Ensure all numbers are integers without commas.`;
     });
   });
 
-  // Status check for server-level environment secrets & masked previews
-  app.get('/api/secrets/status', (req, res) => {
+  // Status check for server-level environment secrets & masked previews (Owner only)
+  app.get('/api/secrets/status', requireRole('Owner'), (req, res) => {
     const mask = (val?: string) => {
       if (!val) return null;
       if (val.length <= 8) return '••••';
@@ -2492,8 +2668,8 @@ Ensure all numbers are integers without commas.`;
     });
   });
 
-  // Test OpenAI API Key endpoint (exclusively reads from server process.env)
-  app.post('/api/secrets/test-openai', async (req, res) => {
+  // Test OpenAI API Key endpoint (exclusively reads from server process.env - Owner only)
+  app.post('/api/secrets/test-openai', requireRole('Owner'), async (req, res) => {
     try {
       const { model } = req.body;
       const targetKey = process.env.OPENAI_API_KEY;
@@ -2523,8 +2699,8 @@ Ensure all numbers are integers without commas.`;
     }
   });
 
-  // Test Google Gemini API Key endpoint (exclusively reads from server process.env)
-  app.post('/api/secrets/test-gemini', async (req, res) => {
+  // Test Google Gemini API Key endpoint (exclusively reads from server process.env - Owner only)
+  app.post('/api/secrets/test-gemini', requireRole('Owner'), async (req, res) => {
     try {
       const targetKey = process.env.GEMINI_API_KEY;
       if (!targetKey) {
@@ -2558,8 +2734,8 @@ Ensure all numbers are integers without commas.`;
     }
   });
 
-  // Test Telegram Bot integration endpoint
-  app.post('/api/secrets/test-telegram', async (req, res) => {
+  // Test Telegram Bot integration endpoint (Owner only)
+  app.post('/api/secrets/test-telegram', requireRole('Owner'), async (req, res) => {
     try {
       const { botToken, chatId, model } = req.body;
       const targetToken = botToken || process.env.TELEGRAM_BOT_TOKEN;
@@ -2630,8 +2806,8 @@ Ensure all numbers are integers without commas.`;
     }
   });
 
-  // Test Webhook ping endpoint
-  app.post('/api/secrets/test-webhook', async (req, res) => {
+  // Test Webhook ping endpoint (Owner only)
+  app.post('/api/secrets/test-webhook', requireRole('Owner'), async (req, res) => {
     try {
       const { url, secret } = req.body;
       if (!url) {
@@ -2657,61 +2833,6 @@ Ensure all numbers are integers without commas.`;
       return res.json({ success: true, statusCode: response.status });
     } catch (err: any) {
       return res.status(400).json({ success: false, error: err?.message || 'Failed to ping webhook URL.' });
-    }
-  });
-
-  // Owner-only Staff Provisioning & Role Mapping API Endpoint (R1)
-  app.post('/api/staff', async (req, res) => {
-    try {
-      const callerRole = String((req as any).user?.role || '');
-      if (callerRole !== 'Owner') {
-        return res.status(403).json({
-          success: false,
-          error: 'Forbidden: Only Owner can create or modify staff accounts and roles.',
-        });
-      }
-      const { staffUser, firebaseUid } = req.body || {};
-      if (!staffUser || !staffUser.id || !staffUser.role) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid staffUser payload.',
-        });
-      }
-      const { doc, setDoc, deleteField } = await import('firebase/firestore');
-      const { db } = await import('./src/lib/firebase');
-      const sanitizedStaff = { ...staffUser };
-      delete sanitizedStaff.pin;
-      delete sanitizedStaff.password;
-      await setDoc(
-        doc(db, 'staffUsers', String(staffUser.id)),
-        {
-          ...sanitizedStaff,
-          pin: deleteField(),
-          password: deleteField(),
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
-      const targetUid = firebaseUid || staffUser.firebaseUid;
-      if (targetUid) {
-        await setDoc(
-          doc(db, 'staffAccess', String(targetUid)),
-          {
-            uid: String(targetUid),
-            staffId: String(staffUser.id),
-            role: String(staffUser.role),
-            name: String(staffUser.name || ''),
-            updatedAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
-      }
-      return res.json({ success: true });
-    } catch (err: any) {
-      return res.status(500).json({
-        success: false,
-        error: err?.message || 'Failed to provision staff role.',
-      });
     }
   });
 

@@ -10,14 +10,9 @@ service cloud.firestore {
     function isBootstrappedOwnerEmail() {
       return isSignedIn() &&
         'email' in request.auth.token &&
-        request.auth.token.email != null &&
-        request.auth.token.email in [
-          'phonemyatpaing950@gmail.com',
-          'owner@apexpos.internal',
-          'staff_owner@apexpos.internal',
-          'maychanmyaeaung@apexpos.internal',
-          'admin@apexpos.internal'
-        ];
+        request.auth.token.email == 'phonemyatpaing950@gmail.com' &&
+        'email_verified' in request.auth.token &&
+        request.auth.token.email_verified == true;
     }
 
     function role() {
@@ -29,7 +24,7 @@ service cloud.firestore {
                 ? get(/databases/$(database)/documents/staffAccess/$(request.auth.uid)).data.role
                 : (exists(/databases/$(database)/documents/staffUsers/$(request.auth.uid))
                     ? get(/databases/$(database)/documents/staffUsers/$(request.auth.uid)).data.role
-                    : 'Cashier')));
+                    : 'none')));
     }
 
     function isStaff() {
@@ -65,51 +60,25 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // 2. POS Terminal Identity, Staff Credentials, & Store Configurations (R1 & R3)
+    // 2. POS Terminal Identity, Staff Credentials, & Store Configurations (R1, R3, & Critical #2)
     match /staffAccess/{uid} {
-      allow read: if isStaff();
-      allow create: if isOwner() || (
-        isSignedIn() &&
-        request.auth.uid == uid &&
-        !exists(/databases/$(database)/documents/staffAccess/$(uid)) &&
-        (
-          request.resource.data.role in ['Cashier', 'Inventory_Staff', 'Manager'] ||
-          isBootstrappedOwnerEmail() ||
-          ('staffId' in request.resource.data &&
-           exists(/databases/$(database)/documents/staffUsers/$(request.resource.data.staffId)) &&
-           get(/databases/$(database)/documents/staffUsers/$(request.resource.data.staffId)).data.role == request.resource.data.role)
-        )
-      );
-      allow update: if isOwner() || (
-        isSignedIn() &&
-        request.auth.uid == uid &&
-        (
-          request.resource.data.role == resource.data.role ||
-          isBootstrappedOwnerEmail() ||
-          ('staffId' in request.resource.data &&
-           exists(/databases/$(database)/documents/staffUsers/$(request.resource.data.staffId)) &&
-           get(/databases/$(database)/documents/staffUsers/$(request.resource.data.staffId)).data.role == request.resource.data.role)
-        )
-      );
-      allow delete: if isOwner();
+      allow read: if isSignedIn() && (request.auth.uid == uid || isStaff());
+      allow create, update, delete: if isOwner();
     }
 
     match /staffUsers/{staffId} {
       allow read: if isStaff();
-      // Only Owner can create new staff or change roles; staff can migrate PBKDF2 hashes so long as plaintext pin/password are excluded and role is unchanged
-      allow create: if isOwner() || (
-        isStaff() &&
-        !('pin' in request.resource.data) &&
-        !('password' in request.resource.data) &&
-        (request.resource.data.role != 'Owner' || isBootstrappedOwnerEmail())
-      );
+      // Only Owner can create or delete staff documents or modify roles; non-Owner staff can only update their own bound record without changing role or firebaseUid
+      allow create, delete: if isOwner();
       allow update: if isOwner() || (
         isStaff() &&
+        'firebaseUid' in resource.data &&
+        resource.data.firebaseUid == request.auth.uid &&
         !('pin' in request.resource.data) &&
         !('password' in request.resource.data) &&
-        request.resource.data.role == resource.data.role
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.firebaseUid == resource.data.firebaseUid
       );
-      allow delete: if isOwner();
     }
 
     match /settings/{docId} {

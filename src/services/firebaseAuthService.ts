@@ -1,6 +1,5 @@
 import { 
   signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
   signOut as firebaseSignOut, 
   onAuthStateChanged, 
   updatePassword,
@@ -47,9 +46,6 @@ export class FirebaseAuthService {
 
     onAuthStateChanged(auth, async (user) => {
       this.currentUser = user;
-      if (user) {
-        await this.ensureActiveStaffAccessBound(user);
-      }
       this.authReady = true;
       this.listeners.forEach((callback) => {
         try {
@@ -59,45 +55,6 @@ export class FirebaseAuthService {
         }
       });
     });
-  }
-
-  /**
-   * Ensures /staffAccess/{uid} exists in Firestore when a browser session restores an existing Firebase Auth user
-   * so RBAC rules immediately recognize the user's role before realtime listeners attach.
-   */
-  private static async ensureActiveStaffAccessBound(user: FirebaseUser): Promise<void> {
-    if (typeof localStorage === 'undefined') return;
-    try {
-      const settingsRaw = localStorage.getItem('mobileshop_settings');
-      const staffRaw = localStorage.getItem('mobileshop_staff_users');
-      const settings = settingsRaw ? JSON.parse(settingsRaw) : null;
-      const staffList: StaffUser[] = staffRaw ? JSON.parse(staffRaw) : [];
-      const userEmail = (user.email || '').toLowerCase();
-
-      const matched =
-        staffList.find(s => s && s.firebaseUid === user.uid) ||
-        staffList.find(s => s && settings?.currentStaffId && s.id === settings.currentStaffId) ||
-        staffList.find(s => s && this.getAuthEmail(s) === userEmail) ||
-        staffList.find(s => s && this.getInternalAuthEmail(s) === userEmail);
-
-      const staffId = matched?.id || settings?.currentStaffId || 'staff-owner';
-      const staffRole = matched?.role || settings?.currentStaffRole || 'Cashier';
-      const staffName = matched?.name || settings?.currentStaffName || 'Staff';
-      const staffUsername = matched?.username || userEmail.split('@')[0] || 'staff';
-
-      await setDoc(doc(db, 'staffAccess', user.uid), {
-        uid: user.uid,
-        staffId,
-        username: staffUsername,
-        name: staffName,
-        role: staffRole,
-        email: user.email || `${staffUsername}@apexpos.internal`,
-        active: true,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true }).catch(() => {});
-    } catch {
-      // Ignore pre-binding error
-    }
   }
 
   public static onAuthChanged(callback: (user: FirebaseUser | null) => void): () => void {
@@ -365,24 +322,6 @@ export class FirebaseAuthService {
         }
       }
 
-      // Only provision Firebase Auth session when the staff user's PBKDF2 credential was verified
-      if (
-        isLocalCredentialValid &&
-        lastSignInErr &&
-        (lastSignInErr.code === 'auth/user-not-found' ||
-         lastSignInErr.code === 'auth/invalid-email' ||
-         lastSignInErr.code === 'auth/invalid-credential')
-      ) {
-        try {
-          const newCred = await createUserWithEmailAndPassword(auth, internalEmail, strongPassword);
-          this.currentUser = newCred.user;
-          await this.syncStaffProfileToFirestore(staff, newCred.user.uid);
-          return { success: true, user: newCred.user };
-        } catch (createErr: any) {
-          console.warn('[FirebaseAuthService] Staff Firebase Auth creation notice:', createErr.message);
-        }
-      }
-
       // If error is strictly network-related while navigator.onLine was still true, allow verified PBKDF2 fallback
       if (
         isLocalCredentialValid &&
@@ -457,21 +396,25 @@ export class FirebaseAuthService {
    * Synchronize active staff user record into Firestore /staffUsers/{id} and /staffAccess/{firebaseUid}
    * Explicitly deletes any leftover plaintext pin/password fields in Firestore using deleteField() (R1 & R3).
    */
-  public static async syncStaffProfileToFirestore(staff: StaffUser, firebaseUid: string): Promise<void> {
+  public static async syncStaffProfileToFirestore(staff: StaffUser, firebaseUid: string, isOwnerAction: boolean = false): Promise<void> {
     try {
       const nowIso = new Date().toISOString();
-      // 1. Bind UID -> Role in /staffAccess/{firebaseUid} FIRST so Firestore Security Rules immediately recognize the user's role (R1)
-      const accessRef = doc(db, 'staffAccess', firebaseUid);
-      await setDoc(accessRef, {
-        uid: firebaseUid,
-        staffId: staff.id,
-        username: staff.username,
-        name: staff.name,
-        role: staff.role,
-        email: staff.email || this.getAuthEmail(staff),
-        active: staff.active !== false,
-        updatedAt: nowIso,
-      }, { merge: true }).catch(() => {});
+      const canWriteStaffAccess = isOwnerAction || staff.role === 'Owner';
+
+      // 1. Only Owner sessions write /staffAccess/{firebaseUid} (Critical #2: non-Owner clients never write staffAccess)
+      if (canWriteStaffAccess) {
+        const accessRef = doc(db, 'staffAccess', firebaseUid);
+        await setDoc(accessRef, {
+          uid: firebaseUid,
+          staffId: staff.id,
+          username: staff.username,
+          name: staff.name,
+          role: staff.role,
+          email: staff.email || this.getAuthEmail(staff),
+          active: staff.active !== false,
+          updatedAt: nowIso,
+        }, { merge: true }).catch(() => {});
+      }
 
       // 2. Sync staff profile in /staffUsers/{id}
       const userRef = doc(db, 'staffUsers', staff.id);
@@ -502,6 +445,49 @@ export class FirebaseAuthService {
       }
     } catch (err) {
       console.warn('[FirebaseAuthService] Could not save staff profile to Firestore:', err);
+    }
+  }
+
+  /**
+   * Provisions a new or updated staff member's Firebase Authentication account via the Owner-only server endpoint (/api/staff)
+   * without calling createUserWithEmailAndPassword from the browser (Critical #1).
+   */
+  public static async provisionStaffAccountOnServer(
+    staff: StaffUser,
+    rawPinOrPassword: string
+  ): Promise<{ success: boolean; uid?: string; error?: string }> {
+    try {
+      const currentOwner = this.getFirebaseUser();
+      if (!currentOwner) {
+        return { success: false, error: 'Owner Firebase Auth session is required to provision staff.' };
+      }
+      const idToken = await currentOwner.getIdToken();
+      const internalEmail = this.getInternalAuthEmail(staff);
+      const strongPassword = await this.deriveStrongFirebasePassword(staff, rawPinOrPassword);
+
+      const res = await fetch('/api/staff', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          id: staff.id,
+          username: staff.username,
+          name: staff.name,
+          role: staff.role,
+          email: internalEmail,
+          password: strongPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.uid) {
+        return { success: false, error: data?.error || `Server returned HTTP ${res.status}` };
+      }
+      await this.syncStaffProfileToFirestore({ ...staff, firebaseUid: data.uid }, data.uid, true);
+      return { success: true, uid: data.uid };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Staff provisioning request failed' };
     }
   }
 

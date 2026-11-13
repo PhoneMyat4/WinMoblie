@@ -1799,7 +1799,7 @@ export class FirestoreSyncService {
 
           // --- VALIDATIONS: Recompute Line-Item Math, Price Override & Below-Cost Guard (Item 9 & R6) ---
           const fbEmail = (currentFbUser?.email || '').toLowerCase();
-          const isBootstrapOwnerEmail = fbEmail === 'phonemyatpaing950@gmail.com' || fbEmail === 'owner@apexpos.internal';
+          const isBootstrapOwnerEmail = fbEmail === 'phonemyatpaing950@gmail.com' && currentFbUser?.emailVerified === true;
           const cloudRole = (
             isBootstrapOwnerEmail
               ? 'Owner'
@@ -3405,6 +3405,8 @@ export class FirestoreSyncService {
    */
   public async migrateStaffPlaintextCredentials(): Promise<void> {
     if (!FirebaseAuthService.isAuthenticated()) return;
+    const currentRole = StorageService.getSettings()?.currentStaffRole;
+    if (currentRole !== 'Owner') return;
     try {
       const snap = await getDocs(collection(db, 'staffUsers'));
       for (const d of snap.docs) {

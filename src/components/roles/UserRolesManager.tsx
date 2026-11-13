@@ -309,6 +309,13 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
       workEndTime: isOwner ? undefined : (restrictWorkingHours ? (workEndTime || '19:00') : undefined),
     };
 
+    if (pin && pin.trim()) {
+      const provRes = await FirebaseAuthService.provisionStaffAccountOnServer(newUser, pin.trim());
+      if (provRes.uid) {
+        newUser.firebaseUid = provRes.uid;
+      }
+    }
+
     onSaveStaffUser(newUser);
     setIsStaffModalOpen(false);
   };
