@@ -85,6 +85,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setIsSubmitting(true);
     setErrorMsg('');
 
+    // 0. Check 5-attempt / 5-minute temporary login lockout (R3)
+    const lockoutStatus = FirebaseAuthService.checkLoginLockout(cleanUsername);
+    if (lockoutStatus.locked) {
+      const mins = Math.ceil(lockoutStatus.remainingSeconds / 60);
+      setErrorMsg(
+        `Account temporarily locked due to 5 failed attempts. Please wait ${mins} minute(s) (${lockoutStatus.remainingSeconds}s) before trying again.`
+      );
+      triggerShake();
+      setIsSubmitting(false);
+      return;
+    }
+
     // 1. Gather all local registered staff accounts (from props and StorageService cache)
     const localCachedStaff = StorageService.getStaffUsers();
     const combinedStaff = localCachedStaff.length > 0 ? localCachedStaff : staffUsers;
@@ -126,6 +138,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     if (!matchedUser && activeStaffPool.length === 0) {
       const isOwnerEmail = cleanUsername === 'phonemyatpaing950@gmail.com' || cleanUsername.includes('@');
       const ownerUsername = isOwnerEmail ? cleanUsername.split('@')[0] : (cleanUsername || 'owner');
+      const pbkdf2 = await FirebaseAuthService.derivePbkdf2Hash(cleanPassword);
       const ownerAccount: StaffUser = {
         id: `owner-${Date.now()}`,
         username: ownerUsername,
@@ -133,8 +146,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         role: 'Owner',
         email: isOwnerEmail ? cleanUsername : 'owner@apexpos.internal',
         phone: '09-123456789',
-        pin: cleanPassword.length <= 6 && /^\d+$/.test(cleanPassword) ? cleanPassword : '1234',
-        password: cleanPassword,
+        pin: '',
+        credentialHash: pbkdf2.credentialHash,
+        credentialSalt: pbkdf2.credentialSalt,
+        credentialIterations: pbkdf2.credentialIterations,
         active: true,
         avatarColor: 'bg-purple-600',
       };
@@ -143,7 +158,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     }
 
     if (!matchedUser) {
-      setErrorMsg('Invalid username or password. Please check your credentials.');
+      const lockAfterFail = FirebaseAuthService.recordFailedLoginAttempt(cleanUsername);
+      setErrorMsg(
+        lockAfterFail.locked
+          ? `Too many failed attempts (5/5). Terminal locked for 5 minutes.`
+          : 'Invalid username or password. Please check your credentials.'
+      );
       triggerShake();
       setIsSubmitting(false);
       return;
@@ -152,27 +172,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     // Track effective user object in case credentials update
     let effectiveUser = matchedUser;
 
-    // 4. Verify password:
-    // Check registered password or PIN strictly against the user's account (no hardcoded bypasses)
-    let isValidPassword = 
-      Boolean(cleanPassword) && (
-        (Boolean(matchedUser.password) && matchedUser.password?.trim() === cleanPassword) ||
-        (Boolean(matchedUser.pin) && matchedUser.pin?.trim() === cleanPassword)
-      );
+    // 4. Verify credential using salted PBKDF2-SHA256 (R3: no raw plaintext acceptance when hashed)
+    const localVerify = await FirebaseAuthService.verifyStaffCredential(matchedUser, cleanPassword);
+    let isValidPassword = localVerify.valid;
 
-    // 5. If local password check fails, fetch the latest document directly from Firestore
-    // (Handles when passwords or PINs are updated directly in the Firebase Console)
+    // 5. If local check fails, fetch the latest document directly from Firestore
     if (!isValidPassword && matchedUser.id) {
       try {
         const freshUser = await FirestoreSyncService.getInstance().getFreshStaffUser(matchedUser.id);
         if (freshUser) {
-          const freshMatches = 
-            (freshUser.password && freshUser.password.trim() === cleanPassword) ||
-            (freshUser.pin && freshUser.pin.trim() === cleanPassword);
-          if (freshMatches) {
+          const freshVerify = await FirebaseAuthService.verifyStaffCredential(freshUser, cleanPassword);
+          if (freshVerify.valid) {
             isValidPassword = true;
             effectiveUser = { ...matchedUser, ...freshUser };
-            StorageService.saveStaffUser(effectiveUser, false);
           }
         }
       } catch (freshErr) {
@@ -186,10 +198,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         const fbResult = await FirebaseAuthService.verifyFirebaseCredentials(matchedUser, cleanPassword);
         if (fbResult.verified) {
           isValidPassword = true;
+          const pbkdf2 = await FirebaseAuthService.derivePbkdf2Hash(cleanPassword);
           effectiveUser = {
             ...matchedUser,
-            password: cleanPassword,
-            pin: cleanPassword.length <= 6 ? cleanPassword : matchedUser.pin,
+            pin: '',
+            password: undefined,
+            credentialHash: pbkdf2.credentialHash,
+            credentialSalt: pbkdf2.credentialSalt,
+            credentialIterations: pbkdf2.credentialIterations,
           };
           StorageService.saveStaffUser(effectiveUser, true);
         }
@@ -199,11 +215,33 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     }
 
     if (!isValidPassword) {
-      setErrorMsg('Invalid username or password. Please check your credentials.');
+      const lockAfterFail = FirebaseAuthService.recordFailedLoginAttempt(cleanUsername);
+      setErrorMsg(
+        lockAfterFail.locked
+          ? `Too many failed attempts (5/5). Terminal locked for 5 minutes.`
+          : `Invalid username or password (${lockAfterFail.attempts}/5 attempts).`
+      );
       triggerShake();
       setPassword('');
       setIsSubmitting(false);
       return;
+    }
+
+    // Clear failed login attempts upon successful verification
+    FirebaseAuthService.clearLoginLockout(cleanUsername);
+
+    // Upgrade legacy credential to salted PBKDF2 and strip plaintext pin/password
+    if (!effectiveUser.credentialHash?.startsWith('pbkdf2_') || !effectiveUser.credentialSalt || effectiveUser.pin || effectiveUser.password) {
+      const pbkdf2 = await FirebaseAuthService.derivePbkdf2Hash(cleanPassword, effectiveUser.credentialSalt, effectiveUser.credentialIterations);
+      effectiveUser = {
+        ...effectiveUser,
+        pin: '',
+        password: undefined,
+        credentialHash: pbkdf2.credentialHash,
+        credentialSalt: pbkdf2.credentialSalt,
+        credentialIterations: pbkdf2.credentialIterations,
+      };
+      StorageService.saveStaffUser(effectiveUser, true);
     }
 
     // 7. Enforce time-based working hours restriction (Staff with role 'Owner' is always exempt)
@@ -218,7 +256,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
     // 8. Authenticate with Firebase Auth and sync user session to Firestore
     try {
-      await FirebaseAuthService.loginStaffWithFirebase(effectiveUser, cleanPassword);
+      const authRes = await FirebaseAuthService.loginStaffWithFirebase(effectiveUser, cleanPassword);
+      if (authRes.user?.uid) {
+        effectiveUser = { ...effectiveUser, firebaseUid: authRes.user.uid };
+        StorageService.saveStaffUser(effectiveUser, false);
+      }
     } catch (fbErr) {
       console.warn('Firebase auth connection notice:', fbErr);
     }

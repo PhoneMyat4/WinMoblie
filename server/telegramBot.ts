@@ -810,6 +810,17 @@ export async function processTelegramUpdate(
       return;
     }
 
+    // R12: Surface Firestore read failure immediately so Telegram never reports "0 sales" when database access is unavailable
+    if (context.dataUnavailable) {
+      await sendTelegramMessage(
+        botToken,
+        chatId,
+        `⚠️ *Data Unavailable*\n\n${context.dataUnavailableReason || 'The server cannot read Firestore because MCP_AUTH_EMAIL / MCP_AUTH_PASSWORD are not configured or access was denied.'}\n\n_Refusing to report sales or inventory figures so zero-value false answers are never returned._`,
+        messageId
+      );
+      return;
+    }
+
     const openai = getOpenAI();
 
     // 3. Extract text query from Callback Query, Text message, or Voice message

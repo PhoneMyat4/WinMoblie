@@ -479,9 +479,9 @@ export default function App() {
       syncState: cloudCommitted ? 'synced' : 'pending',
     };
     StorageService.saveSale(saleToSave, shouldSyncFallback);
-    StorageService.saveProducts(updatedProducts, shouldSyncFallback);
+    StorageService.saveProducts(updatedProducts, false);
     if (updatedCustomer) {
-      StorageService.saveCustomer(updatedCustomer, shouldSyncFallback);
+      StorageService.saveCustomer(updatedCustomer, false);
     }
     if (shouldSyncFallback) {
       AuditLogger.logSale(saleToSave, currentActiveUser, false);

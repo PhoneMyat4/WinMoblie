@@ -106,7 +106,10 @@ export interface StaffUser {
   email?: string;
   pin: string; // Security PIN for terminal switch
   password?: string; // Password for account authentication
-  credentialHash?: string; // Hashed credential fingerprint for cloud sync without storing plaintext
+  credentialHash?: string; // PBKDF2-SHA256 derived bits hex fingerprint
+  credentialSalt?: string; // 16-byte random salt (hex) per staff member
+  credentialIterations?: number; // PBKDF2 iteration count (310000)
+  firebaseUid?: string; // Linked Firebase Authentication UID
   active: boolean;
   avatarColor?: string;
   branchId?: string; // Assigned primary branch (e.g. 'loc_br_yangon_01')
@@ -526,6 +529,8 @@ export interface RefundRecord {
   digitalChannel?: string;
   restockItems: boolean;
   totalRefundAmount: number;
+  cashPayoutAmount?: number; // R7: Actual cash/digital payout (capped at customer totalPaid on credit sales)
+  debtCancelledAmount?: number; // R7: Unpaid credit balance cancelled by this refund
   refundedBy: string;
   notes?: string;
 }
@@ -590,7 +595,8 @@ export interface Sale {
   preOrderId?: string;
   preOrderNumber?: string;
   depositDeducted?: number;
-  syncState?: 'pending' | 'synced';
+  syncState?: 'pending' | 'synced' | 'conflict';
+  syncError?: string;
 }
 
 export type PreOrderStatus = 'Pending' | 'Stock Arrived' | 'Completed' | 'Cancelled';
@@ -876,12 +882,12 @@ export interface CashDrawerRecord {
   openingFloat: number;
   openingBalance?: number;
   cashSales: number;
-  cashInManual: { reason: string; amount: number; time: string; entryType?: 'manual' | 'sale' | 'expense' | 'refund' }[];
-  cashOutManual: { reason: string; amount: number; time: string; entryType?: 'manual' | 'sale' | 'expense' | 'refund' }[];
+  cashInManual: { reason: string; amount: number; time: string; entryType?: 'manual' | 'sale' | 'expense' | 'refund'; cashierId?: string; terminalId?: string }[];
+  cashOutManual: { reason: string; amount: number; time: string; entryType?: 'manual' | 'sale' | 'expense' | 'refund'; cashierId?: string; terminalId?: string }[];
   
   totalCashIn?: number;
   totalCashOut?: number;
-  transactions?: { id: string; timestamp: string; type: string; description: string; amount: number; entryType?: 'manual' | 'sale' | 'expense' | 'refund' }[];
+  transactions?: { id: string; timestamp: string; type: string; description: string; amount: number; entryType?: 'manual' | 'sale' | 'expense' | 'refund'; cashierId?: string; terminalId?: string }[];
 
   expectedInDrawer: number;
   actualCounted?: number;

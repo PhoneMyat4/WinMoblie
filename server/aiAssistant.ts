@@ -12,6 +12,8 @@ export interface PosDataContext {
   stockAdjustments?: StockAdjustment[];
   currencySymbol?: string;
   settings?: ShopSettings;
+  dataUnavailable?: boolean;
+  dataUnavailableReason?: string;
 }
 
 export interface ChatMessage {
@@ -594,6 +596,14 @@ export function filterByDateRange(sales: Sale[], dateRangePreset: string): Sale[
 
 // Execute query_pos_reports logic
 export function executeQueryPosReports(args: any, context: PosDataContext): any {
+  // R12: Never return "0 sales" when Firestore access is denied or service credentials are missing
+  if (context.dataUnavailable) {
+    return {
+      status: 'error',
+      error: 'DATA_UNAVAILABLE',
+      message: context.dataUnavailableReason || 'Data unavailable: POS database could not be read because server Firestore authentication is not configured or was denied.',
+    };
+  }
   const { report_type, date_range = 'last_30_days', imei, sku, category, brand, admin_secret_key } = args;
   const products = context.products || [];
   const sales = context.sales || [];
@@ -1254,6 +1264,14 @@ function isAccessoryItem(p: Product): boolean {
 
 // Tool Execution Handler 4: Query Inventory Products
 export function executeQueryInventoryProducts(args: any, context: PosDataContext) {
+  // R12: Never return "0 stock" when Firestore access is denied or service credentials are missing
+  if (context.dataUnavailable) {
+    return {
+      status: 'error',
+      error: 'DATA_UNAVAILABLE',
+      message: context.dataUnavailableReason || 'Data unavailable: Inventory database could not be read because server Firestore authentication is not configured or was denied.',
+    };
+  }
   const products = context.products || [];
   const rawQuery = (args.search_query || '').trim();
   const query = normalizeRetailQuery(rawQuery);

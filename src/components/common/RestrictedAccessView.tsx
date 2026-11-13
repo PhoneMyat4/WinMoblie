@@ -15,6 +15,7 @@ import {
 import { StaffUser, StaffRole, RolePermissions, ShopSettings, AppTab } from '../../types';
 import { getRoleBadgeClass } from '../../utils/formatters';
 import { getTabRequiredPermissionInfo, checkUserPermission } from '../../utils/permissionUtils';
+import { FirebaseAuthService } from '../../services/firebaseAuthService';
 
 interface RestrictedAccessViewProps {
   tab: AppTab;
@@ -52,31 +53,52 @@ export const RestrictedAccessView: React.FC<RestrictedAccessViewProps> = ({
     return u.role === 'Manager';
   });
 
-  const handleVerifySupervisorPin = (e: React.FormEvent) => {
+  const handleVerifySupervisorPin = async (e: React.FormEvent) => {
     e.preventDefault();
     setPinError(null);
     setPinSuccess(null);
+
+    const lockout = FirebaseAuthService.checkLoginLockout('supervisor_override');
+    if (lockout.locked) {
+      setPinError(`Override temporarily locked due to 5 failed attempts (${lockout.remainingSeconds}s remaining).`);
+      return;
+    }
 
     if (!enteredPin || enteredPin.length < 4) {
       setPinError('Please enter a valid 4-digit security PIN.');
       return;
     }
 
-    // Check if the PIN matches any authorized supervisor / owner / manager
-    const matchingSupervisor = authorizedStaffMembers.find(u => u.pin === enteredPin && u.active);
+    // Check if the PIN matches any authorized supervisor / owner / manager via PBKDF2
+    let matchingSupervisor: StaffUser | undefined;
+    for (const candidate of authorizedStaffMembers) {
+      if (!candidate.active) continue;
+      const check = await FirebaseAuthService.verifyStaffCredential(candidate, enteredPin);
+      if (check.valid) {
+        matchingSupervisor = candidate;
+        break;
+      }
+    }
 
     if (matchingSupervisor) {
+      FirebaseAuthService.clearLoginLockout('supervisor_override');
       setPinSuccess(`Supervisor authorization verified: ${matchingSupervisor.name} (${matchingSupervisor.role})`);
+      const targetSupervisor = matchingSupervisor;
       setTimeout(() => {
         if (onAuthorizeSessionBypass) {
           onAuthorizeSessionBypass(tab);
         } else {
           // Switch to supervisor
-          onSwitchStaffUser(matchingSupervisor);
+          onSwitchStaffUser(targetSupervisor);
         }
       }, 750);
     } else {
-      setPinError('Invalid supervisor PIN or unauthorized staff account.');
+      const failLock = FirebaseAuthService.recordFailedLoginAttempt('supervisor_override');
+      setPinError(
+        failLock.locked
+          ? 'Too many failed attempts (5/5). Override locked for 5 minutes.'
+          : `Invalid supervisor PIN or unauthorized staff account (${failLock.attempts}/5 attempts).`
+      );
     }
   };
 

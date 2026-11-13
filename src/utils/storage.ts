@@ -127,6 +127,7 @@ export const STORAGE_KEYS = {
   DELETED_LOCATION_IDS: 'mobileshop_deleted_location_ids_v2',
   DELETED_PRODUCT_IDS: 'mobileshop_deleted_product_ids_v2',
   FOC_DISTRIBUTIONS: 'mobileshop_foc_distributions_v2',
+  PENDING_OFFLINE_REFUNDS: 'mobileshop_pending_offline_refunds_v2',
 };
 
 // Cross-tab broadcast channel for instantaneous reactive tab synchronization
@@ -314,6 +315,20 @@ export interface StorageChangeHandler {
   }) => void;
   onAuditLogUpsert?: (entry: AuditLogEntry) => void;
   onCashDrawerShiftClosed?: (shift: CashDrawerRecord) => void;
+  onCashDrawerEntryAdded?: (params: {
+    shiftId: string;
+    entry: {
+      id: string;
+      timestamp: string;
+      type: 'in' | 'out';
+      entryType: 'manual' | 'sale' | 'expense' | 'refund';
+      description: string;
+      amount: number;
+      cashierId: string;
+      terminalId: string;
+    };
+    isSaleCash?: boolean;
+  }) => void;
   onSocialMarketingStateUpsert?: (state: SocialMarketingState) => void;
 }
 
@@ -602,19 +617,25 @@ export const StorageService = {
     if (filtered.length !== raw.length) {
       setItem(STORAGE_KEYS.STAFF_USERS, filtered, false);
     }
-    return filtered.map((u, idx) => ({
-      ...u,
-      username: u.username || (
-        u.role === 'Owner' ? 'owner' :
-        u.role === 'Manager' ? 'manager' :
-        u.role === 'Inventory_Staff' ? 'stock' :
-        `cashier${idx + 1}`
-      ),
-      password: u.password || u.pin || '',
-      restrictWorkingHours: u.role === 'Owner' ? false : Boolean(u.restrictWorkingHours),
-      workStartTime: u.workStartTime || (u.restrictWorkingHours ? '07:30' : undefined),
-      workEndTime: u.workEndTime || (u.restrictWorkingHours ? '19:00' : undefined),
-    }));
+    return filtered.map((u, idx) => {
+      const sanitized: StaffUser = {
+        ...u,
+        username: u.username || (
+          u.role === 'Owner' ? 'owner' :
+          u.role === 'Manager' ? 'manager' :
+          u.role === 'Inventory_Staff' ? 'stock' :
+          `cashier${idx + 1}`
+        ),
+        restrictWorkingHours: u.role === 'Owner' ? false : Boolean(u.restrictWorkingHours),
+        workStartTime: u.workStartTime || (u.restrictWorkingHours ? '07:30' : undefined),
+        workEndTime: u.workEndTime || (u.restrictWorkingHours ? '19:00' : undefined),
+      };
+      if (sanitized.credentialHash) {
+        delete sanitized.pin;
+        delete sanitized.password;
+      }
+      return sanitized;
+    });
   },
   purgeMockStaffUsers: (): StaffUser[] => {
     const raw = getItem<StaffUser[]>(STORAGE_KEYS.STAFF_USERS, []);
@@ -626,18 +647,31 @@ export const StorageService = {
     StorageService.saveStaffUsers([], true);
   },
   saveStaffUsers: (users: StaffUser[], triggerSync = true) => {
-    setItem(STORAGE_KEYS.STAFF_USERS, users, triggerSync);
+    const sanitizedUsers = users.map(u => {
+      const copy = { ...u };
+      if (copy.credentialHash) {
+        delete copy.pin;
+        delete copy.password;
+      }
+      return copy;
+    });
+    setItem(STORAGE_KEYS.STAFF_USERS, sanitizedUsers, triggerSync);
     if (triggerSync && activeStorageSyncHandler?.onStaffUsersBatch) {
       activeStorageSyncHandler.onStaffUsersBatch(users);
     }
   },
   saveStaffUser: (user: StaffUser, triggerSync = true) => {
     const users = StorageService.getStaffUsers();
+    const sanitizedUser = { ...user };
+    if (sanitizedUser.credentialHash) {
+      delete sanitizedUser.pin;
+      delete sanitizedUser.password;
+    }
     const index = users.findIndex(u => u.id === user.id);
     if (index >= 0) {
-      users[index] = user;
+      users[index] = sanitizedUser;
     } else {
-      users.push(user);
+      users.push(sanitizedUser);
     }
     StorageService.saveStaffUsers(users, false);
     if (triggerSync && activeStorageSyncHandler?.onStaffUserUpsert) {
@@ -1066,9 +1100,6 @@ export const StorageService = {
       }
 
       StorageService.saveProducts(products, false);
-      if (activeStorageSyncHandler?.onProductUpsert) {
-        activeStorageSyncHandler.onProductUpsert(prod);
-      }
 
       // Update localized branch inventory for this product at the active branch
       const activeLocId = StorageService.getActiveLocationId();
@@ -1414,25 +1445,56 @@ export const StorageService = {
     }
   },
 
+  getMyanmarDateCompact: (dateObj: Date = new Date()): string => {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Yangon' })
+        .format(dateObj)
+        .replace(/-/g, '');
+    } catch {
+      const y = dateObj.getFullYear();
+      const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const d = String(dateObj.getDate()).padStart(2, '0');
+      return `${y}${m}${d}`;
+    }
+  },
+
+  getBranchCode: (locationId?: string): string => {
+    const locId = locationId || StorageService.getActiveLocationId();
+    const loc = StorageService.getLocations().find(l => l.id === locId);
+    const code = (loc?.code || locId || 'MAIN').replace(/[^A-Za-z0-9]/g, '');
+    return (code || 'MAIN').toUpperCase();
+  },
+
+  getTerminalId: (): string => {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return 'TERM-SERVER';
+    }
+    let termId = localStorage.getItem('mobileshop_terminal_id_v2');
+    if (!termId) {
+      termId = `TERM-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      try {
+        localStorage.setItem('mobileshop_terminal_id_v2', termId);
+      } catch {}
+    }
+    return termId;
+  },
+
   generateNextInvoiceNumber: (prefix?: string): string => {
     const existingSales = StorageService.getSales();
     const existingNumbers = new Set(existingSales.map(s => (s.invoiceNumber || '').trim().toUpperCase()));
     
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-    const basePrefix = (prefix && prefix.trim()) || 'INV-';
+    const yyyymmdd = StorageService.getMyanmarDateCompact(new Date());
+    const locCode = StorageService.getBranchCode();
+    const cleanPrefix = ((prefix && prefix.trim()) || 'INV').replace(/-+$/, '');
 
     let candidate = '';
     let attempts = 0;
     do {
       const rand = Math.floor(1000 + Math.random() * 9000);
-      candidate = `${basePrefix}${year}${month}${day}-${time}-${rand}`;
+      candidate = `${cleanPrefix}-${locCode}-${yyyymmdd}-${rand}`;
       attempts++;
       if (attempts > 50) {
-        candidate = `${basePrefix}${year}${month}${day}-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+        candidate = `${cleanPrefix}-${locCode}-${yyyymmdd}-${Date.now().toString().slice(-4)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
         break;
       }
     } while (existingNumbers.has(candidate.toUpperCase()));
@@ -1444,20 +1506,17 @@ export const StorageService = {
     const existingCredits = StorageService.getCreditSales();
     const existingNumbers = new Set(existingCredits.map(c => (c.creditNumber || '').trim().toUpperCase()));
     
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+    const yyyymmdd = StorageService.getMyanmarDateCompact(new Date());
+    const locCode = StorageService.getBranchCode();
 
     let candidate = '';
     let attempts = 0;
     do {
       const rand = Math.floor(1000 + Math.random() * 9000);
-      candidate = `CR-${year}${month}${day}-${time}-${rand}`;
+      candidate = `CRD-${locCode}-${yyyymmdd}-${rand}`;
       attempts++;
       if (attempts > 50) {
-        candidate = `CR-${year}${month}${day}-${Date.now()}`;
+        candidate = `CRD-${locCode}-${yyyymmdd}-${Date.now().toString().slice(-5)}`;
         break;
       }
     } while (existingNumbers.has(candidate.toUpperCase()));
@@ -1466,13 +1525,10 @@ export const StorageService = {
   },
 
   generateNextCreditReceiptNumber: (): string => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+    const yyyymmdd = StorageService.getMyanmarDateCompact(new Date());
+    const locCode = StorageService.getBranchCode();
     const rand = Math.floor(1000 + Math.random() * 9000);
-    return `CR-REC-${year}${month}${day}-${time}-${rand}`;
+    return `CR-REC-${locCode}-${yyyymmdd}-${rand}`;
   },
 
   deductStockForSale: (
@@ -1822,6 +1878,28 @@ export const StorageService = {
     const fundingSource = params.refundFundingSource || 
       (params.refundMethod && params.refundMethod.toLowerCase().includes('cash') && !params.refundMethod.toLowerCase().includes('kpay') ? 'cash_drawer' : 'digital_cash_pool');
 
+    const isCreditSale = Boolean(sale.paymentMethod === 'credit' || sale.creditSaleId || sale.paymentDetails?.creditSaleId);
+    const creditSales = isCreditSale ? StorageService.getCreditSales() : [];
+    // R8: Match credit sale strictly by ID (never by invoiceNumber across branches)
+    const targetCredit = isCreditSale
+      ? creditSales.find(
+          cs =>
+            (sale.creditSaleId && cs.id === sale.creditSaleId) ||
+            (sale.paymentDetails?.creditSaleId && cs.id === sale.paymentDetails.creditSaleId) ||
+            cs.saleId === sale.id
+        )
+      : undefined;
+
+    let cashBack = effectiveRefundAmount;
+    let debtCancel = 0;
+    if (isCreditSale) {
+      const paidSoFar = targetCredit
+        ? Math.max(0, Number(targetCredit.totalPaid || 0))
+        : Math.max(0, Number(sale.paymentDetails?.downPayment || 0));
+      cashBack = Math.min(effectiveRefundAmount, paidSoFar);
+      debtCancel = Math.max(0, effectiveRefundAmount - cashBack);
+    }
+
     // Record in refund history
     const refundRecord: RefundRecord = {
       id: `ref-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -1835,6 +1913,8 @@ export const StorageService = {
       digitalChannel: params.digitalChannel || (fundingSource === 'digital_cash_pool' ? params.refundMethod : undefined),
       restockItems: params.restockItems,
       totalRefundAmount: effectiveRefundAmount,
+      cashPayoutAmount: cashBack,
+      debtCancelledAmount: debtCancel,
       refundedBy: params.staffName,
       notes: params.notes,
     };
@@ -1842,18 +1922,11 @@ export const StorageService = {
     sale.refundHistory = sale.refundHistory || [];
     sale.refundHistory.unshift(refundRecord);
 
-    // If credit sale, deduct customer outstanding credit balance AND update creditSales record (Item M-b)
-    if ((sale.paymentMethod === 'credit' || sale.creditSaleId || sale.paymentDetails?.creditSaleId) && effectiveRefundAmount > 0) {
-      const creditSales = StorageService.getCreditSales();
-      const targetCredit = creditSales.find(
-        cs =>
-          (sale.creditSaleId && cs.id === sale.creditSaleId) ||
-          (sale.paymentDetails?.creditSaleId && cs.id === sale.paymentDetails.creditSaleId) ||
-          cs.saleId === sale.id ||
-          cs.invoiceNumber === sale.invoiceNumber
-      );
+    // If credit sale, deduct customer outstanding credit balance by debtCancel AND update creditSales record (R7)
+    if (isCreditSale && effectiveRefundAmount > 0) {
       if (targetCredit) {
-        targetCredit.remainingBalance = Math.max(0, Math.round((targetCredit.remainingBalance || 0) - effectiveRefundAmount));
+        targetCredit.remainingBalance = Math.max(0, Math.round((targetCredit.remainingBalance || 0) - debtCancel));
+        targetCredit.totalPaid = Math.max(0, Math.round((targetCredit.totalPaid || 0) - cashBack));
         targetCredit.totalPayable = Math.max(0, Math.round((targetCredit.totalPayable || 0) - effectiveRefundAmount));
         if (targetCredit.remainingBalance <= 0) {
           targetCredit.status = 'paid';
@@ -1861,11 +1934,13 @@ export const StorageService = {
         StorageService.saveCreditSale(targetCredit);
       }
 
-      const customers = StorageService.getCustomers();
-      const cust = customers.find(c => c.id === sale.customerId || c.phone === sale.customerPhone);
-      if (cust && cust.outstandingCreditBalance) {
-        cust.outstandingCreditBalance = Math.max(0, cust.outstandingCreditBalance - effectiveRefundAmount);
-        StorageService.saveCustomer(cust);
+      if (debtCancel > 0) {
+        const customers = StorageService.getCustomers();
+        const cust = customers.find(c => c.id === sale.customerId || c.phone === sale.customerPhone);
+        if (cust && cust.outstandingCreditBalance) {
+          cust.outstandingCreditBalance = Math.max(0, cust.outstandingCreditBalance - debtCancel);
+          StorageService.saveCustomer(cust);
+        }
       }
     }
 
@@ -1875,11 +1950,11 @@ export const StorageService = {
       activeStorageSyncHandler.onSaleUpsert(sale);
     }
 
-    // If funding source is Cash Drawer, deduct from daily shift Cash Register Drawer
-    if (fundingSource === 'cash_drawer' && effectiveRefundAmount > 0) {
+    // If funding source is Cash Drawer, only deduct actual cashBack (never unpaid credit debtCancel)
+    if (fundingSource === 'cash_drawer' && cashBack > 0) {
       StorageService.recordCashTransaction(
         'out', 
-        effectiveRefundAmount, 
+        cashBack, 
         `Refund Invoice #${sale.invoiceNumber} (${params.reason}) - ${refundItemsList.length} item(s) [Physical Cash Drawer]`,
         true,
         `tx-ref-${refundRecord.id}`,
@@ -1892,19 +1967,34 @@ export const StorageService = {
       actionType: 'SALE_REFUNDED',
       category: 'sales',
       severity: 'warning',
-      summary: `Refunded ${params.totalRefundAmount.toLocaleString()} Ks for #${sale.invoiceNumber} via ${fundingSource === 'cash_drawer' ? 'Daily Cash Drawer' : `Digital Pool [${params.refundMethod}]`}`,
+      summary: `Refunded ${effectiveRefundAmount.toLocaleString()} Ks (Cash out: ${cashBack.toLocaleString()} Ks, Debt cancelled: ${debtCancel.toLocaleString()} Ks) for #${sale.invoiceNumber} via ${fundingSource === 'cash_drawer' ? 'Daily Cash Drawer' : `Digital Pool [${params.refundMethod}]`}`,
       details: {
         targetId: sale.id,
         invoiceNumber: sale.invoiceNumber,
-        amount: params.totalRefundAmount,
+        amount: effectiveRefundAmount,
         paymentMethod: params.refundMethod,
         metadata: {
           fundingSource,
+          cashPayoutAmount: cashBack,
+          debtCancelledAmount: debtCancel,
           itemsCount: params.itemsToRefund.length
         }
       },
       staffId: params.staffName || 'admin'
     });
+  },
+  getPendingOfflineRefunds: (): any[] => {
+    const raw = getItem<any[]>(STORAGE_KEYS.PENDING_OFFLINE_REFUNDS, []);
+    return Array.isArray(raw) ? raw : [];
+  },
+  enqueuePendingOfflineRefund: (params: any) => {
+    const queue = StorageService.getPendingOfflineRefunds().filter(item => item?.saleId !== params?.saleId);
+    queue.push({ ...params, queuedAt: new Date().toISOString() });
+    setItem(STORAGE_KEYS.PENDING_OFFLINE_REFUNDS, queue, false);
+  },
+  dequeuePendingOfflineRefund: (saleId: string) => {
+    const queue = StorageService.getPendingOfflineRefunds().filter(item => item?.saleId !== saleId);
+    setItem(STORAGE_KEYS.PENDING_OFFLINE_REFUNDS, queue, false);
   },
   refundSale: (saleId: string, refundReason: string, staffName: string) => {
     const sales = StorageService.getSales();
@@ -2095,6 +2185,8 @@ export const StorageService = {
 
     const purchases = StorageService.getPurchases();
     const existingIndex = purchases.findIndex(p => p.id === purchase.id);
+    // R10: Capture the stored purchase BEFORE overwriting it so we can compute exact cash delta
+    const prevPurchase = existingIndex >= 0 ? { ...purchases[existingIndex] } : null;
     
     if (existingIndex >= 0) {
       purchases[existingIndex] = purchase;
@@ -2345,14 +2437,19 @@ export const StorageService = {
       StorageService.savePurchases(purchases);
     }
 
-    // If paid with cash, record outflow with deterministic idempotency key (and delta adjustment on edits - Item M-c)
-    if (existingIndex === -1 && purchase.paymentMethod === 'cash' && purchase.amountPaid > 0 && purchase.status !== 'draft') {
+    // R10: Book the cash delta between the new and previous purchase on every save (draft->submitted, payment method change, or amountPaid edit)
+    const cashOfPurchase = (p?: PurchaseRecord | null): number =>
+      p && p.paymentMethod === 'cash' && p.status !== 'draft' && p.status !== 'cancelled'
+        ? Math.round(Number(p.amountPaid) || 0)
+        : 0;
+    const cashDelta = cashOfPurchase(purchase) - cashOfPurchase(prevPurchase);
+    if (cashDelta !== 0) {
       StorageService.recordCashTransaction(
-        'out',
-        purchase.amountPaid,
+        cashDelta > 0 ? 'out' : 'in',
+        Math.abs(cashDelta),
         `Purchase Order #${purchase.purchaseOrderNumber} to ${purchase.supplierName}`,
         triggerSync,
-        `tx-po-${purchase.id}`,
+        `tx-po-${purchase.id}-${Date.now()}`,
         'expense'
       );
     }
@@ -2368,10 +2465,7 @@ export const StorageService = {
       target.status = 'pending_approval';
       target.submittedForApprovalAt = new Date().toISOString();
       target.submittedBy = submitterName;
-      StorageService.savePurchases(purchases);
-      if (activeStorageSyncHandler?.onPurchaseUpsert) {
-        activeStorageSyncHandler.onPurchaseUpsert(target);
-      }
+      StorageService.savePurchase(target);
     }
   },
   confirmPurchaseOrder: (
@@ -2407,20 +2501,8 @@ export const StorageService = {
     target.confirmedByRole = data.confirmedByRole;
     target.confirmedAt = new Date().toISOString();
 
-    StorageService.savePurchases(purchases);
-    if (activeStorageSyncHandler?.onPurchaseUpsert) {
-      activeStorageSyncHandler.onPurchaseUpsert(target);
-    }
-
-    if (data.paymentMethod === 'cash' && data.amountPaid > 0) {
-      StorageService.recordCashTransaction(
-        'out',
-        data.amountPaid,
-        `PO #${target.purchaseOrderNumber} Payment to ${target.supplierName}`,
-        true,
-        `tx-po-conf-${target.id}`
-      );
-    }
+    // R10: Single booking point — delegate persistence & cash delta booking to savePurchase(target) so confirm + subsequent save never double-book
+    StorageService.savePurchase(target);
 
     if (data.amountPaid > 0) {
       StorageService.addAuditLog({
@@ -2502,10 +2584,7 @@ export const StorageService = {
     target.amountPaid = 0;
     target.balanceDue = target.grandTotal;
 
-    StorageService.savePurchases(purchases);
-    if (activeStorageSyncHandler?.onPurchaseUpsert) {
-      activeStorageSyncHandler.onPurchaseUpsert(target);
-    }
+    StorageService.savePurchase(target);
   },
   revertPurchaseToPendingApproval: (purchaseId: string) => {
     const purchases = StorageService.getPurchases();
@@ -2948,6 +3027,9 @@ export const StorageService = {
     const roundedAmount = Math.round(Number(amount) || 0);
     const now = new Date().toISOString();
     const isIn = type === 'in' || type === 'sale_cash';
+    const settings = StorageService.getSettings();
+    const cashierId = settings.currentStaffId || settings.currentStaffName || 'staff';
+    const terminalId = StorageService.getTerminalId();
     const inferredEntryType: 'manual' | 'sale' | 'expense' | 'refund' =
       explicitEntryType ||
       (type === 'sale_cash' || customTxId?.startsWith('tx-sale-')
@@ -2962,36 +3044,53 @@ export const StorageService = {
       if (type === 'sale_cash') {
         drawer.cashSales = Math.round((drawer.cashSales || 0) + roundedAmount);
       } else {
-        drawer.cashInManual.push({ reason: description, amount: roundedAmount, time: now, entryType: inferredEntryType });
+        drawer.cashInManual.push({ reason: description, amount: roundedAmount, time: now, entryType: inferredEntryType, cashierId, terminalId });
       }
       drawer.expectedInDrawer = Math.round((drawer.expectedInDrawer || 0) + roundedAmount);
       drawer.totalCashIn = Math.round((drawer.totalCashIn || 0) + roundedAmount);
     } else {
-      drawer.cashOutManual.push({ reason: description, amount: roundedAmount, time: now, entryType: inferredEntryType });
+      drawer.cashOutManual.push({ reason: description, amount: roundedAmount, time: now, entryType: inferredEntryType, cashierId, terminalId });
       drawer.expectedInDrawer = Math.round((drawer.expectedInDrawer || 0) - roundedAmount);
       drawer.totalCashOut = Math.round((drawer.totalCashOut || 0) + roundedAmount);
     }
 
-    drawer.transactions.unshift({
+    const txEntry = {
       id: customTxId || `tx-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       timestamp: now,
-      type: isIn ? 'in' : 'out',
+      type: (isIn ? 'in' : 'out') as 'in' | 'out',
       entryType: inferredEntryType,
       description,
       amount: roundedAmount,
-    });
+      cashierId,
+      terminalId,
+    };
 
-    StorageService.saveCashDrawer(drawer, triggerSync);
+    drawer.transactions.unshift(txEntry);
+
+    // R9: Always save local copy with triggerSync=false so no terminal ever overwrites the shared cloud drawer document
+    StorageService.saveCashDrawer(drawer, false);
+
+    if (triggerSync && activeStorageSyncHandler?.onCashDrawerEntryAdded) {
+      const shiftId = drawer.id || `shift-${drawer.date || now.slice(0, 10)}`;
+      activeStorageSyncHandler.onCashDrawerEntryAdded({
+        shiftId,
+        entry: txEntry,
+        isSaleCash: type === 'sale_cash',
+      });
+    }
   },
   closeCashDrawerShift: (actualCounted: number, notes: string) => {
     const drawer = StorageService.getCashDrawer();
     const roundedCounted = Math.round(Number(actualCounted) || 0);
+    const settings = StorageService.getSettings();
     drawer.status = 'closed';
     drawer.closedAt = new Date().toISOString();
+    drawer.closedBy = settings.currentStaffName || settings.currentStaffId || drawer.openedBy || 'Manager';
     drawer.actualCounted = roundedCounted;
     drawer.variance = Math.round(roundedCounted - Math.round(drawer.expectedInDrawer || 0));
     drawer.closingNotes = notes;
-    StorageService.saveCashDrawer(drawer);
+    // R9: Save local copy with triggerSync=false and let onCashDrawerShiftClosed commit the closure atomically
+    StorageService.saveCashDrawer(drawer, false);
     if (activeStorageSyncHandler?.onCashDrawerShiftClosed) {
       activeStorageSyncHandler.onCashDrawerShiftClosed({
         ...drawer,

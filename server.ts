@@ -34,7 +34,7 @@ import {
   startTelegramPolling,
   stopTelegramPolling,
 } from './server/telegramBot';
-import { registerServerStateSnapshotGetter } from './server/posFirestoreService';
+import { registerServerStateSnapshotGetter, ensureAuth, getLastFirestoreAuthError } from './server/posFirestoreService';
 import { archiveSalesData, listArchivedFiles } from './server/archiveService';
 
 async function startServer() {
@@ -46,23 +46,116 @@ async function startServer() {
   app.use(express.json({ limit: '5mb' }));
   app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
-  // Secure token-based API authentication middleware for all /api/* routes
-  const VALID_API_TOKENS = new Set(
-    [
-      process.env.API_AUTH_TOKEN,
-      process.env.VITE_API_TOKEN,
-    ]
-      .filter(Boolean)
-      .map((t) => String(t).trim())
-  );
-
-  if (VALID_API_TOKENS.size === 0) {
-    console.warn(
-      '[Security Warning] No API_AUTH_TOKEN or VITE_API_TOKEN defined in environment variables. Protected /api/* endpoints will reject requests until an API key is configured.'
-    );
+  // Read Firebase config for server-side ID token verification (R1 & R2)
+  let firebaseWebApiKey = process.env.VITE_FIREBASE_API_KEY || '';
+  try {
+    const cfgPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(cfgPath)) {
+      const parsedCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+      if (parsedCfg?.apiKey) {
+        firebaseWebApiKey = String(parsedCfg.apiKey).trim();
+      }
+    }
+  } catch {
+    // Ignore read error
   }
 
-  app.use('/api', (req, res, next) => {
+  // Optional backend-only secret token (never exposed via VITE_*)
+  const SERVER_ONLY_API_TOKEN = (process.env.API_AUTH_TOKEN || '').trim();
+
+  interface VerifiedCaller {
+    uid: string;
+    email: string;
+    role: string;
+    expiresAt: number;
+  }
+  const verifiedTokenCache = new Map<string, VerifiedCaller>();
+
+  async function verifyCallerToken(token: string): Promise<VerifiedCaller | null> {
+    if (!token) return null;
+
+    // Allow backend-only API_AUTH_TOKEN if explicitly set on server environment
+    if (SERVER_ONLY_API_TOKEN && token === SERVER_ONLY_API_TOKEN) {
+      return {
+        uid: 'server-admin',
+        email: 'owner@apexpos.internal',
+        role: 'Owner',
+        expiresAt: Date.now() + 60_000,
+      };
+    }
+
+    const cached = verifiedTokenCache.get(token);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached;
+    }
+
+    if (!firebaseWebApiKey) return null;
+
+    try {
+      const lookupRes = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(firebaseWebApiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken: token }),
+        }
+      );
+      if (!lookupRes.ok) return null;
+      const lookupData = (await lookupRes.json()) as any;
+      const userInfo = lookupData?.users?.[0];
+      if (!userInfo || !userInfo.localId) return null;
+
+      const uid = String(userInfo.localId);
+      const email = String(userInfo.email || '').toLowerCase();
+      let customRole = '';
+      if (userInfo.customAttributes) {
+        try {
+          const attrs = JSON.parse(userInfo.customAttributes);
+          if (attrs?.role) customRole = String(attrs.role);
+        } catch {
+          // Ignore malformed customAttributes
+        }
+      }
+
+      let resolvedRole = customRole;
+      if (!resolvedRole) {
+        if (email === 'phonemyatpaing950@gmail.com' || email === 'owner@apexpos.internal') {
+          resolvedRole = 'Owner';
+        } else {
+          try {
+            const { doc, getDoc } = await import('firebase/firestore');
+            const { db } = await import('./src/lib/firebase');
+            const accessSnap = await getDoc(doc(db, 'staffAccess', uid));
+            if (accessSnap.exists() && accessSnap.data()?.role) {
+              resolvedRole = String(accessSnap.data()?.role);
+            } else {
+              const staffPrefixMatch = email.match(/^staff_(.+)@apexpos\.internal$/i);
+              const staffIdCandidate = staffPrefixMatch ? staffPrefixMatch[1] : uid;
+              const staffSnap = await getDoc(doc(db, 'staffUsers', staffIdCandidate));
+              if (staffSnap.exists() && staffSnap.data()?.role) {
+                resolvedRole = String(staffSnap.data()?.role);
+              }
+            }
+          } catch {
+            // Firestore lookup fallback
+          }
+        }
+      }
+
+      const caller: VerifiedCaller = {
+        uid,
+        email,
+        role: resolvedRole || 'Cashier',
+        expiresAt: Date.now() + 60_000,
+      };
+      verifiedTokenCache.set(token, caller);
+      return caller;
+    } catch {
+      return null;
+    }
+  }
+
+  app.use('/api', async (req, res, next) => {
     // Only public health check and Telegram incoming webhook are whitelisted
     // (Telegram sends its own cryptographic secret in X-Telegram-Bot-Api-Secret-Token)
     if (
@@ -72,15 +165,20 @@ async function startServer() {
       return next();
     }
 
-    const rawProvided = req.headers['x-api-key'] || (req.headers['authorization']?.replace(/^Bearer\s+/i, ''));
+    const rawProvided =
+      (req.headers['authorization']?.replace(/^Bearer\s+/i, '')) ||
+      req.headers['x-api-key'];
     const providedToken = typeof rawProvided === 'string' ? rawProvided.trim() : '';
 
-    if (!providedToken || !VALID_API_TOKENS.has(providedToken)) {
+    const verifiedUser = await verifyCallerToken(providedToken);
+    if (!verifiedUser) {
       return res.status(401).json({
         success: false,
-        error: 'Unauthorized: Invalid or missing API security token.',
+        error: 'Unauthorized: Valid Firebase authentication token required.',
       });
     }
+
+    (req as any).user = verifiedUser;
     next();
   });
 
@@ -119,12 +217,23 @@ async function startServer() {
     return openAiClient;
   }
 
-  // Health check endpoint
-  app.get('/api/health', (req, res) => {
-    res.json({ 
-      status: 'ok',
+  // Health check endpoint (R12: includes firestoreAuth status; returns 503 if credentials were supplied but failed or when ?strict=1 is queried)
+  app.get('/api/health', async (req, res) => {
+    const user = await ensureAuth();
+    const firestoreAuth = Boolean(user);
+    const hasConfiguredCreds = Boolean(
+      (process.env.MCP_AUTH_EMAIL || process.env.FIREBASE_AUTH_EMAIL || '').trim() &&
+      (process.env.MCP_AUTH_PASSWORD || process.env.FIREBASE_AUTH_PASSWORD || '').trim()
+    );
+    const strictCheck = req.query.strict === '1' || req.query.strict === 'true' || hasConfiguredCreds;
+    const statusCode = strictCheck && !firestoreAuth ? 503 : 200;
+
+    res.status(statusCode).json({
+      status: statusCode === 200 ? 'ok' : 'degraded',
       version: 'v2-testing-server',
       time: new Date().toISOString(),
+      firestoreAuth,
+      firestoreAuthError: firestoreAuth ? null : getLastFirestoreAuthError(),
       hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
       hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
     });
@@ -642,24 +751,21 @@ If the image is blurry, poorly lit, or does not show a phone box/label, set conf
         activeModel = 'gemini-3.8-flash';
       }
 
-      // Check admin authorization: verify against server ADMIN_AUDIT_KEY or authenticated Owner/Manager staff role (never blindly trust req.body.isAdmin alone)
+      // Check admin authorization: verify exclusively against server ADMIN_AUDIT_KEY or verified Firebase ID token role (R1 & R2 — never trust req.body.userRole)
       const hasAuditKeyHeader = Boolean(
         process.env.ADMIN_AUDIT_KEY &&
         req.headers['x-admin-audit-key'] === process.env.ADMIN_AUDIT_KEY
       );
-      const staffRoleFromContext = String(
-        req.body.userRole ||
-        (context.settings as any)?.currentStaffRole ||
-        ''
-      ).trim();
+      const verifiedRole = String((req as any).user?.role || '').trim();
       const isPrivilegedStaffRole =
-        staffRoleFromContext === 'Owner' ||
-        staffRoleFromContext === 'Manager' ||
-        staffRoleFromContext === 'Admin';
+        verifiedRole === 'Owner' ||
+        verifiedRole === 'Manager' ||
+        verifiedRole === 'Admin';
       const isAdmin = Boolean(hasAuditKeyHeader || isPrivilegedStaffRole);
       (context as any).isAdmin = isAdmin;
       if (context.settings && typeof context.settings === 'object') {
         (context.settings as any).isAdmin = isAdmin;
+        (context.settings as any).currentStaffRole = verifiedRole || 'Cashier';
       }
 
       const replyLanguage = req.body.language || 'my';
@@ -2554,9 +2660,71 @@ Ensure all numbers are integers without commas.`;
     }
   });
 
-  // Data Archiving & Cleanup API Endpoints
+  // Owner-only Staff Provisioning & Role Mapping API Endpoint (R1)
+  app.post('/api/staff', async (req, res) => {
+    try {
+      const callerRole = String((req as any).user?.role || '');
+      if (callerRole !== 'Owner') {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Only Owner can create or modify staff accounts and roles.',
+        });
+      }
+      const { staffUser, firebaseUid } = req.body || {};
+      if (!staffUser || !staffUser.id || !staffUser.role) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid staffUser payload.',
+        });
+      }
+      const { doc, setDoc, deleteField } = await import('firebase/firestore');
+      const { db } = await import('./src/lib/firebase');
+      const sanitizedStaff = { ...staffUser };
+      delete sanitizedStaff.pin;
+      delete sanitizedStaff.password;
+      await setDoc(
+        doc(db, 'staffUsers', String(staffUser.id)),
+        {
+          ...sanitizedStaff,
+          pin: deleteField(),
+          password: deleteField(),
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+      const targetUid = firebaseUid || staffUser.firebaseUid;
+      if (targetUid) {
+        await setDoc(
+          doc(db, 'staffAccess', String(targetUid)),
+          {
+            uid: String(targetUid),
+            staffId: String(staffUser.id),
+            role: String(staffUser.role),
+            name: String(staffUser.name || ''),
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Failed to provision staff role.',
+      });
+    }
+  });
+
+  // Data Archiving & Cleanup API Endpoints (Owner/Manager only — R1)
   app.post('/api/archive-data', async (req, res) => {
     try {
+      const callerRole = String((req as any).user?.role || '');
+      if (callerRole !== 'Owner' && callerRole !== 'Manager') {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Owner or Manager role required to archive sales data.',
+        });
+      }
       const { startDate, endDate, olderThanDate, previewOnly, fileNamePrefix } = req.body || {};
       const result = await archiveSalesData({
         startDate,
@@ -2577,6 +2745,13 @@ Ensure all numbers are integers without commas.`;
 
   app.get('/api/archive-data/list', async (req, res) => {
     try {
+      const callerRole = String((req as any).user?.role || '');
+      if (callerRole !== 'Owner' && callerRole !== 'Manager') {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden: Owner or Manager role required to list archived files.',
+        });
+      }
       const files = await listArchivedFiles();
       return res.json({ success: true, files });
     } catch (err: any) {
@@ -2640,6 +2815,18 @@ Ensure all numbers are integers without commas.`;
   }
 
   const server = http.createServer(app);
+
+  // R12 Startup check: verify Firestore service credentials at boot
+  const bootServiceUser = await ensureAuth();
+  if (!bootServiceUser) {
+    console.error(
+      `[R12 Startup Notice] Server Firestore service credentials (MCP_AUTH_EMAIL / MCP_AUTH_PASSWORD) are not authenticated: ${getLastFirestoreAuthError() || 'not configured'}.`
+    );
+    if (process.env.REQUIRE_FIRESTORE_SERVICE_AUTH === 'true') {
+      console.error('FATAL: MCP_AUTH_EMAIL / MCP_AUTH_PASSWORD are not configured or invalid while REQUIRE_FIRESTORE_SERVICE_AUTH=true.');
+      process.exit(1);
+    }
+  }
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Mobile Shop POS server running at http://0.0.0.0:${PORT}`);

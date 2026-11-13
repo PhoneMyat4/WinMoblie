@@ -37,7 +37,7 @@ function getSpreadsheet() {
 function initializeDatabase() {
   var ss = getSpreadsheet();
   var sheets = {
-    'Staff': ['id', 'username', 'name', 'role', 'phone', 'pin', 'avatarColor', 'status'],
+    'Staff': ['id', 'username', 'name', 'role', 'phone', 'pin', 'avatarColor', 'status', 'mustChangePin'],
     'Products': ['id', 'name', 'brand', 'category', 'costPrice', 'sellingPrice', 'stock', 'minStockAlert', 'isSerialized', 'imeiList', 'barcode', 'status'],
     'Sales': ['id', 'invoiceNumber', 'date', 'customerName', 'customerPhone', 'subtotal', 'discountTotal', 'taxTotal', 'grandTotal', 'paymentMethod', 'soldBy', 'status', 'itemsJson'],
     'Customers': ['id', 'name', 'phone', 'address', 'nrcNumber', 'totalSpent', 'totalVisits', 'loyaltyPoints', 'lastVisitDate', 'notes'],
@@ -56,17 +56,22 @@ function initializeDatabase() {
     }
   }
 
-  // Populate default staff users if empty (PINs stored as SHA-256 hashes)
+  // R11.1: Do NOT hardcode seed PINs in source code. Generate random one-time PINs at setup, log them once, and set mustChangePin = TRUE.
   var staffSheet = ss.getSheetByName('Staff');
   if (staffSheet.getLastRow() <= 1) {
-    var defaultStaff = [
-      ['staff_1', 'owner', 'Ko Aung Kyaw (Owner)', 'Owner', '09-798123456', hashStaffPin('8492'), 'bg-purple-600', 'active'],
-      ['staff_2', 'manager', 'Ma Thandar (Manager)', 'Manager', '09-974567890', hashStaffPin('7381'), 'bg-blue-600', 'active'],
-      ['staff_3', 'cashier', 'Ko Min Thu (Cashier)', 'Cashier', '09-450112233', hashStaffPin('6274'), 'bg-emerald-600', 'active'],
-      ['staff_4', 'stock', 'Ko Zaw Zaw (Stock Controller)', 'Inventory_Staff', '09-250998877', hashStaffPin('5163'), 'bg-amber-600', 'active']
+    var seedProfiles = [
+      ['staff_1', 'owner', 'Ko Aung Kyaw (Owner)', 'Owner', '09-798123456', 'bg-purple-600'],
+      ['staff_2', 'manager', 'Ma Thandar (Manager)', 'Manager', '09-974567890', 'bg-blue-600'],
+      ['staff_3', 'cashier', 'Ko Min Thu (Cashier)', 'Cashier', '09-450112233', 'bg-emerald-600'],
+      ['staff_4', 'stock', 'Ko Zaw Zaw (Stock Controller)', 'Inventory_Staff', '09-250998877', 'bg-amber-600']
     ];
-    for (var s = 0; s < defaultStaff.length; s++) {
-      staffSheet.appendRow(defaultStaff[s]);
+    for (var s = 0; s < seedProfiles.length; s++) {
+      var p = seedProfiles[s];
+      var randomPin = String(Math.floor(100000 + Math.random() * 900000));
+      var randomSalt = Utilities.getUuid().replace(/-/g, '').slice(0, 16);
+      var stretchedHash = hashPinV2(randomPin, randomSalt);
+      Logger.log('[INITIAL SETUP] One-time seed PIN for ' + p[1] + ' (' + p[3] + '): ' + randomPin + ' (mustChangePin=TRUE)');
+      staffSheet.appendRow([p[0], p[1], p[2], p[3], p[4], 'v2:' + randomSalt + ':' + stretchedHash, p[5], 'active', true]);
     }
   }
 
@@ -226,7 +231,22 @@ function getInitialData() {
   };
 }
 
+// R11.2: Per-user salt + 20,000-round key stretching (stored as 'v2:<salt>:<hash>' in the PIN column)
+function hashPinV2(pin, salt) {
+  var h = String(salt || '') + ':' + String(pin || '').trim();
+  for (var i = 0; i < 20000; i++) {
+    var d = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, h, Utilities.Charset.UTF_8);
+    h = Utilities.base64Encode(d);
+  }
+  return h;
+}
+
 function hashStaffPin(rawPin) {
+  var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 16);
+  return 'v2:' + salt + ':' + hashPinV2(rawPin, salt);
+}
+
+function hashStaffPinLegacy_(rawPin) {
   var raw = 'winmobile_gas_v1:' + String(rawPin || '').trim();
   var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, raw, Utilities.Charset.UTF_8);
   var hex = '';
@@ -238,18 +258,39 @@ function hashStaffPin(rawPin) {
   return 'sha256:' + hex;
 }
 
+function canOverridePrice(role) {
+  var r = String(role || '').trim();
+  return r === 'Owner' || r === 'Manager';
+}
+
 /**
- * Validates staff authentication by Username and PIN (supports SHA-256 hashed PINs and auto-upgrades legacy plaintext rows)
+ * Validates staff authentication by Username and PIN:
+ * - Enforces 5-attempt / 5-minute lockout via CacheService (R11.2)
+ * - Rejects retired insecure seed PINs (8492, 7381, 6274, 5163) or forces PIN rotation (R11.1)
+ * - Auto-upgrades legacy hashes to 'v2:<salt>:<hash>' with 20,000 SHA-256 rounds
+ * - Issues a server-cached session token binding the authenticated user's role
  */
-function verifyStaffCredentials(inputUsername, enteredPin) {
+function verifyStaffCredentials(inputUsername, enteredPin, newPinIfChanging) {
   var ss = getSpreadsheet();
   var staffSheet = ss.getSheetByName('Staff');
   if (!staffSheet) return { success: false, message: 'Staff database not found.' };
 
-  var data = staffSheet.getDataRange().getValues();
   var cleanUser = String(inputUsername || '').trim().toLowerCase();
   var enteredStr = String(enteredPin || '').trim();
-  var enteredHash = hashStaffPin(enteredStr);
+  if (!cleanUser || !enteredStr) {
+    return { success: false, message: 'Username and PIN are required.' };
+  }
+
+  // R11.2: Lockout — 5 wrong PINs = 5 minutes (300 seconds)
+  var cache = CacheService.getScriptCache();
+  var failKey = 'fail_' + cleanUser;
+  var fails = Number(cache.get(failKey) || 0);
+  if (fails >= 5) {
+    return { success: false, message: 'Too many attempts. Try again in 5 minutes.' };
+  }
+
+  var RETIRED_SEED_PINS = { '8492': true, '7381': true, '6274': true, '5163': true };
+  var data = staffSheet.getDataRange().getValues();
 
   for (var i = 1; i < data.length; i++) {
     var storedId = String(data[i][0]).toLowerCase();
@@ -257,32 +298,71 @@ function verifyStaffCredentials(inputUsername, enteredPin) {
     var storedName = String(data[i][2]).toLowerCase();
     var storedPin = String(data[i][5] || '').trim();
     var status = String(data[i][7] || 'active');
+    var mustChangePin = Boolean(data[i][8] === true || data[i][8] === 'TRUE' || data[i][8] === 'true' || RETIRED_SEED_PINS[enteredStr]);
 
     if (status === 'active' && (storedUsername === cleanUser || storedName === cleanUser || storedId === cleanUser)) {
-      var isMatch = (storedPin.indexOf('sha256:') === 0)
-        ? (storedPin === enteredHash)
-        : (storedPin === enteredStr);
-
-      if (isMatch) {
-        if (storedPin.indexOf('sha256:') !== 0) {
-          staffSheet.getRange(i + 1, 6).setValue(enteredHash);
-        }
-        return {
-          success: true,
-          user: {
-            id: String(data[i][0]),
-            username: String(data[i][1]),
-            name: String(data[i][2]),
-            role: String(data[i][3]),
-            phone: String(data[i][4] || ''),
-            avatarColor: String(data[i][6] || 'bg-purple-600')
-          }
-        };
+      var isMatch = false;
+      if (storedPin.indexOf('v2:') === 0) {
+        var parts = storedPin.split(':');
+        var salt = parts[1] || '';
+        var expectedHash = parts.slice(2).join(':');
+        isMatch = (hashPinV2(enteredStr, salt) === expectedHash);
+      } else if (storedPin.indexOf('sha256:') === 0) {
+        isMatch = (storedPin === hashStaffPinLegacy_(enteredStr));
       } else {
+        isMatch = (storedPin === enteredStr);
+      }
+
+      if (!isMatch) {
+        cache.put(failKey, String(fails + 1), 300);
         return { success: false, message: 'Incorrect PIN for user "' + inputUsername + '". Please try again.' };
       }
+
+      cache.remove(failKey);
+
+      // R11.1: Force PIN change on first login or if account still uses a retired seed PIN
+      if (mustChangePin) {
+        var cleanNewPin = String(newPinIfChanging || '').trim();
+        if (!cleanNewPin || cleanNewPin.length < 4 || RETIRED_SEED_PINS[cleanNewPin] || cleanNewPin === enteredStr) {
+          return {
+            success: false,
+            mustChangePin: true,
+            message: 'Security policy: You must set a new personal PIN (cannot use default seed PINs).'
+          };
+        }
+        var newSalt = Utilities.getUuid().replace(/-/g, '').slice(0, 16);
+        var newStretched = 'v2:' + newSalt + ':' + hashPinV2(cleanNewPin, newSalt);
+        staffSheet.getRange(i + 1, 6).setValue(newStretched);
+        staffSheet.getRange(i + 1, 9).setValue(false);
+      } else if (storedPin.indexOf('v2:') !== 0) {
+        // Upgrade legacy hash to v2 per-user salted 20,000-round hash
+        var upgradeSalt = Utilities.getUuid().replace(/-/g, '').slice(0, 16);
+        staffSheet.getRange(i + 1, 6).setValue('v2:' + upgradeSalt + ':' + hashPinV2(enteredStr, upgradeSalt));
+      }
+
+      var sessionToken = Utilities.getUuid();
+      var role = String(data[i][3] || 'Cashier');
+      cache.put('sess_' + sessionToken, JSON.stringify({
+        id: String(data[i][0]),
+        username: String(data[i][1]),
+        role: role
+      }), 21600);
+
+      return {
+        success: true,
+        sessionToken: sessionToken,
+        user: {
+          id: String(data[i][0]),
+          username: String(data[i][1]),
+          name: String(data[i][2]),
+          role: role,
+          phone: String(data[i][4] || ''),
+          avatarColor: String(data[i][6] || 'bg-purple-600')
+        }
+      };
     }
   }
+  cache.put(failKey, String(fails + 1), 300);
   return { success: false, message: 'Username "' + inputUsername + '" is not registered.' };
 }
 
@@ -314,6 +394,18 @@ function recordSaleTransaction(saleData) {
 
     if (!saleData.items || saleData.items.length === 0) {
       throw new Error('Cannot record an empty sale transaction.');
+    }
+
+    // Resolve callerRole from server session token cache (R11.3: never trust role sent in request body)
+    var callerRole = 'Cashier';
+    if (saleData.sessionToken) {
+      var rawSess = CacheService.getScriptCache().get('sess_' + String(saleData.sessionToken));
+      if (rawSess) {
+        var parsedSess = parseJsonSafely(rawSess, null);
+        if (parsedSess && parsedSess.role) {
+          callerRole = String(parsedSess.role);
+        }
+      }
     }
 
     // 1. PHASE 1 (READ & VALIDATE ALL ITEMS FIRST): Never mutate sheet rows until every line item passes stock, IMEI, and price checks
@@ -349,6 +441,10 @@ function recordSaleTransaction(saleData) {
       }
 
       var isSerialized = Boolean(pData[matchedRow][8] === true || pData[matchedRow][8] === 'TRUE' || pData[matchedRow][8] === 'true');
+      // R11.4: Enforce one unit per serialized line so stock and IMEI list never drift apart
+      if (isSerialized && reqQty !== 1) {
+        throw new Error('Serialized items must be sold one unit per line.');
+      }
       var availableImeis = rowImeiMap[matchedRow];
       if (item.imei) {
         var imeiIdx = availableImeis.indexOf(String(item.imei));
@@ -356,7 +452,7 @@ function recordSaleTransaction(saleData) {
           throw new Error('IMEI "' + item.imei + '" for "' + pData[matchedRow][1] + '" is not in stock (already sold or invalid).');
         }
         availableImeis.splice(imeiIdx, 1);
-      } else if (isSerialized && availableImeis.length > 0) {
+      } else if (isSerialized) {
         throw new Error('Product "' + pData[matchedRow][1] + '" requires a valid in-stock IMEI selection.');
       }
 
@@ -369,14 +465,14 @@ function recordSaleTransaction(saleData) {
 
       var sheetCostPrice = Math.round(Number(pData[matchedRow][4]) || 0);
       var sheetSellingPrice = Math.round(Number(pData[matchedRow][5]) || 0);
-      // Authoritative server price enforcement: default to sheetSellingPrice and disallow selling below cost
+      // R11.3: Only Owner/Manager (verified via sessionToken) can override catalog selling price
       var submittedPrice = Number(item.unitPrice);
-      var unitPrice = (!isNaN(submittedPrice) && submittedPrice >= sheetCostPrice)
+      var unitPrice = (canOverridePrice(callerRole) && !isNaN(submittedPrice) && submittedPrice > 0)
         ? Math.round(submittedPrice)
         : sheetSellingPrice;
       var discount = Math.max(0, Math.round(Number(item.discount) || 0));
       var finalPrice = Math.round(unitPrice * reqQty - discount);
-      if (sheetCostPrice > 0 && finalPrice < sheetCostPrice * reqQty) {
+      if (sheetCostPrice > 0 && finalPrice < sheetCostPrice * reqQty && !canOverridePrice(callerRole)) {
         throw new Error('Price below cost floor rejected for "' + pData[matchedRow][1] + '".');
       }
 
@@ -406,7 +502,7 @@ function recordSaleTransaction(saleData) {
       }
     }
 
-    // 3. Allocate sequential invoice number under script lock
+    // 3. Allocate sequential invoice number under script lock (refuses if Settings sheet is missing)
     var invoiceNumber = allocateSequentialInvoiceNumber(settingsSheet);
 
     var discountTotal = Math.max(0, Math.round(Number(saleData.discountTotal) || 0));
@@ -565,16 +661,13 @@ function parseJsonSafely(str, fallback) {
 }
 
 function allocateSequentialInvoiceNumber(settingsSheet) {
-  var d = new Date();
-  var y = d.getFullYear();
-  var m = ('0' + (d.getMonth() + 1)).slice(-2);
-  var day = ('0' + d.getDate()).slice(-2);
-  var yyyymmdd = '' + y + m + day;
-  var counterKey = 'invoiceSeq_' + yyyymmdd;
-
+  // R11.5: Refuse to sell when Settings sheet is missing instead of falling back to duplicate INV-yyyymmdd-0001
   if (!settingsSheet) {
-    return 'INV-' + yyyymmdd + '-0001';
+    throw new Error('Settings sheet missing; cannot allocate invoice number.');
   }
+
+  var yyyymmdd = Utilities.formatDate(new Date(), 'Asia/Yangon', 'yyyyMMdd');
+  var counterKey = 'invoiceSeq_' + yyyymmdd;
 
   var data = settingsSheet.getDataRange().getValues();
   var foundRow = -1;
@@ -599,7 +692,8 @@ function allocateSequentialInvoiceNumber(settingsSheet) {
   return 'INV-' + yyyymmdd + '-' + padded;
 }
 
-function generateInvoiceNumber() {
+// R11.5: Private helper (trailing underscore) so browser google.script.run cannot invoke it outside the script lock
+function generateInvoiceNumber_() {
   var ss = getSpreadsheet();
   return allocateSequentialInvoiceNumber(ss ? ss.getSheetByName('Settings') : null);
 }

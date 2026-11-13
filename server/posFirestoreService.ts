@@ -2,7 +2,6 @@ import 'dotenv/config';
 import { collection, getDocs, doc, getDoc, setDoc, runTransaction } from 'firebase/firestore';
 import {
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
 } from 'firebase/auth';
 import { db, auth } from '../src/lib/firebase';
 import type { PosDataContext } from './aiAssistant';
@@ -15,13 +14,18 @@ import type {
   CashDrawerRecord,
 } from '../src/types';
 
+let lastFirestoreAuthError: string | null = null;
+
+let hasLoggedMissingServiceAuth = false;
+
 /**
  * Ensures authentication with Firebase so that Firestore security rules
  * permit read and write operations from background/server processes.
- * Item 3: Never fall back to hardcoded credentials or anonymous sign-in.
+ * R12: Never fall back to hardcoded credentials, anonymous sign-in, or auto-signup (createUserWithEmailAndPassword).
  */
 export async function ensureAuth() {
   if (auth.currentUser) {
+    lastFirestoreAuthError = null;
     return auth.currentUser;
   }
 
@@ -29,30 +33,27 @@ export async function ensureAuth() {
   const password = (process.env.MCP_AUTH_PASSWORD || process.env.FIREBASE_AUTH_PASSWORD || '').trim();
 
   if (!email || !password) {
+    lastFirestoreAuthError = 'MCP_AUTH_EMAIL / MCP_AUTH_PASSWORD are not configured';
     return null;
   }
 
   try {
     const cred = await signInWithEmailAndPassword(auth, email, password);
+    lastFirestoreAuthError = null;
     console.error(`[FirestoreService] Authenticated with Firebase as ${cred.user.email}`);
     return cred.user;
   } catch (signInErr: any) {
-    if (
-      signInErr.code === 'auth/user-not-found' ||
-      signInErr.code === 'auth/invalid-credential'
-    ) {
-      try {
-        const newCred = await createUserWithEmailAndPassword(auth, email, password);
-        console.error(`[FirestoreService] Created & authenticated service account: ${newCred.user.email}`);
-        return newCred.user;
-      } catch (createErr: any) {
-        console.error('[FirestoreService] Service account creation notice:', createErr.message);
-      }
-    } else {
-      console.error('[FirestoreService] Sign-in notice:', signInErr.message);
+    lastFirestoreAuthError = signInErr?.message || 'Firebase service account sign-in failed';
+    if (!hasLoggedMissingServiceAuth) {
+      hasLoggedMissingServiceAuth = true;
+      console.error('[FirestoreService] Service account sign-in failed (R12 — auto-creation disabled):', lastFirestoreAuthError);
     }
     return null;
   }
+}
+
+export function getLastFirestoreAuthError(): string | null {
+  return lastFirestoreAuthError;
 }
 
 let serverStateSnapshotGetter: (() => Record<string, any> | null) | null = null;
@@ -68,97 +69,116 @@ export function getServerStateSnapshot(): Record<string, any> | null {
 /**
  * Fetches current POS and inventory state directly from the Firestore database
  * to construct a fresh PosDataContext for report and inventory evaluation.
+ * R12: If Firestore reads fail and no authenticated snapshot is available, marks dataUnavailable=true
+ * so callers report "data unavailable" instead of silently answering "0 sales".
  */
 export async function fetchPosDataContext(): Promise<PosDataContext> {
-  await ensureAuth();
-
-  const [
-    productsSnap,
-    salesSnap,
-    expensesSnap,
-    purchasesSnap,
-    settingsSnap,
-    cashDrawerSnap,
-  ] = await Promise.allSettled([
-    getDocs(collection(db, 'products')),
-    getDocs(collection(db, 'sales')),
-    getDocs(collection(db, 'expenses')),
-    getDocs(collection(db, 'purchases')),
-    getDoc(doc(db, 'settings', 'global')),
-    getDoc(doc(db, 'cashDrawer', 'current')),
-  ]);
+  const authedUser = await ensureAuth();
 
   let products: Product[] = [];
-  if (productsSnap.status === 'fulfilled') {
-    productsSnap.value.forEach((d) => {
-      products.push({ id: d.id, ...(d.data() as any) });
-    });
-  } else {
-    console.error('[FirestoreService] Failed to load products collection:', productsSnap.reason);
-  }
-
   let sales: Sale[] = [];
-  if (salesSnap.status === 'fulfilled') {
-    salesSnap.value.forEach((d) => {
-      const data = d.data() as any;
-      if (data && !data.archived && data.status !== 'voided') {
-        sales.push({ id: d.id, ...data });
-      }
-    });
-  } else {
-    console.error('[FirestoreService] Failed to load sales collection:', salesSnap.reason);
-  }
-
   let expenses: ExpenseRecord[] = [];
-  if (expensesSnap.status === 'fulfilled') {
-    expensesSnap.value.forEach((d) => {
-      expenses.push({ id: d.id, ...(d.data() as any) });
-    });
-  } else {
-    console.error('[FirestoreService] Failed to load expenses collection:', expensesSnap.reason);
-  }
-
   let purchases: PurchaseRecord[] = [];
-  if (purchasesSnap.status === 'fulfilled') {
-    purchasesSnap.value.forEach((d) => {
-      purchases.push({ id: d.id, ...(d.data() as any) });
-    });
-  } else {
-    console.error('[FirestoreService] Failed to load purchases collection:', purchasesSnap.reason);
-  }
-
   let settings: ShopSettings | undefined = undefined;
-  if (settingsSnap.status === 'fulfilled' && settingsSnap.value.exists()) {
-    settings = settingsSnap.value.data() as ShopSettings;
-  }
-
   let cashDrawer: CashDrawerRecord | undefined = undefined;
-  if (cashDrawerSnap.status === 'fulfilled' && cashDrawerSnap.value.exists()) {
-    cashDrawer = cashDrawerSnap.value.data() as CashDrawerRecord;
+  let firestoreReadFailed = !authedUser;
+  let firestoreFailureReason = !authedUser
+    ? (lastFirestoreAuthError || 'Service account not authenticated')
+    : '';
+
+  if (authedUser) {
+    const [
+      productsSnap,
+      salesSnap,
+      expensesSnap,
+      purchasesSnap,
+      settingsSnap,
+      cashDrawerSnap,
+    ] = await Promise.allSettled([
+      getDocs(collection(db, 'products')),
+      getDocs(collection(db, 'sales')),
+      getDocs(collection(db, 'expenses')),
+      getDocs(collection(db, 'purchases')),
+      getDoc(doc(db, 'settings', 'global')),
+      getDoc(doc(db, 'cashDrawer', 'current')),
+    ]);
+
+    if (productsSnap.status === 'fulfilled') {
+      productsSnap.value.forEach((d) => {
+        products.push({ id: d.id, ...(d.data() as any) });
+      });
+    } else {
+      firestoreReadFailed = true;
+      firestoreFailureReason = productsSnap.reason?.message || String(productsSnap.reason || 'Products read denied');
+    }
+
+    if (salesSnap.status === 'fulfilled') {
+      salesSnap.value.forEach((d) => {
+        const data = d.data() as any;
+        if (data && !data.archived && data.status !== 'voided') {
+          sales.push({ id: d.id, ...data });
+        }
+      });
+    } else {
+      firestoreReadFailed = true;
+      firestoreFailureReason = salesSnap.reason?.message || String(salesSnap.reason || 'Sales read denied');
+    }
+
+    if (expensesSnap.status === 'fulfilled') {
+      expensesSnap.value.forEach((d) => {
+        expenses.push({ id: d.id, ...(d.data() as any) });
+      });
+    }
+
+    if (purchasesSnap.status === 'fulfilled') {
+      purchasesSnap.value.forEach((d) => {
+        purchases.push({ id: d.id, ...(d.data() as any) });
+      });
+    }
+
+    if (settingsSnap.status === 'fulfilled' && settingsSnap.value.exists()) {
+      settings = settingsSnap.value.data() as ShopSettings;
+    }
+
+    if (cashDrawerSnap.status === 'fulfilled' && cashDrawerSnap.value.exists()) {
+      cashDrawer = cashDrawerSnap.value.data() as CashDrawerRecord;
+    }
   }
 
   // Firestore is the authoritative source of truth; fall back to in-memory server state snapshot only if Firestore returned empty
   const serverState = getServerStateSnapshot();
+  let usedServerSnapshot = false;
   if (serverState) {
     if (sales.length === 0 && Array.isArray(serverState.sales) && serverState.sales.length > 0) {
       sales = serverState.sales;
+      usedServerSnapshot = true;
     }
     if (products.length === 0 && Array.isArray(serverState.products) && serverState.products.length > 0) {
       products = serverState.products;
+      usedServerSnapshot = true;
     }
     if (expenses.length === 0 && Array.isArray(serverState.expenses) && serverState.expenses.length > 0) {
       expenses = serverState.expenses;
+      usedServerSnapshot = true;
     }
     if (purchases.length === 0 && Array.isArray(serverState.purchases) && serverState.purchases.length > 0) {
       purchases = serverState.purchases;
+      usedServerSnapshot = true;
     }
     if (!settings && serverState.settings) {
       settings = serverState.settings;
+      usedServerSnapshot = true;
     }
     if (!cashDrawer && serverState.cashDrawer) {
       cashDrawer = serverState.cashDrawer;
+      usedServerSnapshot = true;
     }
   }
+
+  const dataUnavailable = Boolean((!authedUser || firestoreReadFailed) && !usedServerSnapshot);
+  const dataUnavailableReason = dataUnavailable
+    ? `Data unavailable: Server could not read Firestore (${lastFirestoreAuthError || firestoreFailureReason || 'Service credentials missing or access denied'}).`
+    : undefined;
 
   return {
     products,
@@ -168,6 +188,8 @@ export async function fetchPosDataContext(): Promise<PosDataContext> {
     settings,
     cashDrawer,
     currencySymbol: settings?.currencySymbol || 'MMK',
+    dataUnavailable,
+    dataUnavailableReason,
   };
 }
 
@@ -176,7 +198,11 @@ export async function fetchPosDataContext(): Promise<PosDataContext> {
  */
 export async function persistProductToFirestore(product: Product): Promise<boolean> {
   try {
-    await ensureAuth();
+    const user = await ensureAuth();
+    if (!user) {
+      console.error('[FirestoreService] Cannot persist product: service account is not authenticated (R12).');
+      return false;
+    }
     if (!product.id) return false;
     await setDoc(doc(db, 'products', product.id), product, { merge: true });
     console.log(`[FirestoreService] Successfully persisted product "${product.name}" (${product.id}) to Firestore.`);
@@ -196,7 +222,11 @@ export async function persistProductPriceUpdateToFirestore(
   costPrice?: number
 ): Promise<boolean> {
   try {
-    await ensureAuth();
+    const user = await ensureAuth();
+    if (!user) {
+      console.error('[FirestoreService] Cannot update product price: service account is not authenticated (R12).');
+      return false;
+    }
     if (!productId) return false;
     const nowIso = new Date().toISOString();
     await setDoc(
@@ -222,7 +252,11 @@ export async function persistProductPriceUpdateToFirestore(
  */
 export async function updateSettingSecretInFirestore(key: string, value: any): Promise<boolean> {
   try {
-    await ensureAuth();
+    const user = await ensureAuth();
+    if (!user) {
+      console.error('[FirestoreService] Cannot update setting secret: service account is not authenticated (R12).');
+      return false;
+    }
     await setDoc(
       doc(db, 'settings', 'global'),
       {
@@ -270,7 +304,8 @@ export async function claimTelegramMessageLock(lockKey: string, instanceId: stri
 
   // 2. Distributed Firestore atomic transaction claim across all server instances
   try {
-    await ensureAuth();
+    const user = await ensureAuth();
+    if (!user) return false;
     const docRef = doc(db, 'telegram_processed_messages', sanitizedKey);
     const claimed = await runTransaction(db, async (txn) => {
       const snap = await txn.get(docRef);
@@ -310,7 +345,8 @@ export async function acquireTelegramPollingLease(
   ttlMs: number = 35000
 ): Promise<{ isLeader: boolean; leaderId?: string }> {
   try {
-    await ensureAuth();
+    const user = await ensureAuth();
+    if (!user) return { isLeader: false, leaderId: '' };
     const now = Date.now();
     const docRef = doc(db, 'telegram_bot_state', 'polling_lease');
 
@@ -345,7 +381,8 @@ export async function acquireTelegramPollingLease(
  */
 export async function getTelegramPollingOffset(): Promise<number> {
   try {
-    await ensureAuth();
+    const user = await ensureAuth();
+    if (!user) return 0;
     const snap = await getDoc(doc(db, 'telegram_bot_state', 'polling_offset'));
     if (snap.exists()) {
       const val = snap.data()?.offset;
@@ -362,7 +399,8 @@ export async function getTelegramPollingOffset(): Promise<number> {
  */
 export async function saveTelegramPollingOffset(offset: number): Promise<void> {
   try {
-    await ensureAuth();
+    const user = await ensureAuth();
+    if (!user) return;
     await setDoc(
       doc(db, 'telegram_bot_state', 'polling_offset'),
       {

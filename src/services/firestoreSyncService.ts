@@ -4,10 +4,13 @@ import {
   getDocs, 
   getDoc,
   setDoc, 
+  updateDoc,
   deleteDoc,
+  deleteField,
   writeBatch, 
   runTransaction,
   increment,
+  arrayUnion,
   onSnapshot, 
   query, 
   where,
@@ -161,11 +164,8 @@ export class FirestoreSyncService {
         this.updateStatus({ isConnected: false });
       });
 
-      // Start pre-auth listener for staffUsers and settings so login terminal is always up to date
-      this.startPreAuthSync();
-
       FirebaseAuthService.onAuthChanged((user) => {
-        const isAuth = Boolean(user) || FirebaseAuthService.isAuthenticated();
+        const isAuth = Boolean(user) || FirebaseAuthService.hasFirebaseSession();
         if (isAuth) {
           this.stopPreAuthSync();
           this.updateStatus({ isConnected: true, error: null });
@@ -174,8 +174,10 @@ export class FirestoreSyncService {
           this.flushPendingAuditLogs();
         } else {
           this.stopRealtimeSync();
-          this.startPreAuthSync();
           this.updateStatus({ isConnected: false });
+          this.markCollectionHydrated('settings');
+          this.markCollectionHydrated('products');
+          this.markCollectionHydrated('staffUsers');
         }
       });
     }
@@ -370,6 +372,11 @@ export class FirestoreSyncService {
           this.syncClosedCashDrawerShift(shift);
         }
       },
+      onCashDrawerEntryAdded: (params) => {
+        if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
+          this.syncCashDrawerEntry(params);
+        }
+      },
       onSocialMarketingStateUpsert: (state) => {
         if (!this.isSyncPaused && !this.isProcessingRemoteSnapshot && FirebaseAuthService.isAuthenticated()) {
           this.syncSocialMarketingState(state);
@@ -447,6 +454,9 @@ export class FirestoreSyncService {
    */
   public startPreAuthSync() {
     this.stopPreAuthSync();
+    if (!FirebaseAuthService.hasFirebaseSession()) {
+      return;
+    }
     try {
       // 1. Pre-auth Staff Users Listener
       const unsubStaff = onSnapshot(query(collection(db, 'staffUsers'), limit(500)), (snap) => {
@@ -459,8 +469,11 @@ export class FirestoreSyncService {
                 ...data,
                 id: data.id || d.id,
                 active: data.active !== false,
-                password: data.password || data.pin,
-                pin: data.pin || data.password || '1234',
+                pin: '',
+                password: undefined,
+                credentialHash: data.credentialHash,
+                credentialSalt: data.credentialSalt,
+                credentialIterations: data.credentialIterations,
               });
             }
           });
@@ -526,6 +539,13 @@ export class FirestoreSyncService {
       return;
     }
 
+    if (!FirebaseAuthService.hasFirebaseSession()) {
+      this.markCollectionHydrated('settings');
+      this.markCollectionHydrated('products');
+      this.markCollectionHydrated('staffUsers');
+      return;
+    }
+
     try {
       // Offline fallback timer: ensure UI unblocks after 2.5s even if network is offline
       setTimeout(() => {
@@ -534,8 +554,11 @@ export class FirestoreSyncService {
         this.markCollectionHydrated('staffUsers');
       }, 2500);
 
-      // Purge any residual mock data (purchases, expenses, announcements, staff, etc.) from Firestore in the background
+      // Purge any residual mock data and migrate any legacy plaintext staff PINs/passwords to PBKDF2 + deleteField() (R3)
       this.purgeAllRemoteMockData().catch(() => {});
+      this.migrateStaffPlaintextCredentials().catch(() => {});
+      this.replayPendingSales().catch(() => {});
+      this.replayPendingOfflineRefunds().catch(() => {});
 
       // 1. Settings Listener
       const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snap) => {
@@ -678,24 +701,24 @@ export class FirestoreSyncService {
             }
           });
 
-          // Automatically purge any detected mock sales from the cloud database
-          if (mockIdsToDelete.length > 0) {
-            this.deleteSales(mockIdsToDelete).catch((err) => {
-              console.warn('[FirestoreSync] Failed to purge mock sales from cloud:', err);
-            });
-          }
+          // Note: Sales are immutable in Firestore (R4: allow delete: if false); mock sales are filtered out in-memory above without issuing forbidden deleteDoc calls.
 
-          // Preserve any offline-created local sales with syncState === 'pending' that haven't reached cloud yet
+          // Preserve any offline-created local sales with syncState === 'pending' or 'conflict' and replay pending sales atomically (R4)
           const remoteIdSet = new Set(remoteSales.map(s => s.id));
           const localPendingSales = StorageService.getSales().filter(
-            ls => ls && ls.id && ls.syncState === 'pending' && !remoteIdSet.has(ls.id) && !removedIds.has(ls.id)
+            ls => ls && ls.id && (ls.syncState === 'pending' || ls.syncState === 'conflict') && !remoteIdSet.has(ls.id) && !removedIds.has(ls.id)
           );
           if (localPendingSales.length > 0) {
             for (const pendingSale of localPendingSales) {
               remoteSales.push(pendingSale);
-              if (typeof navigator !== 'undefined' && navigator.onLine && FirebaseAuthService.isAuthenticated()) {
-                this.syncSale(pendingSale).catch(() => {});
-              }
+            }
+            if (
+              localPendingSales.some(s => s.syncState === 'pending') &&
+              typeof navigator !== 'undefined' &&
+              navigator.onLine &&
+              FirebaseAuthService.isAuthenticated()
+            ) {
+              this.replayPendingSales().catch(() => {});
             }
           }
 
@@ -991,9 +1014,11 @@ export class FirestoreSyncService {
               remoteStaff.push({
                 ...data,
                 id: staffId,
-                pin: data.pin || existingLocal?.pin || '',
-                password: data.password || existingLocal?.password,
+                pin: '',
+                password: undefined,
                 credentialHash: data.credentialHash || existingLocal?.credentialHash,
+                credentialSalt: data.credentialSalt || existingLocal?.credentialSalt,
+                credentialIterations: data.credentialIterations || existingLocal?.credentialIterations,
               });
             } else if (data && isMockStaffUser(data)) {
               deleteDoc(d.ref).catch(() => {});
@@ -1381,9 +1406,7 @@ export class FirestoreSyncService {
             }
           });
 
-          if (mockAuditLogsToDelete.length > 0) {
-            mockAuditLogsToDelete.forEach(id => deleteDoc(doc(db, 'auditLogs', id)).catch(() => {}));
-          }
+          // Note: Audit logs are append-only in Firestore (allow delete: if false); mock logs are filtered out in-memory above.
 
           StorageService.saveAuditLogs(remoteLogs, false);
           if (typeof window !== 'undefined') {
@@ -1703,16 +1726,19 @@ export class FirestoreSyncService {
             }
           }
 
-          // Read sequential invoice counter & optional credit counter
-          const nowDate = new Date();
-          const yyyymmdd = `${nowDate.getFullYear()}${String(nowDate.getMonth() + 1).padStart(2, '0')}${String(nowDate.getDate()).padStart(2, '0')}`;
-          const invCtrRef = doc(db, 'counters', `invoice-${saleLocId}-${yyyymmdd}`);
+          // R8: Read sequential invoice counter & optional credit counter using branch code and fixed Asia/Yangon date
+          const loc = StorageService.getLocations().find(l => l.id === saleLocId);
+          const locCode = ((loc?.code || saleLocId || 'MAIN').replace(/[^A-Za-z0-9]/g, '') || 'MAIN').toUpperCase();
+          const yyyymmdd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Yangon' })
+            .format(new Date())
+            .replace(/-/g, '');
+          const invCtrRef = doc(db, 'counters', `invoice-${locCode}-${yyyymmdd}`);
           const invCtrSnap = await transaction.get(invCtrRef);
 
           let crdCtrRef: any = null;
           let crdCtrSnap: any = null;
           if (finalizedCreditRecord) {
-            crdCtrRef = doc(db, 'counters', `credit-${saleLocId}-${yyyymmdd}`);
+            crdCtrRef = doc(db, 'counters', `credit-${locCode}-${yyyymmdd}`);
             crdCtrSnap = await transaction.get(crdCtrRef);
           }
 
@@ -1750,6 +1776,19 @@ export class FirestoreSyncService {
             drawerSnap = await transaction.get(drawerRef);
           }
 
+          // Read authenticated user's verified role and permissions from Firestore (R6: never trust localStorage alone)
+          const activeSettings = StorageService.getSettings();
+          const currentFbUser = FirebaseAuthService.getFirebaseUser();
+          let staffAccessSnap: any = null;
+          let staffDocSnap: any = null;
+          if (currentFbUser?.uid) {
+            staffAccessSnap = await transaction.get(doc(db, 'staffAccess', currentFbUser.uid));
+          }
+          if (activeSettings.currentStaffId) {
+            staffDocSnap = await transaction.get(doc(db, 'staffUsers', activeSettings.currentStaffId));
+          }
+          const rolePermsSnap = await transaction.get(doc(db, 'rolePermissions', 'global'));
+
           // --- VALIDATIONS ---
           if (preOrderSnap && preOrderSnap.exists()) {
             const livePreOrder = preOrderSnap.data() as PreOrder;
@@ -1758,10 +1797,21 @@ export class FirestoreSyncService {
             }
           }
 
-          // --- VALIDATIONS: Recompute Line-Item Math, Price Override & Below-Cost Guard (Item 9 & H3) ---
-          const activeSettings = StorageService.getSettings();
-          const staffRole = activeSettings.currentStaffRole || 'Cashier';
-          const rolePerms = StorageService.getRolePermissions()?.[staffRole];
+          // --- VALIDATIONS: Recompute Line-Item Math, Price Override & Below-Cost Guard (Item 9 & R6) ---
+          const fbEmail = (currentFbUser?.email || '').toLowerCase();
+          const isBootstrapOwnerEmail = fbEmail === 'phonemyatpaing950@gmail.com' || fbEmail === 'owner@apexpos.internal';
+          const cloudRole = (
+            isBootstrapOwnerEmail
+              ? 'Owner'
+              : staffAccessSnap?.exists()
+                ? staffAccessSnap.data()?.role
+                : staffDocSnap?.exists()
+                  ? staffDocSnap.data()?.role
+                  : activeSettings.currentStaffRole
+          ) as StaffRole || 'Cashier';
+          const staffRole: StaffRole = cloudRole;
+          const cloudPermsMap = rolePermsSnap?.exists() ? rolePermsSnap.data()?.permissions : StorageService.getRolePermissions();
+          const rolePerms = cloudPermsMap?.[staffRole] || StorageService.getRolePermissions()?.[staffRole];
           const isPrivilegedRole = staffRole === 'Owner' || staffRole === 'Manager';
           const canOverridePrice = isPrivilegedRole || Boolean(rolePerms?.canEditPrice);
           const canGiveDiscount = isPrivilegedRole || Boolean(rolePerms?.canGiveDiscount);
@@ -1784,7 +1834,8 @@ export class FirestoreSyncService {
                 throw new Error(`Permission Denied: Role "${staffRole}" is not authorized to issue FOC items.`);
               }
               if (!line.isFoc) {
-                if (liveSelling > 0 && unitPrice !== liveSelling && !canOverridePrice && !canGiveDiscount) {
+                // R6 Fix: Price override strictly requires canOverridePrice (canEditPrice), never bypassed by canGiveDiscount
+                if (liveSelling > 0 && unitPrice !== liveSelling && !canOverridePrice) {
                   throw new Error(
                     `Price Override Denied: "${line.name}" was submitted at ${unitPrice.toLocaleString()} Ks instead of catalog price ${liveSelling.toLocaleString()} Ks.`
                   );
@@ -1923,19 +1974,19 @@ export class FirestoreSyncService {
             }
           }
 
-          // --- WRITES: Sequential Counters (Item 4: Always assign authoritative sequential invoice & credit numbers) ---
+          // --- WRITES: Sequential Counters (Item 4 & R8: Always assign authoritative sequential invoice & credit numbers with branch code & Myanmar date) ---
           const currentInvSeq = invCtrSnap.exists() ? (invCtrSnap.data()?.seq || 0) : 0;
           const nextInvSeq = currentInvSeq + 1;
-          transaction.set(invCtrRef, { seq: nextInvSeq, updatedAt: new Date().toISOString() }, { merge: true });
+          transaction.set(invCtrRef, { seq: nextInvSeq, branchCode: locCode, date: yyyymmdd, updatedAt: new Date().toISOString() }, { merge: true });
 
           const invPrefix = (activeSettings.invoicePrefix || 'INV').replace(/-+$/, '');
-          finalizedSale.invoiceNumber = `${invPrefix}-${yyyymmdd}-${String(nextInvSeq).padStart(4, '0')}`;
+          finalizedSale.invoiceNumber = `${invPrefix}-${locCode}-${yyyymmdd}-${String(nextInvSeq).padStart(4, '0')}`;
 
           if (finalizedCreditRecord && crdCtrRef) {
             const currentCrdSeq = crdCtrSnap?.exists() ? (crdCtrSnap.data()?.seq || 0) : 0;
             const nextCrdSeq = currentCrdSeq + 1;
-            transaction.set(crdCtrRef, { seq: nextCrdSeq, updatedAt: new Date().toISOString() }, { merge: true });
-            finalizedCreditRecord.creditNumber = `CRD-${yyyymmdd}-${String(nextCrdSeq).padStart(4, '0')}`;
+            transaction.set(crdCtrRef, { seq: nextCrdSeq, branchCode: locCode, date: yyyymmdd, updatedAt: new Date().toISOString() }, { merge: true });
+            finalizedCreditRecord.creditNumber = `CRD-${locCode}-${yyyymmdd}-${String(nextCrdSeq).padStart(4, '0')}`;
             finalizedCreditRecord.invoiceNumber = finalizedSale.invoiceNumber;
             finalizedSale.creditSaleNumber = finalizedCreditRecord.creditNumber;
             finalizedSale.creditSaleId = finalizedCreditRecord.id;
@@ -1991,10 +2042,12 @@ export class FirestoreSyncService {
             }
           }
 
-          // --- WRITES: Atomic Cash Drawer Update (Item 8: Handle both existing and missing cashDrawer/current) ---
+          // --- WRITES: Atomic Cash Drawer Update & Per-Shift Entry (Item 8 & R9) ---
           if (drawerRef && cashAmt > 0) {
             const nowIso = new Date().toISOString();
             const roundedCashAmt = Math.round(cashAmt);
+            const cashierId = finalizedSale.soldById || finalizedSale.soldBy || activeSettings.currentStaffId || 'cashier';
+            const terminalId = StorageService.getTerminalId();
             const txEntry = {
               id: `tx-sale-${finalizedSale.id}`,
               timestamp: nowIso,
@@ -2004,36 +2057,48 @@ export class FirestoreSyncService {
                 ? `Credit Down Payment #${finalizedCreditRecord.creditNumber} (${finalizedSale.customerName})`
                 : `POS Invoice #${finalizedSale.invoiceNumber} (${finalizedSale.customerName})`,
               amount: roundedCashAmt,
+              cashierId,
+              terminalId,
             };
-            if (drawerSnap && drawerSnap.exists()) {
-              const liveDrawer = drawerSnap.data() as CashDrawerRecord;
+            const localDrawer = StorageService.getCashDrawer();
+            const liveDrawer = drawerSnap && drawerSnap.exists() ? (drawerSnap.data() as CashDrawerRecord) : undefined;
+            const activeShiftId = liveDrawer?.id || localDrawer.id || `shift-${yyyymmdd}`;
+
+            // Write immutable per-shift drawer entry document (R9)
+            const shiftEntryRef = doc(db, 'cashDrawerShifts', activeShiftId, 'entries', txEntry.id);
+            transaction.set(shiftEntryRef, sanitizeForFirestore({
+              ...txEntry,
+              shiftId: activeShiftId,
+              locationId: saleLocId,
+              updatedAt: nowIso,
+            }));
+
+            if (liveDrawer) {
               const existingTxs = Array.isArray(liveDrawer.transactions) ? liveDrawer.transactions : [];
               const alreadyBooked = existingTxs.some(t => t.id === txEntry.id);
               if (!alreadyBooked) {
-                transaction.update(drawerRef, sanitizeForFirestore({
-                  cashSales: Math.round((liveDrawer.cashSales || 0) + roundedCashAmt),
-                  expectedInDrawer: Math.round((liveDrawer.expectedInDrawer || 0) + roundedCashAmt),
-                  totalCashIn: Math.round((liveDrawer.totalCashIn || 0) + roundedCashAmt),
-                  transactions: [txEntry, ...existingTxs].slice(0, 500),
+                transaction.update(drawerRef, {
+                  cashSales: increment(roundedCashAmt),
+                  expectedInDrawer: increment(roundedCashAmt),
+                  totalCashIn: increment(roundedCashAmt),
+                  transactions: arrayUnion(sanitizeForFirestore(txEntry)),
                   syncedAt: nowIso,
-                }));
+                });
               }
             } else {
-              const localDrawer = StorageService.getCashDrawer();
               const openingFloat = Math.round(Number(localDrawer.openingFloat || localDrawer.openingBalance || 0));
               transaction.set(drawerRef, sanitizeForFirestore({
-                ...localDrawer,
-                id: localDrawer.id || `shift-${nowIso.slice(0, 10)}`,
+                id: activeShiftId,
                 date: localDrawer.date || nowIso.slice(0, 10),
                 openedAt: localDrawer.openedAt || nowIso,
                 openedBy: localDrawer.openedBy || finalizedSale.soldBy || 'Cashier',
                 status: 'open',
                 openingFloat,
                 cashSales: roundedCashAmt,
-                cashInManual: localDrawer.cashInManual || [],
-                cashOutManual: localDrawer.cashOutManual || [],
+                cashInManual: [],
+                cashOutManual: [],
                 totalCashIn: roundedCashAmt,
-                totalCashOut: Math.round(Number(localDrawer.totalCashOut || 0)),
+                totalCashOut: 0,
                 expectedInDrawer: openingFloat + roundedCashAmt,
                 transactions: [txEntry],
                 syncedAt: nowIso,
@@ -2127,6 +2192,7 @@ export class FirestoreSyncService {
   }): Promise<{ success: boolean; error?: string }> {
     if (!FirebaseAuthService.isAuthenticated() || typeof navigator === 'undefined' || !navigator.onLine) {
       StorageService.processItemRefund(params);
+      StorageService.enqueuePendingOfflineRefund(params);
       return { success: true };
     }
 
@@ -2170,14 +2236,14 @@ export class FirestoreSyncService {
           custSnap = await transaction.get(custRef);
         }
 
-        // Read CreditSaleRecord if credit sale (Item M-b)
+        // Read CreditSaleRecord if credit sale (Item M-b & R8: match strictly by ID, never by invoiceNumber)
         let creditRef: any = null;
         let creditSnap: any = null;
         const linkedCreditId =
           liveSale.creditSaleId ||
           liveSale.paymentDetails?.creditSaleId ||
           (liveSale.paymentMethod === 'credit'
-            ? StorageService.getCreditSales().find(cs => cs.saleId === liveSale.id || cs.invoiceNumber === liveSale.invoiceNumber)?.id
+            ? StorageService.getCreditSales().find(cs => cs.saleId === liveSale.id)?.id
             : undefined);
         if (linkedCreditId) {
           creditRef = doc(db, 'creditSales', linkedCreditId);
@@ -2328,6 +2394,30 @@ export class FirestoreSyncService {
           }
         }
 
+        // R7: For credit sales, cancel unpaid debt first and only pay out cash/digital up to what the customer actually paid
+        const isCreditSale = Boolean(
+          liveSale.paymentMethod === 'credit' ||
+          liveSale.isCreditSale ||
+          liveSale.creditSaleId ||
+          liveSale.paymentDetails?.creditSaleId ||
+          (creditSnap && creditSnap.exists())
+        );
+        const liveCreditData = creditSnap && creditSnap.exists() ? (creditSnap.data() as CreditSaleRecord) : undefined;
+        const priorCashRefunded = (liveSale.refundHistory || []).reduce(
+          (acc, r) => acc + (r.cashPayoutAmount !== undefined ? r.cashPayoutAmount : (isCreditSale ? 0 : (r.totalRefundAmount || 0))),
+          0
+        );
+        const totalCustomerPaidOnCredit = Math.max(
+          0,
+          Math.round(Number(liveCreditData?.totalPaid ?? liveSale.amountPaid ?? 0)) - priorCashRefunded
+        );
+        const cashBack = isCreditSale
+          ? Math.min(effectiveRefundAmount, totalCustomerPaidOnCredit)
+          : effectiveRefundAmount;
+        const debtCancel = isCreditSale
+          ? Math.max(0, effectiveRefundAmount - cashBack)
+          : 0;
+
         // 5. Write Updated Sale Document
         const totalSoldQty = updatedSaleItems.reduce((sum, item) => sum + item.quantity, 0);
         const totalRefundedQty = updatedSaleItems.reduce((sum, item) => sum + (item.refundedQuantity || 0), 0);
@@ -2346,6 +2436,8 @@ export class FirestoreSyncService {
           digitalChannel: params.digitalChannel || (fundingSource === 'digital_cash_pool' ? params.refundMethod : undefined),
           restockItems: params.restockItems,
           totalRefundAmount: effectiveRefundAmount,
+          cashPayoutAmount: cashBack,
+          debtCancelledAmount: debtCancel,
           refundedBy: params.staffName,
           notes: params.notes,
         };
@@ -2364,12 +2456,12 @@ export class FirestoreSyncService {
         transaction.update(saleRef, sanitizeForFirestore(salePatch));
         committedSaleUpdate = { ...liveSale, id: liveSale.id || params.saleId, ...salePatch };
 
-        // 6. Reverse Customer Spend & Credit Balance + Update creditSales Record (Item M-b)
+        // 6. Reverse Customer Spend & Credit Balance + Update creditSales Record (Item M-b & R7)
         if (custRef && custSnap && custSnap.exists() && effectiveRefundAmount > 0) {
           const liveCust = custSnap.data() as Customer;
           const newSpent = Math.max(0, (liveCust.totalSpent || 0) - effectiveRefundAmount);
-          const newCreditBal = liveSale.paymentMethod === 'credit'
-            ? Math.max(0, (liveCust.outstandingCreditBalance || 0) - effectiveRefundAmount)
+          const newCreditBal = isCreditSale
+            ? Math.max(0, (liveCust.outstandingCreditBalance || 0) - debtCancel)
             : liveCust.outstandingCreditBalance;
 
           transaction.update(custRef, sanitizeForFirestore({
@@ -2386,12 +2478,14 @@ export class FirestoreSyncService {
 
         if (creditRef && creditSnap && creditSnap.exists() && effectiveRefundAmount > 0) {
           const liveCredit = creditSnap.data() as CreditSaleRecord;
-          const newRemBalance = Math.max(0, (liveCredit.remainingBalance || 0) - effectiveRefundAmount);
+          const newRemBalance = Math.max(0, (liveCredit.remainingBalance || 0) - debtCancel);
           const newTotalPayable = Math.max(0, (liveCredit.totalPayable || 0) - effectiveRefundAmount);
+          const newTotalPaid = Math.max(0, (liveCredit.totalPaid || 0) - cashBack);
           const newStatus = newRemBalance <= 0 ? 'paid' : liveCredit.status;
           transaction.update(creditRef, sanitizeForFirestore({
             remainingBalance: newRemBalance,
             totalPayable: newTotalPayable,
+            totalPaid: newTotalPaid,
             status: newStatus,
             updatedAt: nowIso,
           }));
@@ -2399,55 +2493,78 @@ export class FirestoreSyncService {
             ...liveCredit,
             remainingBalance: newRemBalance,
             totalPayable: newTotalPayable,
+            totalPaid: newTotalPaid,
             status: newStatus,
           };
         }
 
-        // 7. Record Cash Drawer Outflow if funded from physical cash drawer (Item 8: Handle both existing & missing doc)
-        if (drawerRef && effectiveRefundAmount > 0) {
+        // 7. Record Cash Drawer Outflow ONLY for cashBack actually paid out (R7, R9 & Item 8)
+        if (drawerRef && cashBack > 0) {
+          const activeSettings = StorageService.getSettings();
+          const cashierId = activeSettings.currentStaffId || params.staffName || 'manager';
+          const terminalId = StorageService.getTerminalId();
           const txEntry = {
             id: `tx-ref-${refundRecord.id}`,
             timestamp: nowIso,
             type: 'out' as const,
             entryType: 'refund' as const,
             description: `Refund Invoice #${liveSale.invoiceNumber} (${params.reason}) - ${refundItemsList.length} item(s) [Physical Cash Drawer]`,
-            amount: effectiveRefundAmount,
+            amount: cashBack,
+            cashierId,
+            terminalId,
           };
           const manualOutEntry = {
             reason: txEntry.description,
-            amount: effectiveRefundAmount,
+            amount: cashBack,
             time: nowIso,
             entryType: 'refund' as const,
+            cashierId,
+            terminalId,
           };
-          if (drawerSnap && drawerSnap.exists()) {
-            const liveDrawer = drawerSnap.data() as CashDrawerRecord;
-            const drawerPatch = {
-              expectedInDrawer: Math.round((liveDrawer.expectedInDrawer || 0) - effectiveRefundAmount),
-              totalCashOut: Math.round((liveDrawer.totalCashOut || 0) + effectiveRefundAmount),
+          const localDrawer = StorageService.getCashDrawer();
+          const liveDrawer = drawerSnap && drawerSnap.exists() ? (drawerSnap.data() as CashDrawerRecord) : undefined;
+          const activeShiftId = liveDrawer?.id || localDrawer.id || `shift-${nowIso.slice(0, 10)}`;
+
+          // Write immutable per-shift drawer entry document (R9)
+          const shiftEntryRef = doc(db, 'cashDrawerShifts', activeShiftId, 'entries', txEntry.id);
+          transaction.set(shiftEntryRef, sanitizeForFirestore({
+            ...txEntry,
+            shiftId: activeShiftId,
+            locationId: saleLocId,
+            updatedAt: nowIso,
+          }));
+
+          if (liveDrawer) {
+            transaction.update(drawerRef, {
+              expectedInDrawer: increment(-cashBack),
+              totalCashOut: increment(cashBack),
+              cashOutManual: arrayUnion(sanitizeForFirestore(manualOutEntry)),
+              transactions: arrayUnion(sanitizeForFirestore(txEntry)),
+              syncedAt: nowIso,
+            });
+            committedDrawerUpdate = {
+              ...liveDrawer,
+              expectedInDrawer: Math.round((liveDrawer.expectedInDrawer || 0) - cashBack),
+              totalCashOut: Math.round((liveDrawer.totalCashOut || 0) + cashBack),
               cashOutManual: [...(liveDrawer.cashOutManual || []), manualOutEntry],
               transactions: [txEntry, ...(liveDrawer.transactions || [])].slice(0, 500),
-              syncedAt: nowIso,
             };
-            transaction.update(drawerRef, sanitizeForFirestore(drawerPatch));
-            committedDrawerUpdate = { ...liveDrawer, ...drawerPatch };
           } else {
-            const localDrawer = StorageService.getCashDrawer();
             const openingFloat = Math.round(Number(localDrawer.openingFloat || localDrawer.openingBalance || 0));
             const initializedDrawer: CashDrawerRecord = {
-              ...localDrawer,
-              id: localDrawer.id || `shift-${nowIso.slice(0, 10)}`,
+              id: activeShiftId,
               date: localDrawer.date || nowIso.slice(0, 10),
               openedAt: localDrawer.openedAt || nowIso,
               openedBy: localDrawer.openedBy || params.staffName || 'Manager',
               status: 'open',
               openingFloat,
-              cashSales: Math.round(Number(localDrawer.cashSales || 0)),
-              cashInManual: localDrawer.cashInManual || [],
-              cashOutManual: [...(localDrawer.cashOutManual || []), manualOutEntry],
-              totalCashIn: Math.round(Number(localDrawer.totalCashIn || 0)),
-              totalCashOut: Math.round(Number(localDrawer.totalCashOut || 0) + effectiveRefundAmount),
-              expectedInDrawer: Math.max(0, Math.round((localDrawer.expectedInDrawer || openingFloat) - effectiveRefundAmount)),
-              transactions: [txEntry, ...(localDrawer.transactions || [])].slice(0, 500),
+              cashSales: 0,
+              cashInManual: [],
+              cashOutManual: [manualOutEntry],
+              totalCashIn: 0,
+              totalCashOut: cashBack,
+              expectedInDrawer: Math.max(0, openingFloat - cashBack),
+              transactions: [txEntry],
             };
             transaction.set(drawerRef, sanitizeForFirestore({ ...initializedDrawer, syncedAt: nowIso }), { merge: true });
             committedDrawerUpdate = initializedDrawer;
@@ -2836,8 +2953,134 @@ export class FirestoreSyncService {
   // INDIVIDUAL REAL-TIME PUSH OPERATIONS
   // ==========================================
 
+  /**
+   * Replays offline-created pending sales through the full atomic Firestore transaction (R4):
+   * Performs live stock oversell check, IMEI availability check, device_units status = 'sold',
+   * sequential invoice/credit numbering, customer spend/credit increments, and cash drawer entry.
+   * If a pending sale fails any cloud check, it is marked syncState = 'conflict' and placed in the
+   * Manager Review Queue (offlineSaleConflicts/{sale.id}) rather than overwriting cloud inventory.
+   */
+  public async replayPendingSales(): Promise<void> {
+    if (!FirebaseAuthService.isAuthenticated() || typeof navigator === 'undefined' || !navigator.onLine) {
+      return;
+    }
+    const pendingSales = StorageService.getSales().filter(s => s && s.id && s.syncState === 'pending');
+    if (pendingSales.length === 0) return;
+
+    for (const pendingSale of pendingSales) {
+      try {
+        // Check if already committed in Firestore
+        const existingSnap = await getDoc(doc(db, 'sales', pendingSale.id));
+        if (existingSnap.exists()) {
+          const allLocal = StorageService.getSales();
+          const idx = allLocal.findIndex(x => x.id === pendingSale.id);
+          if (idx >= 0) {
+            allLocal[idx] = { ...allLocal[idx], syncState: 'synced', syncError: undefined };
+            StorageService.saveSales(allLocal, false);
+          }
+          continue;
+        }
+
+        // Reconstruct cartItems for the atomic checkout transaction
+        const localProds = StorageService.getProducts();
+        const cartItems = (pendingSale.items || []).map(item => {
+          const foundProd = localProds.find(p => p.id === item.productId) || ({
+            id: item.productId,
+            name: item.name,
+            brand: item.brand || '',
+            model: item.name,
+            category: item.category || 'accessories',
+            condition: 'brand_new',
+            sku: '',
+            barcode: '',
+            costPrice: item.costPrice || 0,
+            sellingPrice: item.unitPrice || 0,
+            stock: item.quantity,
+            minStockAlert: 1,
+          } as Product);
+          return {
+            product: foundProd,
+            quantity: item.quantity,
+            selectedImei: item.imei,
+            selectedImei2: item.imei2,
+          };
+        });
+
+        const linkedCredit = pendingSale.creditSaleId
+          ? StorageService.getCreditSales().find(cs => cs.id === pendingSale.creditSaleId || cs.saleId === pendingSale.id)
+          : undefined;
+        const linkedCustomer = pendingSale.customerId
+          ? StorageService.getCustomers().find(c => c.id === pendingSale.customerId)
+          : undefined;
+
+        const res = await this.executeAtomicSaleTransaction({
+          cartItems,
+          sale: pendingSale,
+          creditRecord: linkedCredit,
+          updatedCustomer: linkedCustomer,
+          preOrderId: pendingSale.preOrderId,
+        });
+
+        if (res.success && res.cloudCommitted && res.finalizedSale) {
+          const allLocal = StorageService.getSales();
+          const idx = allLocal.findIndex(x => x.id === pendingSale.id);
+          if (idx >= 0) {
+            allLocal[idx] = { ...res.finalizedSale, syncState: 'synced', syncError: undefined };
+            StorageService.saveSales(allLocal, false);
+          }
+        } else {
+          const conflictReason = res.error || 'Offline sale failed cloud stock/IMEI/price validation during replay.';
+          await this.queueOfflineSaleForManagerReview(pendingSale, conflictReason);
+        }
+      } catch (err: any) {
+        const conflictReason = err?.message || 'Offline sale replay failed validation.';
+        await this.queueOfflineSaleForManagerReview(pendingSale, conflictReason);
+      }
+    }
+  }
+
+  private async queueOfflineSaleForManagerReview(sale: Sale, reason: string): Promise<void> {
+    const allLocal = StorageService.getSales();
+    const idx = allLocal.findIndex(x => x.id === sale.id);
+    if (idx >= 0) {
+      allLocal[idx] = {
+        ...allLocal[idx],
+        syncState: 'conflict',
+        syncError: reason,
+      };
+      StorageService.saveSales(allLocal, false);
+    }
+    try {
+      await setDoc(doc(db, 'offlineSaleConflicts', sale.id), sanitizeForFirestore({
+        ...sale,
+        syncState: 'conflict',
+        syncError: reason,
+        flaggedAt: new Date().toISOString(),
+      }), { merge: true });
+    } catch {}
+  }
+
+  public async replayPendingOfflineRefunds(): Promise<void> {
+    if (!FirebaseAuthService.isAuthenticated() || typeof navigator === 'undefined' || !navigator.onLine) {
+      return;
+    }
+    const queuedRefunds = StorageService.getPendingOfflineRefunds();
+    if (queuedRefunds.length === 0) return;
+
+    for (const refundParams of queuedRefunds) {
+      const res = await this.executeAtomicRefundTransaction(refundParams);
+      if (res.success) {
+        StorageService.dequeuePendingOfflineRefund(refundParams.saleId);
+      }
+    }
+  }
+
   public async syncSale(sale: Sale): Promise<void> {
     if (!sale?.id) return;
+    if (sale.syncState === 'pending') {
+      await this.replayPendingSales();
+      return;
+    }
     try {
       const docRef = doc(db, 'sales', sale.id);
       const syncedSale: Sale = {
@@ -2848,12 +3091,6 @@ export class FirestoreSyncService {
         ...syncedSale,
         syncedAt: new Date().toISOString(),
       }), { merge: true });
-      const localSales = StorageService.getSales();
-      const idx = localSales.findIndex(s => s.id === sale.id);
-      if (idx >= 0 && localSales[idx].syncState === 'pending') {
-        localSales[idx] = { ...localSales[idx], syncState: 'synced' };
-        StorageService.saveSales(localSales, false);
-      }
       this.updateStatus({ lastSyncedAt: new Date(), error: null });
     } catch (err: any) {
       console.warn('[FirestoreSync] Error syncing sale:', err?.message || err);
@@ -3003,11 +3240,32 @@ export class FirestoreSyncService {
     try {
       const nowIso = new Date().toISOString();
       const docRef = doc(db, 'products', product.id);
-      await setDoc(docRef, sanitizeForFirestore({
-        ...product,
-        archived: false,
-        syncedAt: nowIso,
-      }), { merge: true });
+      const existingSnap = await getDoc(docRef);
+
+      if (existingSnap.exists()) {
+        // R5: Exclude inventory fields (stock, imeiList, imeiPairs, quarantinedStock, quarantinedImeis) from catalog edits
+        // so renaming or repricing a product never overwrites cloud stock or resurrects sold IMEIs
+        const {
+          stock: _stock,
+          imeiList: _imeiList,
+          imeiPairs: _imeiPairs,
+          quarantinedStock: _quarantinedStock,
+          quarantinedImeis: _quarantinedImeis,
+          ...catalogFields
+        } = product;
+        await setDoc(docRef, sanitizeForFirestore({
+          ...catalogFields,
+          archived: false,
+          syncedAt: nowIso,
+        }), { merge: true });
+      } else {
+        // Brand-new product creation initializes initial stock and IMEIs
+        await setDoc(docRef, sanitizeForFirestore({
+          ...product,
+          archived: false,
+          syncedAt: nowIso,
+        }), { merge: true });
+      }
 
       // Item 10: Only sync quarantinedImeis to device_units on generic product edits; never overwrite activeImeis to 'in_stock' here so concurrently sold IMEIs are never flipped back to 'in_stock'
       const quarantinedImeis = Array.isArray(product.quarantinedImeis) ? product.quarantinedImeis.filter(Boolean) : [];
@@ -3140,22 +3398,102 @@ export class FirestoreSyncService {
     await this.batchWriteCollection('suppliers', suppliers, s => s.id);
   }
 
+  /**
+   * One-time and continuous cloud migration (R3):
+   * Converts any leftover plaintext pin/password or weak hash on /staffUsers documents to salted PBKDF2-SHA256
+   * and explicitly removes pin and password from Firestore via deleteField().
+   */
+  public async migrateStaffPlaintextCredentials(): Promise<void> {
+    if (!FirebaseAuthService.isAuthenticated()) return;
+    try {
+      const snap = await getDocs(collection(db, 'staffUsers'));
+      for (const d of snap.docs) {
+        const data = d.data() as any;
+        if (!data || isMockStaffUser(data)) continue;
+        const hasPlaintext = data.pin !== undefined || data.password !== undefined;
+        const needsPbkdf2 = !data.credentialHash || !String(data.credentialHash).startsWith('pbkdf2_') || !data.credentialSalt;
+
+        if (hasPlaintext || needsPbkdf2) {
+          const rawSecret = String(data.password || data.pin || '').trim();
+          const updatePayload: Record<string, any> = {
+            pin: deleteField(),
+            password: deleteField(),
+            updatedAt: new Date().toISOString(),
+          };
+          if (rawSecret) {
+            const pbkdf2 = await FirebaseAuthService.derivePbkdf2Hash(rawSecret, data.credentialSalt, data.credentialIterations);
+            updatePayload.credentialHash = pbkdf2.credentialHash;
+            updatePayload.credentialSalt = pbkdf2.credentialSalt;
+            updatePayload.credentialIterations = pbkdf2.credentialIterations;
+          }
+          await updateDoc(d.ref, updatePayload).catch(() => {});
+        }
+
+        if (data.firebaseUid && data.role) {
+          await setDoc(doc(db, 'staffAccess', data.firebaseUid), {
+            uid: data.firebaseUid,
+            staffId: data.id || d.id,
+            username: data.username || '',
+            name: data.name || '',
+            role: data.role,
+            email: data.email || '',
+            active: data.active !== false,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true }).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.warn('[FirestoreSync] migrateStaffPlaintextCredentials notice:', err);
+    }
+  }
+
   public async syncStaffUsers(staff: StaffUser[]): Promise<void> {
-    const cleanStaff = staff
-      .filter(u => !isMockStaffUser(u))
-      .map(u => {
-        const rawCred = u.password || u.pin || '';
-        const credentialHash = u.credentialHash || (rawCred ? FirebaseAuthService.hashStaffCredential(rawCred) : undefined);
-        const sanitizedUser: Record<string, any> = {
-          ...u,
-          ...(credentialHash ? { credentialHash } : {}),
-        };
-        // Item M-e: Strip plaintext password and PIN before writing to Firestore
-        delete sanitizedUser.password;
-        delete sanitizedUser.pin;
-        return sanitizedUser as StaffUser;
-      });
+    const cleanStaff: StaffUser[] = [];
+    for (const u of staff) {
+      if (!u || isMockStaffUser(u)) continue;
+      let credentialHash = u.credentialHash;
+      let credentialSalt = u.credentialSalt;
+      let credentialIterations = u.credentialIterations;
+      const rawCred = (u.password || u.pin || '').trim();
+      if (rawCred && (!credentialHash || !credentialHash.startsWith('pbkdf2_') || !credentialSalt)) {
+        const pbkdf2 = await FirebaseAuthService.derivePbkdf2Hash(rawCred, credentialSalt, credentialIterations);
+        credentialHash = pbkdf2.credentialHash;
+        credentialSalt = pbkdf2.credentialSalt;
+        credentialIterations = pbkdf2.credentialIterations;
+      }
+      const sanitizedUser: Record<string, any> = {
+        ...u,
+        ...(credentialHash ? { credentialHash } : {}),
+        ...(credentialSalt ? { credentialSalt } : {}),
+        ...(credentialIterations ? { credentialIterations } : {}),
+      };
+      delete sanitizedUser.password;
+      delete sanitizedUser.pin;
+      cleanStaff.push(sanitizedUser as StaffUser);
+    }
     await this.batchWriteCollection('staffUsers', cleanStaff, u => u.id);
+
+    // R3: Explicitly remove any existing pin/password fields on Firestore documents via deleteField()
+    for (const u of cleanStaff) {
+      try {
+        await updateDoc(doc(db, 'staffUsers', u.id), {
+          pin: deleteField(),
+          password: deleteField(),
+        });
+        if (u.firebaseUid) {
+          await setDoc(doc(db, 'staffAccess', u.firebaseUid), {
+            uid: u.firebaseUid,
+            staffId: u.id,
+            username: u.username,
+            name: u.name,
+            role: u.role,
+            email: u.email || FirebaseAuthService.getAuthEmail(u),
+            active: u.active !== false,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        }
+      } catch {}
+    }
   }
 
   /**
@@ -3176,9 +3514,11 @@ export class FirestoreSyncService {
             ...data,
             id: staffId,
             active: data.active !== false,
-            password: data.password || existingLocal?.password,
-            pin: data.pin || existingLocal?.pin || '',
+            pin: '',
+            password: undefined,
             credentialHash: data.credentialHash || existingLocal?.credentialHash,
+            credentialSalt: data.credentialSalt || existingLocal?.credentialSalt,
+            credentialIterations: data.credentialIterations || existingLocal?.credentialIterations,
           });
         }
       });
@@ -3187,7 +3527,7 @@ export class FirestoreSyncService {
         const merged = [...local];
         remoteStaff.forEach(r => {
           const idx = merged.findIndex(m => m.id === r.id);
-          if (idx >= 0) merged[idx] = { ...merged[idx], ...r };
+          if (idx >= 0) merged[idx] = { ...merged[idx], ...r, pin: '', password: undefined };
           else merged.push(r);
         });
         const cleanMerged = merged.filter(u => !isMockStaffUser(u));
@@ -3236,8 +3576,12 @@ export class FirestoreSyncService {
             role: (u.role as StaffRole) || 'Cashier',
             phone: u.phone || '',
             email: u.email || (cleanId.includes('@') ? cleanId : undefined),
-            pin: u.pin || u.password || '1234',
-            password: u.password || u.pin || '1234',
+            pin: '',
+            password: undefined,
+            credentialHash: u.credentialHash,
+            credentialSalt: u.credentialSalt,
+            credentialIterations: u.credentialIterations,
+            firebaseUid: u.firebaseUid,
             active: u.active !== false,
             avatarColor: u.avatarColor || (u.role === 'Owner' ? 'bg-purple-600' : 'bg-emerald-600'),
             customPermissions: u.customPermissions,
@@ -3256,7 +3600,7 @@ export class FirestoreSyncService {
 
   /**
    * Fetches fresh, real-time staff document from Firestore by document ID
-   * to ensure credentials and PIN are 100% current.
+   * to ensure credentials and PIN hash are 100% current.
    */
   public async getFreshStaffUser(userId: string): Promise<StaffUser | null> {
     if (!userId) return null;
@@ -3270,8 +3614,11 @@ export class FirestoreSyncService {
             ...u,
             id: u.id || snap.id,
             active: u.active !== false,
-            password: u.password || u.pin,
-            pin: u.pin || u.password || '1234',
+            pin: '',
+            password: undefined,
+            credentialHash: u.credentialHash,
+            credentialSalt: u.credentialSalt,
+            credentialIterations: u.credentialIterations,
           };
         }
       }
@@ -3293,9 +3640,18 @@ export class FirestoreSyncService {
     }
   }
 
+  private hasPurgedRemoteMockData = false;
+
   public async purgeAllRemoteMockData(): Promise<void> {
+    if (!FirebaseAuthService.hasFirebaseSession() || this.hasPurgedRemoteMockData) return;
+    const currentRole = StorageService.getSettings()?.currentStaffRole || 'Owner';
+    if (currentRole !== 'Owner' && currentRole !== 'Manager') return;
+    this.hasPurgedRemoteMockData = true;
+
     try {
-      await this.purgeMockStaffUsersFromFirestore();
+      if (currentRole === 'Owner') {
+        await this.purgeMockStaffUsersFromFirestore();
+      }
 
       // 1. Purge purchases
       const pSnap = await getDocs(collection(db, 'purchases'));
@@ -3329,17 +3685,7 @@ export class FirestoreSyncService {
         }
       }
 
-      // 5. Purge mock sales
-      const sSnap = await getDocs(collection(db, 'sales'));
-      const MOCK_SALE_IDS = new Set(['sale-1', 'sale-2', 'sale-3', 'sale-4', 'sale-5', 'sale-6']);
-      for (const d of sSnap.docs) {
-        const s = d.data() as Sale;
-        if (MOCK_SALE_IDS.has(d.id) || MOCK_SALE_IDS.has(s?.id) || s?.soldBy?.includes('Ko Min Thu')) {
-          await deleteDoc(d.ref).catch(() => {});
-        }
-      }
-
-      // 6. Purge mock customers & suppliers
+      // 5. Purge mock customers & suppliers (Note: sales, auditLogs, and activityLogs are immutable/append-only per R4 and are filtered in-memory)
       const cSnap = await getDocs(collection(db, 'customers'));
       for (const d of cSnap.docs) {
         if (isMockCustomer({ id: d.id, ...d.data() })) {
@@ -3353,24 +3699,10 @@ export class FirestoreSyncService {
         }
       }
 
-      // 7. Cash Drawer
+      // 6. Cash Drawer
       const drawerSnap = await getDoc(doc(db, 'cashDrawer', 'current'));
       if (drawerSnap.exists() && isMockCashDrawer(drawerSnap.data() as CashDrawerRecord)) {
         await setDoc(doc(db, 'cashDrawer', 'current'), StorageService.getCashDrawer()).catch(() => {});
-      }
-
-      // 8. Audit logs & Activity logs
-      const auditSnap = await getDocs(collection(db, 'auditLogs'));
-      for (const d of auditSnap.docs) {
-        if (isMockAuditLog({ id: d.id, ...d.data() })) {
-          await deleteDoc(d.ref).catch(() => {});
-        }
-      }
-      const actSnap = await getDocs(collection(db, 'activityLogs'));
-      for (const d of actSnap.docs) {
-        if (isMockAuditLog({ id: d.id, ...d.data() })) {
-          await deleteDoc(d.ref).catch(() => {});
-        }
       }
     } catch (err: any) {
       console.warn('[FirestoreSync] purgeAllRemoteMockData error:', err?.message || err);
@@ -3380,10 +3712,46 @@ export class FirestoreSyncService {
   public async syncStaffUser(staff: StaffUser): Promise<void> {
     try {
       const docRef = doc(db, 'staffUsers', staff.id);
-      await setDoc(docRef, sanitizeForFirestore({
+      let credentialHash = staff.credentialHash;
+      let credentialSalt = staff.credentialSalt;
+      let credentialIterations = staff.credentialIterations;
+      const rawCred = (staff.password || staff.pin || '').trim();
+      if (rawCred && (!credentialHash || !credentialHash.startsWith('pbkdf2_') || !credentialSalt)) {
+        const pbkdf2 = await FirebaseAuthService.derivePbkdf2Hash(rawCred, credentialSalt, credentialIterations);
+        credentialHash = pbkdf2.credentialHash;
+        credentialSalt = pbkdf2.credentialSalt;
+        credentialIterations = pbkdf2.credentialIterations;
+      }
+      const sanitized: Record<string, any> = {
         ...staff,
+        ...(credentialHash ? { credentialHash } : {}),
+        ...(credentialSalt ? { credentialSalt } : {}),
+        ...(credentialIterations ? { credentialIterations } : {}),
         updatedAt: new Date().toISOString(),
-      }), { merge: true });
+      };
+      delete sanitized.pin;
+      delete sanitized.password;
+
+      await setDoc(docRef, sanitizeForFirestore(sanitized), { merge: true });
+      // Explicitly remove any legacy plaintext pin/password stored in Firestore (R3)
+      await updateDoc(docRef, {
+        pin: deleteField(),
+        password: deleteField(),
+      }).catch(() => {});
+
+      if (staff.firebaseUid) {
+        await setDoc(doc(db, 'staffAccess', staff.firebaseUid), {
+          uid: staff.firebaseUid,
+          staffId: staff.id,
+          username: staff.username,
+          name: staff.name,
+          role: staff.role,
+          email: staff.email || FirebaseAuthService.getAuthEmail(staff),
+          active: staff.active !== false,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true }).catch(() => {});
+      }
+
       this.updateStatus({ lastSyncedAt: new Date(), error: null });
     } catch (err: any) {
       console.warn('[FirestoreSync] Error syncing staff user:', err?.message || err);
@@ -3413,6 +3781,109 @@ export class FirestoreSyncService {
     }
   }
 
+  /**
+   * R9: Atomically records an individual cash drawer entry without overwriting the shared cashDrawer/current document.
+   * 1. Writes an idempotent document at cashDrawerShifts/{shiftId}/entries/{entry.id} with cashierId and terminalId.
+   * 2. Applies delta increments (increment() + arrayUnion()) to cashDrawer/current so concurrent terminals never overwrite each other.
+   */
+  public async syncCashDrawerEntry(params: {
+    shiftId: string;
+    entry: {
+      id: string;
+      timestamp: string;
+      type: 'in' | 'out';
+      entryType: 'manual' | 'sale' | 'expense' | 'refund';
+      description: string;
+      amount: number;
+      cashierId: string;
+      terminalId: string;
+    };
+    isSaleCash?: boolean;
+  }): Promise<void> {
+    if (!params?.entry?.id) return;
+    try {
+      const nowIso = new Date().toISOString();
+      const { shiftId, entry, isSaleCash } = params;
+      const roundedAmt = Math.round(Number(entry.amount) || 0);
+      if (roundedAmt <= 0) return;
+
+      const activeShiftId = shiftId || `shift-${nowIso.slice(0, 10)}`;
+      const entryRef = doc(db, 'cashDrawerShifts', activeShiftId, 'entries', entry.id);
+      const drawerRef = doc(db, 'cashDrawer', 'current');
+
+      await runTransaction(db, async (tx) => {
+        const existingEntrySnap = await tx.get(entryRef);
+        const drawerSnap = await tx.get(drawerRef);
+
+        // Idempotency guard: if this exact entry ID already exists in Firestore, do not double-increment
+        if (existingEntrySnap.exists()) {
+          return;
+        }
+
+        tx.set(entryRef, sanitizeForFirestore({
+          ...entry,
+          amount: roundedAmt,
+          shiftId: activeShiftId,
+          updatedAt: nowIso,
+        }));
+
+        const isIn = entry.type === 'in';
+        const signedDelta = isIn ? roundedAmt : -roundedAmt;
+        const manualItem = {
+          reason: entry.description,
+          amount: roundedAmt,
+          time: entry.timestamp || nowIso,
+          entryType: entry.entryType,
+          cashierId: entry.cashierId,
+          terminalId: entry.terminalId,
+        };
+
+        if (drawerSnap.exists()) {
+          const updateFields: Record<string, any> = {
+            expectedInDrawer: increment(signedDelta),
+            transactions: arrayUnion(sanitizeForFirestore(entry)),
+            lastSyncedAt: nowIso,
+          };
+          if (isIn) {
+            updateFields.totalCashIn = increment(roundedAmt);
+            if (isSaleCash) {
+              updateFields.cashSales = increment(roundedAmt);
+            } else {
+              updateFields.cashInManual = arrayUnion(sanitizeForFirestore(manualItem));
+            }
+          } else {
+            updateFields.totalCashOut = increment(roundedAmt);
+            updateFields.cashOutManual = arrayUnion(sanitizeForFirestore(manualItem));
+          }
+          tx.update(drawerRef, updateFields);
+        } else {
+          const localDrawer = StorageService.getCashDrawer();
+          const openingFloat = Math.round(Number(localDrawer.openingFloat || localDrawer.openingBalance || 0));
+          tx.set(drawerRef, sanitizeForFirestore({
+            id: activeShiftId,
+            date: localDrawer.date || nowIso.slice(0, 10),
+            openedAt: localDrawer.openedAt || nowIso,
+            openedBy: localDrawer.openedBy || entry.cashierId || 'Staff',
+            status: 'open',
+            openingFloat,
+            cashSales: isIn && isSaleCash ? roundedAmt : 0,
+            cashInManual: isIn && !isSaleCash ? [manualItem] : [],
+            cashOutManual: !isIn ? [manualItem] : [],
+            totalCashIn: isIn ? roundedAmt : 0,
+            totalCashOut: !isIn ? roundedAmt : 0,
+            expectedInDrawer: openingFloat + signedDelta,
+            transactions: [entry],
+            lastSyncedAt: nowIso,
+          }), { merge: true });
+        }
+      });
+
+      this.updateStatus({ lastSyncedAt: new Date(), error: null });
+    } catch (err: any) {
+      console.warn('[FirestoreSync] Error syncing cash drawer entry delta:', err?.message || err);
+    }
+  }
+
   public async syncCashDrawer(drawer: CashDrawerRecord): Promise<void> {
     try {
       const docRef = doc(db, 'cashDrawer', 'current');
@@ -3428,13 +3899,37 @@ export class FirestoreSyncService {
 
   public async syncClosedCashDrawerShift(shift: CashDrawerRecord): Promise<void> {
     try {
-      const shiftId = shift.id || `shift-${shift.date || new Date().toISOString().slice(0, 10)}-${Date.now()}`;
-      const docRef = doc(db, 'cashDrawerShifts', shiftId);
-      await setDoc(docRef, sanitizeForFirestore({
-        ...shift,
-        id: shiftId,
-        archivedAt: new Date().toISOString(),
-      }), { merge: true });
+      const nowIso = new Date().toISOString();
+      const shiftId = shift.id || `shift-${shift.date || nowIso.slice(0, 10)}-${Date.now()}`;
+      const drawerRef = doc(db, 'cashDrawer', 'current');
+      const shiftDocRef = doc(db, 'cashDrawerShifts', shiftId);
+      const roundedCounted = Math.round(Number(shift.actualCounted) || 0);
+
+      // R9: Close shift inside a transaction reading the authoritative cloud expectedInDrawer so variance is never computed from a stale local drawer
+      await runTransaction(db, async (tx) => {
+        const drawerSnap = await tx.get(drawerRef);
+        const liveDrawer = drawerSnap.exists() ? (drawerSnap.data() as CashDrawerRecord) : shift;
+        const authoritativeExpected = Math.round(Number(liveDrawer.expectedInDrawer ?? shift.expectedInDrawer ?? 0));
+        const authoritativeVariance = Math.round(roundedCounted - authoritativeExpected);
+
+        const closedPayload = sanitizeForFirestore({
+          ...liveDrawer,
+          id: shiftId,
+          status: 'closed',
+          closedAt: shift.closedAt || nowIso,
+          closedBy: shift.closedBy || liveDrawer.closedBy || 'Manager',
+          actualCounted: roundedCounted,
+          expectedInDrawer: authoritativeExpected,
+          variance: authoritativeVariance,
+          closingNotes: shift.closingNotes || '',
+          archivedAt: nowIso,
+          lastSyncedAt: nowIso,
+        });
+
+        tx.set(drawerRef, closedPayload, { merge: true });
+        tx.set(shiftDocRef, closedPayload, { merge: true });
+      });
+
       this.updateStatus({ lastSyncedAt: new Date(), error: null });
     } catch (err: any) {
       console.warn('[FirestoreSync] Error archiving closed cash drawer shift:', err?.message || err);
@@ -3461,11 +3956,49 @@ export class FirestoreSyncService {
 
   public async syncStockAdjustment(adj: StockAdjustment): Promise<void> {
     try {
-      const docRef = doc(db, 'stockAdjustments', adj.id);
-      await setDoc(docRef, sanitizeForFirestore({
-        ...adj,
-        updatedAt: new Date().toISOString(),
-      }), { merge: true });
+      const nowIso = new Date().toISOString();
+      // R5: Always apply stock adjustments via an atomic Firestore transaction using increment(delta)
+      await runTransaction(db, async (tx) => {
+        const prodRef = doc(db, 'products', adj.productId);
+        const prodSnap = await tx.get(prodRef);
+        const adjRef = doc(db, 'stockAdjustments', adj.id);
+        const existingAdjSnap = await tx.get(adjRef);
+
+        // Only apply the stock delta if this adjustment hasn't already been committed
+        if (!existingAdjSnap.exists() && prodSnap.exists()) {
+          const liveProd = prodSnap.data() as Product;
+          const curStock = Number(liveProd.stock ?? 0);
+          const delta = Number(adj.quantityChange || 0);
+          if (curStock + delta < 0) {
+            throw new Error(`INSUFFICIENT_STOCK: Cannot reduce stock of "${liveProd.name}" by ${Math.abs(delta)} (current cloud stock: ${curStock}).`);
+          }
+          const prodUpdate: Record<string, any> = {
+            stock: increment(delta),
+            updatedAt: nowIso,
+            lastModifiedAt: nowIso,
+          };
+          if (adj.imeiList && adj.imeiList.length > 0) {
+            if (adj.type === 'reduce' || adj.reason === 'damaged' || adj.reason === 'return_supplier' || adj.reason === 'sample') {
+              const removedSet = new Set(adj.imeiList);
+              if (liveProd.imeiList) {
+                prodUpdate.imeiList = liveProd.imeiList.filter(im => !removedSet.has(im));
+              }
+              if (liveProd.imeiPairs) {
+                prodUpdate.imeiPairs = liveProd.imeiPairs.filter(pair => !removedSet.has(pair.imei1) && (!pair.imei2 || !removedSet.has(pair.imei2)));
+              }
+            } else if (adj.type === 'add' || adj.reason === 'restock') {
+              const merged = Array.from(new Set([...(liveProd.imeiList || []), ...adj.imeiList]));
+              prodUpdate.imeiList = merged;
+            }
+          }
+          tx.update(prodRef, sanitizeForFirestore(prodUpdate));
+        }
+
+        tx.set(adjRef, sanitizeForFirestore({
+          ...adj,
+          updatedAt: nowIso,
+        }), { merge: true });
+      });
       this.updateStatus({ lastSyncedAt: new Date(), error: null });
     } catch (err: any) {
       console.warn('[FirestoreSync] Error syncing stock adjustment:', err?.message || err);

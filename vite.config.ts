@@ -18,11 +18,6 @@ export default defineConfig(() => {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
-    define: {
-      'import.meta.env.VITE_API_TOKEN': JSON.stringify(
-        process.env.VITE_API_TOKEN || process.env.API_AUTH_TOKEN || ''
-      ),
-    },
     build: {
       rollupOptions: {
         output: {

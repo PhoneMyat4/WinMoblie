@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { StaffUser, StaffRole, RolePermissions, ShopSettings, StoreLocation } from '../../types';
 import { getRoleBadgeClass } from '../../utils/formatters';
+import { FirebaseAuthService } from '../../services/firebaseAuthService';
 import { 
   DEFAULT_ROLE_PERMISSIONS, 
   PERMISSION_CATEGORIES, 
@@ -247,7 +248,7 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
     setRole(user.role);
     setPhone(user.phone);
     setEmail(user.email || '');
-    setPin(user.password || user.pin || '');
+    setPin('');
     setActive(user.active);
     setBranchId(user.branchId || '');
     setAllowedLocationIds(user.allowedLocationIds || (user.branchId ? [user.branchId] : []));
@@ -257,9 +258,9 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
     setIsStaffModalOpen(true);
   };
 
-  const handleSaveStaff = (e: React.FormEvent) => {
+  const handleSaveStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !pin) {
+    if (!name || (!pin && !editingStaff?.credentialHash)) {
       alert('Please provide staff name and a password or security PIN.');
       return;
     }
@@ -267,6 +268,16 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
     const cleanUsername = username.trim().toLowerCase().replace(/\s+/g, '') || 
       name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) || 
       `user${Date.now().toString().slice(-4)}`;
+
+    let credentialHash = editingStaff?.credentialHash;
+    let credentialSalt = editingStaff?.credentialSalt;
+    let credentialIterations = editingStaff?.credentialIterations;
+    if (pin && pin.trim()) {
+      const pbkdf2 = await FirebaseAuthService.derivePbkdf2Hash(pin.trim());
+      credentialHash = pbkdf2.credentialHash;
+      credentialSalt = pbkdf2.credentialSalt;
+      credentialIterations = pbkdf2.credentialIterations;
+    }
 
     const isOwner = role === 'Owner';
     const selectedLoc = availableLocations.find(l => l.id === branchId);
@@ -277,8 +288,12 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
       role,
       phone,
       email: email || undefined,
-      pin,
-      password: pin,
+      pin: '',
+      password: undefined,
+      credentialHash,
+      credentialSalt,
+      credentialIterations,
+      firebaseUid: editingStaff?.firebaseUid,
       active,
       branchId: branchId || undefined,
       branchName: selectedLoc ? selectedLoc.name : undefined,
@@ -298,11 +313,20 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
     setIsStaffModalOpen(false);
   };
 
-  const handleVerifySwitchPin = (e: React.FormEvent) => {
+  const handleVerifySwitchPin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!switchingToUser) return;
 
-    if (enteredPin === switchingToUser.pin) {
+    const lockout = FirebaseAuthService.checkLoginLockout(switchingToUser.username || switchingToUser.id);
+    if (lockout.locked) {
+      alert(`Account temporarily locked due to 5 failed attempts (${lockout.remainingSeconds}s remaining).`);
+      setPinError(true);
+      return;
+    }
+
+    const verify = await FirebaseAuthService.verifyStaffCredential(switchingToUser, enteredPin);
+    if (verify.valid) {
+      FirebaseAuthService.clearLoginLockout(switchingToUser.username || switchingToUser.id);
       const freshUser = staffUsers.find(u => u.id === switchingToUser.id) || switchingToUser;
       const hoursCheck = checkStaffWorkingHoursAccess(freshUser);
       if (!hoursCheck.allowed) {
@@ -315,6 +339,7 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
       setEnteredPin('');
       setPinError(false);
     } else {
+      FirebaseAuthService.recordFailedLoginAttempt(switchingToUser.username || switchingToUser.id);
       setPinError(true);
     }
   };
@@ -981,17 +1006,9 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
                           <KeyRound className="w-3.5 h-3.5 text-purple-600 shrink-0" />
                           <span className="text-[10px] text-slate-500 font-bold uppercase">PIN:</span>
                           <span className="font-mono font-black text-slate-800 text-xs tracking-wider">
-                            {revealedPins[user.id] ? (user.pin || user.password || '1234') : '••••'}
+                            {user.credentialHash?.startsWith('pbkdf2_') ? 'PBKDF2-SHA256' : '••••'}
                           </span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setRevealedPins(prev => ({ ...prev, [user.id]: !prev[user.id] }))}
-                          className="p-1 text-slate-400 hover:text-purple-700 hover:bg-purple-100/60 rounded-md transition-colors cursor-pointer shrink-0"
-                          title={revealedPins[user.id] ? "Hide Operator PIN" : "Show Operator PIN"}
-                        >
-                          {revealedPins[user.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                        </button>
                       </div>
                       <div className="flex items-center gap-1.5 pt-1 text-[10px]">
                         <Clock className="w-3 h-3 text-slate-400 shrink-0" />
@@ -1717,39 +1734,14 @@ export const UserRolesManager: React.FC<UserRolesManagerProps> = ({
               </p>
             </div>
 
-            {/* Operator PIN Helper / Reveal */}
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 text-left space-y-2">
+            {/* Operator PIN Security Notice */}
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 text-left">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold text-slate-600 flex items-center gap-1.5 text-[11px]">
                   <KeyRound className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                  Operator PIN:
+                  Protected by PBKDF2-SHA256 (5-attempt lockout)
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setShowSwitchPinHint(!showSwitchPinHint)}
-                  className="text-[11px] font-bold text-purple-600 hover:text-purple-800 flex items-center gap-1 cursor-pointer"
-                >
-                  {showSwitchPinHint ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                  <span>{showSwitchPinHint ? 'Hide' : 'Reveal PIN'}</span>
-                </button>
               </div>
-              {showSwitchPinHint && (
-                <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-purple-200">
-                  <span className="font-mono font-black text-sm tracking-widest text-purple-900">
-                    {switchingToUser.pin || switchingToUser.password || '1234'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEnteredPin(switchingToUser.pin || switchingToUser.password || '1234');
-                      setPinError(false);
-                    }}
-                    className="text-[10px] font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded-md border border-purple-200 transition-colors cursor-pointer"
-                  >
-                    Quick Fill
-                  </button>
-                </div>
-              )}
             </div>
 
             <form onSubmit={handleVerifySwitchPin} className="space-y-4">

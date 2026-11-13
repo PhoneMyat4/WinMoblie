@@ -95,7 +95,8 @@ export function calculateRunningCapital(
            !ref.refundMethod.toLowerCase().includes('cash') &&
            ref.refundMethod.toLowerCase() !== 'store credit');
         if (isDigitalRefund) {
-          digitalRefundsOutflow += (ref.totalRefundAmount || 0);
+          const actualCashOut = ref.cashPayoutAmount !== undefined ? ref.cashPayoutAmount : (ref.totalRefundAmount || 0);
+          digitalRefundsOutflow += actualCashOut;
         }
       });
     }
