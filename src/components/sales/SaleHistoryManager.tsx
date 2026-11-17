@@ -936,10 +936,25 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
 
                       <td className="py-3 px-4 text-center">
                         <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                          isRefunded ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
+                          isRefunded
+                            ? 'bg-rose-100 text-rose-800'
+                            : sale.syncState === 'conflict'
+                              ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                              : sale.syncState === 'pending'
+                                ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                : 'bg-emerald-100 text-emerald-800'
                         }`}>
-                          {sale.status}
+                          {sale.syncState === 'conflict'
+                            ? 'sync conflict'
+                            : sale.syncState === 'pending'
+                              ? 'pending sync'
+                              : sale.status}
                         </span>
+                        {sale.syncState === 'conflict' && sale.syncError && (
+                          <span className="block text-[9px] text-rose-600 truncate max-w-[140px] mx-auto mt-0.5" title={sale.syncError}>
+                            {sale.syncError}
+                          </span>
+                        )}
                         {isRefunded && sale.refundReason && (
                           <span className="block text-[9px] text-rose-600 truncate max-w-[120px] mx-auto mt-0.5">
                             {sale.refundReason}

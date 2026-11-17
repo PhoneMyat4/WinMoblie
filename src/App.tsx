@@ -417,7 +417,7 @@ export default function App() {
       currentStaffName: user.name,
       currentStaffRole: user.role,
     };
-    StorageService.saveSettings(updated);
+    StorageService.saveSettings(updated, false);
     setSettings(updated);
 
     // Audit log login event
@@ -625,15 +625,34 @@ export default function App() {
   const handleRefundSale = async (saleId: string, reason: string, staffName: string) => {
     const sale = StorageService.getSales().find(s => s.id === saleId);
     if (sale) {
-      const itemsToRefund = sale.items.map(item => {
+      const getRawLineNet = (item: any) => {
+        if (!item || item.isFoc) return 0;
+        const q = Math.max(1, item.quantity || 1);
+        const gross = Math.round((item.unitPrice || 0) * q);
+        const disc = Math.max(0, Math.round(item.discount || 0));
+        const netAfterDisc = Math.max(0, gross - disc);
+        return item.finalPrice !== undefined
+          ? Math.min(Math.max(0, Math.round(item.finalPrice)), netAfterDisc)
+          : netAfterDisc;
+      };
+      const sumOfLineNets = sale.items.reduce((sum, item) => sum + getRawLineNet(item), 0);
+      const invoiceCap = Math.max(0, Math.round(sale.grandTotal || 0));
+
+      const itemsToRefund = sale.items.map((item, idx) => {
         const returnableQty = item.quantity - (item.refundedQuantity || 0);
-        const unitFinal = item.quantity > 0 ? item.finalPrice / item.quantity : item.unitPrice;
+        const rawNet = getRawLineNet(item);
+        const effectiveLineNet =
+          sumOfLineNets > 0 && invoiceCap < sumOfLineNets
+            ? Math.round((rawNet * invoiceCap) / sumOfLineNets)
+            : rawNet;
+        const unitFinal = item.quantity > 0 ? effectiveLineNet / item.quantity : item.unitPrice;
         return {
+          lineIndex: idx,
           productId: item.productId,
           name: item.name,
           quantity: Math.max(0, returnableQty),
           unitPrice: item.unitPrice,
-          finalPrice: item.finalPrice,
+          finalPrice: effectiveLineNet,
           refundAmount: Math.round(Math.max(0, returnableQty) * unitFinal),
           imei: item.imei,
           imei2: item.imei2,

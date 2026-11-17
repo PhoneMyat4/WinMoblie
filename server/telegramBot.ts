@@ -636,23 +636,26 @@ export async function startTelegramPolling(
           hasClearedWebhook = true;
         }
 
-        const pollUrl = `https://api.telegram.org/bot${botToken}/getUpdates?offset=${offset}&timeout=20&allowed_updates=${encodeURIComponent(
+        const pollUrl = `https://api.telegram.org/bot${botToken}/getUpdates?offset=${offset}&timeout=15&allowed_updates=${encodeURIComponent(
           JSON.stringify(['message', 'edited_message', 'callback_query'])
         )}`;
 
         let pollRes: globalThis.Response;
         try {
+          const reqSignal =
+            pollingAbortController?.signal && typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function'
+              ? AbortSignal.any([pollingAbortController.signal, AbortSignal.timeout(22000)])
+              : pollingAbortController?.signal;
           pollRes = await fetch(pollUrl, {
-            signal: pollingAbortController?.signal,
+            signal: reqSignal,
           });
         } catch (fetchErr: any) {
-          if (fetchErr.name === 'AbortError' || !isPollingActive) {
+          if (!isPollingActive || pollingAbortController?.signal.aborted) {
             console.log('[TelegramBot Polling] Polling loop stopped gracefully.');
             break;
           }
           consecutiveErrors++;
-          const waitTime = Math.min(30000, 2500 * Math.pow(1.4, Math.min(consecutiveErrors, 6)));
-          console.warn(`[TelegramBot Polling] Network transient issue contacting Telegram (${fetchErr?.message || 'fetch failed'}). Reconnecting in ${(waitTime / 1000).toFixed(1)}s...`);
+          const waitTime = Math.min(30000, 3500 * Math.pow(1.4, Math.min(consecutiveErrors, 6)));
           await new Promise((resolve) => setTimeout(resolve, waitTime));
           continue;
         }
@@ -663,17 +666,12 @@ export async function startTelegramPolling(
             consecutiveErrors++;
             const jitter = Math.floor(Math.random() * 5000);
             const backoffTime = Math.min(60000, 20000 + Math.min(consecutiveErrors, 5) * 4000 + jitter);
-            console.log(
-              `[TelegramBot Polling] Telegram updates are currently served by another active instance (HTTP 409). Yielding gracefully for ${(backoffTime / 1000).toFixed(0)}s...`
-            );
             await new Promise((resolve) => setTimeout(resolve, backoffTime));
             continue;
           }
 
-          const errText = await pollRes.text().catch(() => '');
-          console.warn(`[TelegramBot Polling] getUpdates HTTP ${pollRes.status}: ${errText}`);
           consecutiveErrors++;
-          const waitTime = Math.min(30000, 2000 * Math.pow(1.5, Math.min(consecutiveErrors, 6)));
+          const waitTime = Math.min(30000, 3000 * Math.pow(1.5, Math.min(consecutiveErrors, 6)));
           await new Promise((resolve) => setTimeout(resolve, waitTime));
           continue;
         }
@@ -695,7 +693,7 @@ export async function startTelegramPolling(
           try {
             await processTelegramUpdate(update, getOpenAI, getGenAI);
           } catch (updateErr: any) {
-            console.warn(`[TelegramBot Polling] Error processing update ${update.update_id}:`, updateErr?.message || updateErr);
+            console.log(`[TelegramBot Polling] Notice processing update ${update.update_id}:`, updateErr?.message || updateErr);
           }
         }
       } catch (err: any) {
@@ -704,8 +702,7 @@ export async function startTelegramPolling(
           break;
         }
         consecutiveErrors++;
-        console.warn('[TelegramBot Polling] Polling loop transient warning:', err?.message || err);
-        const waitTime = Math.min(30000, 2000 * Math.pow(1.5, Math.min(consecutiveErrors, 6)));
+        const waitTime = Math.min(30000, 3000 * Math.pow(1.5, Math.min(consecutiveErrors, 6)));
         await new Promise((resolve) => setTimeout(resolve, waitTime));
       }
     }

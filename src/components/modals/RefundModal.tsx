@@ -109,16 +109,34 @@ export const RefundModal: React.FC<RefundModalProps> = ({
     }
   }, [isOpen, sale]);
 
-  // Map each sale item with returnable calculation
+  // Map each sale item with returnable calculation (accounting for both item discount and any invoice-wide order discount)
   const itemsWithReturnable = useMemo(() => {
+    const getRawLineNet = (item: SaleItem) => {
+      if (!item || item.isFoc) return 0;
+      const q = Math.max(1, item.quantity || 1);
+      const gross = Math.round((item.unitPrice || 0) * q);
+      const disc = Math.max(0, Math.round(item.discount || 0));
+      const netAfterDisc = Math.max(0, gross - disc);
+      return item.finalPrice !== undefined
+        ? Math.min(Math.max(0, Math.round(item.finalPrice)), netAfterDisc)
+        : netAfterDisc;
+    };
+
+    const sumOfLineNets = sale.items.reduce((sum, item) => sum + getRawLineNet(item), 0);
+    const invoiceCap = Math.max(0, Math.round(sale.grandTotal || 0));
+
     return sale.items.map((item, index) => {
       const key = `${item.productId}_${item.imei || ''}_${index}`;
       const returnable = Math.max(0, item.quantity - (item.refundedQuantity || 0));
       const currentQty = returnQuantities[key] || 0;
-      
-      // Calculate unit price after discounts
-      const unitFinalPrice = item.quantity > 0 ? (item.finalPrice / item.quantity) : item.unitPrice;
-      const refundAmount = currentQty * unitFinalPrice;
+
+      const rawNet = getRawLineNet(item);
+      const effectiveLineNet =
+        sumOfLineNets > 0 && invoiceCap < sumOfLineNets
+          ? Math.round((rawNet * invoiceCap) / sumOfLineNets)
+          : rawNet;
+      const unitFinalPrice = item.quantity > 0 ? effectiveLineNet / item.quantity : item.unitPrice;
+      const refundAmount = Math.round(currentQty * unitFinalPrice);
 
       return {
         key,
@@ -131,7 +149,7 @@ export const RefundModal: React.FC<RefundModalProps> = ({
         refundAmount,
       };
     });
-  }, [sale.items, returnQuantities]);
+  }, [sale.items, sale.grandTotal, returnQuantities]);
 
   // Calculate grand refund total
   const totalRefundAmount = useMemo(() => {
@@ -199,11 +217,12 @@ export const RefundModal: React.FC<RefundModalProps> = ({
     const itemsToRefund = itemsWithReturnable
       .filter(i => i.currentQty > 0)
       .map(i => ({
+        lineIndex: i.index,
         productId: i.item.productId,
         name: i.item.name,
         quantity: i.currentQty,
         unitPrice: i.item.unitPrice,
-        finalPrice: i.item.finalPrice,
+        finalPrice: Math.round(i.unitFinalPrice * i.item.quantity),
         refundAmount: i.refundAmount,
         imei: i.item.imei,
         imei2: i.item.imei2,

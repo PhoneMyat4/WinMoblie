@@ -1684,6 +1684,7 @@ export class FirestoreSyncService {
     cartItems,
     updatedCustomer,
     preOrderId,
+    isReplay = false,
   }: {
     sale: Sale;
     creditRecord?: CreditSaleRecord;
@@ -1695,6 +1696,7 @@ export class FirestoreSyncService {
     }>;
     updatedCustomer?: Customer;
     preOrderId?: string;
+    isReplay?: boolean;
   }): Promise<{
     success: boolean;
     error?: string;
@@ -1703,34 +1705,58 @@ export class FirestoreSyncService {
     finalizedCreditRecord?: CreditSaleRecord;
     cloudCommitted?: boolean;
   }> {
-    // 1. Perform side-effect-free local validation first against fresh storage (commitBranchUpdate = false)
+    // 1. Perform side-effect-free local validation first against fresh storage (skip on replay since local stock was already deducted when queued offline)
     const saleLocId = sale.locationId || StorageService.getActiveLocationId();
-    const localResult = StorageService.deductStockForSale(cartItems, saleLocId, false);
+    const localResult = isReplay
+      ? { success: true, updatedProducts: StorageService.getProducts() }
+      : StorageService.deductStockForSale(cartItems, saleLocId, false);
     if (!localResult.success) {
       return { ...localResult, cloudCommitted: false };
     }
 
-    let finalizedSale: Sale = { ...sale, locationId: saleLocId, syncState: 'pending' };
     let finalizedCreditRecord: CreditSaleRecord | undefined = creditRecord ? { ...creditRecord } : undefined;
+    let finalizedSale: Sale = {
+      ...sale,
+      locationId: saleLocId,
+      syncState: 'pending',
+      ...(finalizedCreditRecord
+        ? {
+            creditSaleId: finalizedCreditRecord.id,
+            creditSaleNumber: finalizedCreditRecord.creditNumber,
+          }
+        : {}),
+    };
     let cloudCommitted = false;
 
+    const isOnline = typeof navigator === 'undefined' || navigator.onLine;
+    if (isOnline && !FirebaseAuthService.isAuthenticated()) {
+      return {
+        success: false,
+        error: 'Cloud authentication session is required to verify stock and finalize checkout while online. Please sign in again.',
+        updatedProducts: StorageService.getProducts(),
+        cloudCommitted: false,
+      };
+    }
+
     // 2. If online and authenticated with Firebase, execute all-in-one atomic Firestore transaction
-    if (FirebaseAuthService.isAuthenticated() && typeof navigator !== 'undefined' && navigator.onLine) {
+    if (isOnline && FirebaseAuthService.isAuthenticated()) {
       try {
         await runTransaction(db, async (transaction) => {
-          // Idempotency guard inside transaction: check if this sale ID was already committed by a concurrent retry
+          // Idempotency guard inside transaction: reuse single operation ID (finalizedSale.id) so retries never deduct stock or cash twice
           const saleDocRef = doc(db, 'sales', finalizedSale.id);
           const existingSaleSnap = await transaction.get(saleDocRef);
           if (existingSaleSnap.exists()) {
             const committedData = existingSaleSnap.data() as Sale;
-            finalizedSale = {
-              ...committedData,
-              id: committedData.id || finalizedSale.id,
-              syncState: 'synced',
-              syncError: undefined,
-            };
-            transaction.delete(doc(db, 'offlineSaleConflicts', finalizedSale.id));
-            return;
+            if (committedData.syncState === 'synced') {
+              finalizedSale = {
+                ...committedData,
+                id: committedData.id || finalizedSale.id,
+                syncState: 'synced',
+                syncError: undefined,
+              };
+              transaction.delete(doc(db, 'offlineSaleConflicts', finalizedSale.id));
+              return;
+            }
           }
 
           // Distinct products involved in this transaction
@@ -1857,17 +1883,17 @@ export class FirestoreSyncService {
           const canApplyFoc = isPrivilegedRole || Boolean(rolePerms?.canApplyFoc);
 
           if (Array.isArray(finalizedSale.items) && finalizedSale.items.length > 0) {
-            let recomputedSubtotal = 0;
+            let recomputedGrossSubtotal = 0;
+            let totalLineDiscounts = 0;
             finalizedSale.items = finalizedSale.items.map(line => {
               const matchedDoc = productDocs.find(p => p.id === line.productId);
               const liveCost = Math.round(Number(matchedDoc?.data?.costPrice ?? line.costPrice ?? 0));
               const liveSelling = Math.round(Number(matchedDoc?.data?.sellingPrice ?? line.unitPrice ?? 0));
               const qty = Math.max(1, Number(line.quantity) || 1);
               const unitPrice = line.isFoc ? 0 : Math.round(Number(line.unitPrice) || 0);
-              const lineDiscount = Math.round(Number(line.discount) || 0);
-              const lineFinal = line.isFoc
-                ? 0
-                : Math.round(Number(line.finalPrice !== undefined ? line.finalPrice : unitPrice * qty - lineDiscount));
+              const lineDiscount = line.isFoc ? 0 : Math.max(0, Math.round(Number(line.discount) || 0));
+              const lineGross = line.isFoc ? 0 : Math.round(unitPrice * qty);
+              const lineFinal = line.isFoc ? 0 : Math.max(0, Math.round(lineGross - lineDiscount));
 
               if (line.isFoc && !canApplyFoc) {
                 throw new Error(`Permission Denied: Role "${staffRole}" is not authorized to issue FOC items.`);
@@ -1877,6 +1903,14 @@ export class FirestoreSyncService {
                 if (liveSelling > 0 && unitPrice !== liveSelling && !canOverridePrice) {
                   throw new Error(
                     `Price Override Denied: "${line.name}" was submitted at ${unitPrice.toLocaleString()} Ks instead of catalog price ${liveSelling.toLocaleString()} Ks.`
+                  );
+                }
+                if (
+                  line.finalPrice !== undefined &&
+                  Math.abs(Math.round(Number(line.finalPrice)) - lineFinal) > 2
+                ) {
+                  throw new Error(
+                    `Line Item Total Mismatch: "${line.name}" expected ${lineFinal.toLocaleString()} Ks (${unitPrice.toLocaleString()} × ${qty} - ${lineDiscount.toLocaleString()} Ks) but received ${Math.round(Number(line.finalPrice)).toLocaleString()} Ks.`
                   );
                 }
                 if (lineDiscount > 0 && !canGiveDiscount) {
@@ -1889,22 +1923,31 @@ export class FirestoreSyncService {
                 }
               }
 
-              recomputedSubtotal += lineFinal;
+              recomputedGrossSubtotal += lineGross;
+              totalLineDiscounts += lineDiscount;
               return {
                 ...line,
                 costPrice: liveCost,
                 unitPrice,
+                discount: lineDiscount,
                 finalPrice: lineFinal,
               };
             });
 
-            const orderDiscount = Math.round(Number(finalizedSale.discountTotal) || 0);
-            if (orderDiscount > 0 && !canGiveDiscount) {
+            // PointOfSale sets discountTotal = itemDiscounts + globalDiscountAmount; never subtract itemDiscounts twice
+            const submittedDiscountTotal = Math.max(0, Math.round(Number(finalizedSale.discountTotal) || 0));
+            const effectiveTotalDiscount = Math.max(totalLineDiscounts, submittedDiscountTotal);
+            const orderLevelDiscount = Math.max(0, effectiveTotalDiscount - totalLineDiscounts);
+
+            if (orderLevelDiscount > 0 && !canGiveDiscount) {
               throw new Error(`Discount Denied: Role "${staffRole}" is not authorized to grant order discounts.`);
             }
             const taxTotal = Math.round(Number(finalizedSale.taxTotal) || 0);
             const depositDeducted = Math.round(Number(finalizedSale.depositDeducted) || 0);
-            const expectedGrandTotal = Math.max(0, Math.round(recomputedSubtotal - orderDiscount + taxTotal - depositDeducted));
+            const expectedGrandTotal = Math.max(
+              0,
+              Math.round(recomputedGrossSubtotal - effectiveTotalDiscount + taxTotal - depositDeducted)
+            );
             const submittedGrandTotal = Math.round(Number(finalizedSale.grandTotal) || 0);
 
             if (Math.abs(expectedGrandTotal - submittedGrandTotal) > 5) {
@@ -1912,6 +1955,11 @@ export class FirestoreSyncService {
                 `Invoice Total Mismatch: Computed total (${expectedGrandTotal.toLocaleString()} Ks) does not match submitted total (${submittedGrandTotal.toLocaleString()} Ks).`
               );
             }
+
+            // Commit the authoritative computed totals onto the sale record
+            finalizedSale.subtotal = recomputedGrossSubtotal;
+            finalizedSale.discountTotal = effectiveTotalDiscount;
+            finalizedSale.grandTotal = expectedGrandTotal;
           }
 
           for (const prodInfo of productDocs) {
@@ -2182,16 +2230,18 @@ export class FirestoreSyncService {
       }
     }
 
-    // 3. Only commit local branch_inventory decrements AFTER cloud transaction succeeds (or when operating offline)
-    const distinctProductIds = Array.from(new Set(cartItems.map(c => c.product.id)));
-    for (const productId of distinctProductIds) {
-      const totalQtySold = cartItems
-        .filter(c => c.product.id === productId)
-        .reduce((s, i) => s + i.quantity, 0);
-      try {
-        StorageService.updateBranchStock(productId, saleLocId, -totalQtySold, 0, false);
-      } catch (branchStockErr) {
-        console.warn('Failed to update local branch stock after checkout:', branchStockErr);
+    // 3. Only commit local branch_inventory decrements on initial checkout (skip on replay since local branch stock was already decremented when queued offline)
+    if (!isReplay) {
+      const distinctProductIds = Array.from(new Set(cartItems.map(c => c.product.id)));
+      for (const productId of distinctProductIds) {
+        const totalQtySold = cartItems
+          .filter(c => c.product.id === productId)
+          .reduce((s, i) => s + i.quantity, 0);
+        try {
+          StorageService.updateBranchStock(productId, saleLocId, -totalQtySold, 0, false);
+        } catch (branchStockErr) {
+          console.warn('Failed to update local branch stock after checkout:', branchStockErr);
+        }
       }
     }
 
@@ -2303,22 +2353,125 @@ export class FirestoreSyncService {
           drawerSnap = await transaction.get(drawerRef);
         }
 
-        // 3. Validate refund caps against live sale items (Item 5: Cap per-line refund amount)
+        // 3. Validate refund caps & IMEIs strictly against live sale items (Item 5: Cap per-line refund amount & verify original sale IMEI)
         let computedRefundTotal = 0;
         const refundItemsList: any[] = [];
         const updatedSaleItems = [...(liveSale.items || [])];
 
+        const getRawLineNet = (line: any): number => {
+          if (!line || line.isFoc) return 0;
+          const q = Math.max(1, Number(line.quantity) || 1);
+          const gross = Math.round((Number(line.unitPrice) || 0) * q);
+          const disc = Math.max(0, Math.round(Number(line.discount) || 0));
+          const netAfterDisc = Math.max(0, gross - disc);
+          return line.finalPrice !== undefined
+            ? Math.min(Math.max(0, Math.round(Number(line.finalPrice))), netAfterDisc)
+            : netAfterDisc;
+        };
+
+        const sumOfAllLineNets = updatedSaleItems.reduce((sum, l) => sum + getRawLineNet(l), 0);
+        const invoicePayableCap = Math.max(0, Math.round(Number(liveSale.grandTotal) || 0));
+
+        const getEffectiveLineNetTotal = (line: any): number => {
+          const rawNet = getRawLineNet(line);
+          if (sumOfAllLineNets > 0 && invoicePayableCap < sumOfAllLineNets) {
+            return Math.round((rawNet * invoicePayableCap) / sumOfAllLineNets);
+          }
+          return rawNet;
+        };
+
         for (const req of params.itemsToRefund) {
           if (req.quantity <= 0) continue;
-          const itemIdx = updatedSaleItems.findIndex(
-            i => i.productId === req.productId && (!req.imei || i.imei === req.imei)
-          );
-          const fallbackIdx = itemIdx >= 0 ? itemIdx : updatedSaleItems.findIndex(i => i.productId === req.productId);
-          if (fallbackIdx === -1) {
+
+          const cleanReqImei = String(req.imei || '').trim();
+          const cleanReqImei2 = String(req.imei2 || '').trim();
+          let matchedIdx = -1;
+
+          if (cleanReqImei) {
+            // Strict IMEI match: never fall back to a generic productId match if an IMEI was specified
+            matchedIdx = updatedSaleItems.findIndex(
+              i =>
+                i.productId === req.productId &&
+                (String(i.imei || '').trim() === cleanReqImei ||
+                  String(i.imei2 || '').trim() === cleanReqImei)
+            );
+            if (matchedIdx === -1) {
+              throw new Error(
+                `Invalid Refund IMEI: IMEI "${cleanReqImei}" was not sold for "${req.name || req.productId}" on Invoice #${liveSale.invoiceNumber}.`
+              );
+            }
+          } else if (
+            typeof (req as any).lineIndex === 'number' &&
+            updatedSaleItems[(req as any).lineIndex]?.productId === req.productId
+          ) {
+            matchedIdx = (req as any).lineIndex;
+          } else {
+            // Find candidate lines for this productId that still have sufficient returnable quantity
+            const candidateIndices = updatedSaleItems
+              .map((item, idx) => ({ item, idx }))
+              .filter(({ item }) => {
+                if (item.productId !== req.productId) return false;
+                const rem = (item.quantity || 1) - (item.refundedQuantity || 0);
+                return rem >= req.quantity;
+              });
+
+            if (candidateIndices.length > 0) {
+              // Prefer line matching requested finalPrice / unitPrice, otherwise lowest unit net price first
+              const reqUnitTarget =
+                req.finalPrice !== undefined && req.quantity > 0
+                  ? Math.round(Number(req.finalPrice) / Math.max(1, Number(req.quantity)))
+                  : req.unitPrice !== undefined
+                    ? Math.round(Number(req.unitPrice))
+                    : undefined;
+
+              if (reqUnitTarget !== undefined) {
+                const exactMatch = candidateIndices.find(({ item }) => {
+                  const lineUnitNet = Math.round(
+                    getEffectiveLineNetTotal(item) / Math.max(1, Number(item.quantity) || 1)
+                  );
+                  return (
+                    Math.abs(lineUnitNet - reqUnitTarget) <= 2 ||
+                    Math.abs(Math.round(Number(item.unitPrice) || 0) - reqUnitTarget) <= 2
+                  );
+                });
+                if (exactMatch) {
+                  matchedIdx = exactMatch.idx;
+                }
+              }
+
+              if (matchedIdx === -1) {
+                candidateIndices.sort(
+                  (a, b) =>
+                    getEffectiveLineNetTotal(a.item) / Math.max(1, a.item.quantity || 1) -
+                    getEffectiveLineNetTotal(b.item) / Math.max(1, b.item.quantity || 1)
+                );
+                matchedIdx = candidateIndices[0].idx;
+              }
+            } else {
+              matchedIdx = updatedSaleItems.findIndex(i => i.productId === req.productId);
+            }
+          }
+
+          if (matchedIdx === -1) {
             throw new Error(`Item "${req.name}" does not exist on Invoice #${liveSale.invoiceNumber}.`);
           }
 
-          const targetLine = { ...updatedSaleItems[fallbackIdx] };
+          const targetLine = { ...updatedSaleItems[matchedIdx] };
+          const origImei1 = String(targetLine.imei || '').trim();
+          const origImei2 = String(targetLine.imei2 || '').trim();
+
+          // If the original sale line was serialized with an IMEI, verify any supplied IMEIs match it
+          if (cleanReqImei && origImei1 && cleanReqImei !== origImei1 && cleanReqImei !== origImei2) {
+            throw new Error(
+              `Invalid Refund IMEI: "${cleanReqImei}" does not match original sale IMEI "${origImei1}".`
+            );
+          }
+          if (cleanReqImei2 && origImei2 && cleanReqImei2 !== origImei2 && cleanReqImei2 !== origImei1) {
+            throw new Error(
+              `Invalid Refund Secondary IMEI: "${cleanReqImei2}" does not match original sale IMEI "${origImei2}".`
+            );
+          }
+
           const remainingReturnable = (targetLine.quantity || 1) - (targetLine.refundedQuantity || 0);
           if (req.quantity > remainingReturnable) {
             throw new Error(
@@ -2326,31 +2479,46 @@ export class FirestoreSyncService {
             );
           }
 
-          targetLine.refundedQuantity = (targetLine.refundedQuantity || 0) + req.quantity;
-          if (req.imei) {
-            const prevImeis = targetLine.refundedImeis || [];
-            if (!prevImeis.includes(req.imei)) {
-              targetLine.refundedImeis = [...prevImeis, req.imei];
-            }
-          }
-          updatedSaleItems[fallbackIdx] = targetLine;
+          const prevImeis = targetLine.refundedImeis || [];
+          const verifiedImeiToReturn = cleanReqImei || origImei1 || undefined;
+          const verifiedImei2ToReturn = cleanReqImei2 ? origImei2 || cleanReqImei2 : origImei2 || undefined;
 
-          const unitNet = (targetLine.finalPrice || (targetLine.unitPrice * targetLine.quantity)) / (targetLine.quantity || 1);
+          if (verifiedImeiToReturn && prevImeis.includes(verifiedImeiToReturn)) {
+            throw new Error(
+              `Duplicate IMEI Refund: IMEI "${verifiedImeiToReturn}" has already been refunded on Invoice #${liveSale.invoiceNumber}.`
+            );
+          }
+
+          targetLine.refundedQuantity = (targetLine.refundedQuantity || 0) + req.quantity;
+          if (verifiedImeiToReturn) {
+            targetLine.refundedImeis = [...prevImeis, verifiedImeiToReturn];
+          }
+          updatedSaleItems[matchedIdx] = targetLine;
+
+          const effectiveLineNet = getEffectiveLineNetTotal(targetLine);
+          const unitNet = effectiveLineNet / Math.max(1, targetLine.quantity || 1);
           const maxLineRefund = Math.round(unitNet * req.quantity);
+
+          if (req.refundAmount !== undefined && Math.round(Number(req.refundAmount)) > maxLineRefund + 2) {
+            throw new Error(
+              `Refund Amount Exceeded: Requested ${Math.round(Number(req.refundAmount)).toLocaleString()} Ks for "${targetLine.name || req.name}" exceeds refundable line value of ${maxLineRefund.toLocaleString()} Ks.`
+            );
+          }
+
           const lineRefund = req.refundAmount > 0
             ? Math.min(Math.round(req.refundAmount), maxLineRefund)
             : maxLineRefund;
           computedRefundTotal += lineRefund;
 
           refundItemsList.push({
-            productId: req.productId,
-            name: req.name,
+            productId: targetLine.productId,
+            name: targetLine.name || req.name,
             quantity: req.quantity,
-            unitPrice: req.unitPrice,
-            finalPrice: req.finalPrice,
+            unitPrice: targetLine.unitPrice,
+            finalPrice: effectiveLineNet,
             refundAmount: lineRefund,
-            imei: req.imei,
-            imei2: req.imei2,
+            imei: verifiedImeiToReturn,
+            imei2: verifiedImei2ToReturn,
             restocked: params.restockItems,
           });
         }
@@ -2361,6 +2529,16 @@ export class FirestoreSyncService {
 
         const currentRefundedSum = (liveSale.refundHistory || []).reduce((acc, r) => acc + (r.totalRefundAmount || 0), 0);
         const maxRefundableAmount = Math.max(0, (liveSale.grandTotal || 0) - currentRefundedSum);
+
+        if (
+          params.totalRefundAmount > 0 &&
+          Math.round(params.totalRefundAmount) > computedRefundTotal + 2
+        ) {
+          throw new Error(
+            `Refund Amount Exceeded: Requested total (${Math.round(params.totalRefundAmount).toLocaleString()} Ks) exceeds refundable line items total (${computedRefundTotal.toLocaleString()} Ks).`
+          );
+        }
+
         const requestedTotal = params.totalRefundAmount > 0
           ? Math.min(Math.round(params.totalRefundAmount), computedRefundTotal)
           : computedRefundTotal;
@@ -2743,6 +2921,7 @@ export class FirestoreSyncService {
   /**
    * Executes atomic Transfer Dispatch:
    * Decrements origin onHandStock, releases reservedStock, sets serial devices to 'in_transit'.
+   * All transaction.get() reads are executed before any transaction.set() writes.
    */
   public async executeAtomicTransferDispatch(transfer: StockTransfer): Promise<{ success: boolean; error?: string }> {
     if (!FirebaseAuthService.isAuthenticated() || typeof navigator === 'undefined' || !navigator.onLine) {
@@ -2751,12 +2930,21 @@ export class FirestoreSyncService {
 
     try {
       await runTransaction(db, async (transaction) => {
-        // Read and update origin branch inventory
+        // 1. ALL READS FIRST (Firestore transaction requirement for multi-item transfers)
+        const branchReads: Array<{ ref: any; item: any; current?: BranchInventory }> = [];
         for (const item of transfer.items) {
           const bRef = doc(db, 'branch_inventory', `${item.productId}_${transfer.fromLocationId}`);
           const snap = await transaction.get(bRef);
-          const current = snap.exists() ? (snap.data() as BranchInventory) : undefined;
+          branchReads.push({
+            ref: bRef,
+            item,
+            current: snap.exists() ? (snap.data() as BranchInventory) : undefined,
+          });
+        }
 
+        // 2. ALL WRITES AFTER READS COMPLETE
+        const nowIso = new Date().toISOString();
+        for (const { ref: bRef, item, current } of branchReads) {
           const currentOnHand = current?.onHandStock ?? item.dispatchedQty;
           const currentReserved = current?.reservedStock ?? item.requestedQty;
           const newOnHand = Math.max(0, currentOnHand - item.dispatchedQty);
@@ -2769,7 +2957,7 @@ export class FirestoreSyncService {
             onHandStock: newOnHand,
             reservedStock: newReserved,
             availableStock: Math.max(0, newOnHand - newReserved),
-            updatedAt: new Date().toISOString(),
+            updatedAt: nowIso,
           }), { merge: true });
 
           // Update serialized IMEIs to 'in_transit'
@@ -2782,7 +2970,7 @@ export class FirestoreSyncService {
                 currentLocationId: transfer.fromLocationId,
                 status: 'in_transit',
                 activeTransferId: transfer.id,
-                updatedAt: new Date().toISOString(),
+                updatedAt: nowIso,
               }), { merge: true });
             }
           }
@@ -2805,6 +2993,7 @@ export class FirestoreSyncService {
    * Executes atomic Transfer Receive:
    * Increments destination onHandStock, updates serial devices to 'in_stock' at destination,
    * and auto-writes DamageLog if any discrepancy is detected.
+   * All transaction.get() reads are executed before any transaction.set() writes.
    */
   public async executeAtomicTransferReceive(
     transfer: StockTransfer,
@@ -2816,12 +3005,21 @@ export class FirestoreSyncService {
 
     try {
       await runTransaction(db, async (transaction) => {
-        // Increment destination branch inventory
+        // 1. ALL READS FIRST (Firestore transaction requirement for multi-item transfers)
+        const branchReads: Array<{ ref: any; item: any; current?: BranchInventory }> = [];
         for (const item of transfer.items) {
           const bRef = doc(db, 'branch_inventory', `${item.productId}_${transfer.toLocationId}`);
           const snap = await transaction.get(bRef);
-          const current = snap.exists() ? (snap.data() as BranchInventory) : undefined;
+          branchReads.push({
+            ref: bRef,
+            item,
+            current: snap.exists() ? (snap.data() as BranchInventory) : undefined,
+          });
+        }
 
+        // 2. ALL WRITES AFTER READS COMPLETE
+        const nowIso = new Date().toISOString();
+        for (const { ref: bRef, item, current } of branchReads) {
           const currentOnHand = current?.onHandStock ?? 0;
           const currentReserved = current?.reservedStock ?? 0;
           const newOnHand = currentOnHand + item.receivedQty;
@@ -2833,7 +3031,7 @@ export class FirestoreSyncService {
             onHandStock: newOnHand,
             reservedStock: currentReserved,
             availableStock: Math.max(0, newOnHand - currentReserved),
-            updatedAt: new Date().toISOString(),
+            updatedAt: nowIso,
           }), { merge: true });
 
           // Relocate verified IMEIs to destination
@@ -2846,7 +3044,7 @@ export class FirestoreSyncService {
               currentLocationId: transfer.toLocationId,
               status: 'in_stock',
               activeTransferId: null,
-              lastReceivedAt: new Date().toISOString(),
+              lastReceivedAt: nowIso,
             }), { merge: true });
           }
         }
@@ -2873,6 +3071,7 @@ export class FirestoreSyncService {
   /**
    * Executes atomic Transfer Rejection:
    * Releases origin branch reservedStock.
+   * All transaction.get() reads are executed before any transaction.update/set() writes.
    */
   public async executeAtomicTransferReject(transfer: StockTransfer): Promise<{ success: boolean; error?: string }> {
     if (!FirebaseAuthService.isAuthenticated() || typeof navigator === 'undefined' || !navigator.onLine) {
@@ -2881,16 +3080,27 @@ export class FirestoreSyncService {
 
     try {
       await runTransaction(db, async (transaction) => {
+        // 1. ALL READS FIRST (Firestore transaction requirement for multi-item transfers)
+        const branchReads: Array<{ ref: any; item: any; current?: BranchInventory }> = [];
         for (const item of transfer.items) {
           const bRef = doc(db, 'branch_inventory', `${item.productId}_${transfer.fromLocationId}`);
           const snap = await transaction.get(bRef);
-          if (snap.exists()) {
-            const current = snap.data() as BranchInventory;
+          branchReads.push({
+            ref: bRef,
+            item,
+            current: snap.exists() ? (snap.data() as BranchInventory) : undefined,
+          });
+        }
+
+        // 2. ALL WRITES AFTER READS COMPLETE
+        const nowIso = new Date().toISOString();
+        for (const { ref: bRef, item, current } of branchReads) {
+          if (current) {
             const newReserved = Math.max(0, (current.reservedStock || 0) - item.requestedQty);
             transaction.update(bRef, {
               reservedStock: newReserved,
               availableStock: Math.max(0, (current.onHandStock || 0) - newReserved),
-              updatedAt: new Date().toISOString(),
+              updatedAt: nowIso,
             });
           }
         }
@@ -3043,9 +3253,9 @@ export class FirestoreSyncService {
             };
           });
 
-          const linkedCredit = pendingSale.creditSaleId
-            ? StorageService.getCreditSales().find(cs => cs.id === pendingSale.creditSaleId || cs.saleId === pendingSale.id)
-            : undefined;
+          const linkedCredit = StorageService.getCreditSales().find(
+            cs => (pendingSale.creditSaleId && cs.id === pendingSale.creditSaleId) || cs.saleId === pendingSale.id
+          );
           const linkedCustomer = pendingSale.customerId
             ? StorageService.getCustomers().find(c => c.id === pendingSale.customerId)
             : undefined;
@@ -3056,6 +3266,7 @@ export class FirestoreSyncService {
             creditRecord: linkedCredit,
             updatedCustomer: linkedCustomer,
             preOrderId: pendingSale.preOrderId,
+            isReplay: true,
           });
 
           if (res.success && res.cloudCommitted && res.finalizedSale) {
@@ -3064,6 +3275,14 @@ export class FirestoreSyncService {
             if (idx >= 0) {
               allLocal[idx] = { ...res.finalizedSale, syncState: 'synced', syncError: undefined };
               StorageService.saveSales(allLocal, false);
+            }
+            if (res.finalizedCreditRecord) {
+              const allCredits = StorageService.getCreditSales();
+              const crIdx = allCredits.findIndex(c => c.id === res.finalizedCreditRecord!.id);
+              if (crIdx >= 0) {
+                allCredits[crIdx] = res.finalizedCreditRecord;
+                StorageService.saveCreditSales(allCredits, false);
+              }
             }
             const remainingConflicts = StorageService.getOfflineSaleConflicts().filter(c => c.id !== pendingSale.id);
             StorageService.saveOfflineSaleConflicts(remainingConflicts);
@@ -3131,9 +3350,9 @@ export class FirestoreSyncService {
       };
     });
 
-    const linkedCredit = sale.creditSaleId
-      ? StorageService.getCreditSales().find(cs => cs.id === sale.creditSaleId || cs.saleId === sale.id)
-      : undefined;
+    const linkedCredit = StorageService.getCreditSales().find(
+      cs => (sale.creditSaleId && cs.id === sale.creditSaleId) || cs.saleId === sale.id
+    );
     const linkedCustomer = sale.customerId
       ? StorageService.getCustomers().find(c => c.id === sale.customerId)
       : undefined;
@@ -3144,6 +3363,7 @@ export class FirestoreSyncService {
       creditRecord: linkedCredit,
       updatedCustomer: linkedCustomer,
       preOrderId: sale.preOrderId,
+      isReplay: true,
     });
 
     if (res.success && res.cloudCommitted && res.finalizedSale) {
@@ -3328,6 +3548,9 @@ export class FirestoreSyncService {
       await this.replayPendingSales();
       return;
     }
+    if (sale.syncState === 'conflict') {
+      return;
+    }
     try {
       const docRef = doc(db, 'sales', sale.id);
       const syncedSale: Sale = {
@@ -3346,8 +3569,22 @@ export class FirestoreSyncService {
 
   public async syncSales(sales: Sale[]): Promise<void> {
     const MOCK_IDS = new Set(['sale-1', 'sale-2', 'sale-3', 'sale-4', 'sale-5', 'sale-6']);
-    const cleanSales = sales.filter(s => !MOCK_IDS.has(s.id) && !s.soldBy?.includes('Ko Min Thu'));
-    await this.batchWriteCollection('sales', cleanSales, s => s.id);
+    const hasPending = sales.some(s => s && s.syncState === 'pending');
+    // Never batch-write unverified offline pending/conflict sales directly to Firestore without atomic validation
+    const cleanSales = sales.filter(
+      s =>
+        s &&
+        !MOCK_IDS.has(s.id) &&
+        !s.soldBy?.includes('Ko Min Thu') &&
+        s.syncState !== 'pending' &&
+        s.syncState !== 'conflict'
+    );
+    if (cleanSales.length > 0) {
+      await this.batchWriteCollection('sales', cleanSales, s => s.id);
+    }
+    if (hasPending) {
+      await this.replayPendingSales();
+    }
   }
 
   public async deleteSale(id: string): Promise<void> {
@@ -3610,6 +3847,11 @@ export class FirestoreSyncService {
 
   public async syncSettings(settings: ShopSettings): Promise<void> {
     try {
+      const currentRole = settings.currentStaffRole || StorageService.getSettings()?.currentStaffRole;
+      if (currentRole && currentRole !== 'Owner' && currentRole !== 'Manager') {
+        return;
+      }
+
       const cleanSettings = { ...settings };
       // Strip terminal-local session staff identifiers before syncing store-wide global settings
       delete (cleanSettings as any).currentStaffId;

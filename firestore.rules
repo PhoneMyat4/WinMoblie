@@ -83,7 +83,7 @@ service cloud.firestore {
 
     match /settings/{docId} {
       allow read: if isStaff();
-      allow write: if isMgr() || isStaff();
+      allow write: if isMgr();
     }
 
     match /rolePermissions/{docId} {
@@ -114,14 +114,40 @@ service cloud.firestore {
 
     // 4. Sales, Offline Sale Conflicts, & Credit Sales (R4)
     match /sales/{saleId} {
-      allow read, create: if isStaff();
-      allow update: if isStaff();
+      allow read: if isStaff();
+      allow create: if isStaff() &&
+        request.resource.data.grandTotal is number &&
+        request.resource.data.grandTotal >= 0;
+      allow update: if isMgr() || (
+        isStaff() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'items',
+          'status',
+          'refundReason',
+          'refundedAt',
+          'refundedBy',
+          'totalRefundedAmount',
+          'refundHistory',
+          'syncedAt',
+          'updatedAt'
+        ]) &&
+        request.resource.data.status in ['refunded', 'partially_refunded'] &&
+        request.resource.data.grandTotal == resource.data.grandTotal &&
+        request.resource.data.invoiceNumber == resource.data.invoiceNumber &&
+        request.resource.data.totalRefundedAmount is number &&
+        request.resource.data.totalRefundedAmount >= 0 &&
+        request.resource.data.totalRefundedAmount <= resource.data.grandTotal
+      );
       allow delete: if false;
     }
 
     match /offlineSaleConflicts/{saleId} {
       allow read, create: if isStaff();
-      allow update, delete: if isMgr();
+      allow update: if isMgr();
+      allow delete: if isMgr() || (
+        isStaff() &&
+        existsAfter(/databases/$(database)/documents/sales/$(saleId))
+      );
     }
 
     match /creditSales/{creditId} {
@@ -132,7 +158,24 @@ service cloud.firestore {
     match /products/{prodId} {
       allow read: if isStaff();
       allow create, delete: if canManageInventory();
-      allow update: if isStaff();
+      allow update: if canManageInventory() || (
+        isStaff() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'stock',
+          'branchStock',
+          'imeiList',
+          'imeiPairs',
+          'soldImeiList',
+          'updatedAt',
+          'lastModifiedAt',
+          'syncedAt'
+        ]) &&
+        request.resource.data.sellingPrice == resource.data.sellingPrice &&
+        request.resource.data.costPrice == resource.data.costPrice &&
+        request.resource.data.name == resource.data.name &&
+        request.resource.data.stock is number &&
+        request.resource.data.stock >= 0
+      );
     }
 
     // 6. Purchases, Customers, Expenses, Cash Drawer

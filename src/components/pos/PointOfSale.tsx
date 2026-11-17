@@ -1137,6 +1137,8 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
         notes: paymentInfo.paymentDetails?.notes,
         promissoryAgreementTerms: paymentInfo.paymentDetails?.promissoryAgreementTerms,
       };
+      newSale.creditSaleId = creditRecord.id;
+      newSale.creditSaleNumber = creditRecord.creditNumber;
     }
 
     // Update customer stats
@@ -1172,13 +1174,16 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
         return;
       }
 
-      const committedSale = checkoutResult.finalizedSale || newSale;
-      const committedCreditRecord = checkoutResult.finalizedCreditRecord || creditRecord;
       const cloudCommitted = Boolean(checkoutResult.cloudCommitted);
+      const committedSale: Sale = {
+        ...(checkoutResult.finalizedSale || newSale),
+        syncState: cloudCommitted ? 'synced' : 'pending',
+      };
+      const committedCreditRecord = checkoutResult.finalizedCreditRecord || creditRecord;
       const shouldSyncFallback = !cloudCommitted;
 
       if (committedCreditRecord) {
-        StorageService.saveCreditSale(committedCreditRecord, shouldSyncFallback);
+        StorageService.saveCreditSale(committedCreditRecord, false);
       }
 
       // Fulfill pre-order in storage if active
@@ -1197,6 +1202,14 @@ export const PointOfSale: React.FC<PointOfSaleProps> = ({
         if (onClearActivePreOrder) {
           onClearActivePreOrder();
         }
+      }
+
+      if (!cloudCommitted) {
+        setScanToast({
+          type: 'warning',
+          text: 'Sale Saved as Pending (Offline Mode)',
+          subtext: 'Stock and payment will be verified in Firestore automatically when internet reconnects.',
+        });
       }
 
       onCompleteSale(committedSale, checkoutResult.updatedProducts, updatedCust, cloudCommitted);
