@@ -2,9 +2,12 @@ import express from 'express';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import OpenAI from 'openai';
+import { collection, getDocs, doc, getDoc, setDoc, deleteField } from 'firebase/firestore';
+import { db } from './src/lib/firebase';
 import { 
   openAiAssistantTools, 
   AI_SYSTEM_INSTRUCTION, 
@@ -124,8 +127,6 @@ async function startServer() {
         } else {
           try {
             await ensureAuth();
-            const { doc, getDoc } = await import('firebase/firestore');
-            const { db } = await import('./src/lib/firebase');
             const accessSnap = await getDoc(doc(db, 'staffAccess', uid));
             if (accessSnap.exists() && accessSnap.data()?.role) {
               resolvedRole = String(accessSnap.data()?.role);
@@ -270,9 +271,6 @@ async function startServer() {
       }
 
       await ensureAuth();
-      const { collection, getDocs, doc, setDoc } = await import('firebase/firestore');
-      const { db } = await import('./src/lib/firebase');
-      const crypto = await import('crypto');
 
       const snap = await getDocs(collection(db, 'staffUsers'));
       let matchedStaff: any = null;
@@ -306,7 +304,7 @@ async function startServer() {
         });
       }
 
-      // Verify password strictly before returning any staff profile data
+      // 1. Verify password against stored PBKDF2 / legacy hash / bootstrap credential
       let isPasswordValid = false;
       if (
         typeof matchedStaff.credentialHash === 'string' &&
@@ -315,7 +313,8 @@ async function startServer() {
         matchedStaff.credentialSalt.length >= 16
       ) {
         const iterations = Number(matchedStaff.credentialIterations) || 310000;
-        const saltBuffer = Buffer.from(matchedStaff.credentialSalt, 'hex');
+        const cleanSaltHex = matchedStaff.credentialSalt.replace(/[^0-9a-fA-F]/g, '');
+        const saltBuffer = Buffer.from(cleanSaltHex, 'hex');
         const derivedHex = crypto
           .pbkdf2Sync(cleanPassword, saltBuffer, iterations, 32, 'sha256')
           .toString('hex');
@@ -338,8 +337,100 @@ async function startServer() {
         isPasswordValid = legacyHash === matchedStaff.credentialHash;
       } else if (!matchedStaff.credentialHash) {
         isPasswordValid =
-          (matchedStaff.password && String(matchedStaff.password) === cleanPassword) ||
-          (matchedStaff.pin && String(matchedStaff.pin) === cleanPassword);
+          Boolean(matchedStaff.password && String(matchedStaff.password) === cleanPassword) ||
+          Boolean(matchedStaff.pin && String(matchedStaff.pin) === cleanPassword);
+      }
+
+      // Compute candidate emails and Firebase Auth passwords for this staff member
+      const cleanUsernameSlug = String(matchedStaff.username || matchedStaff.id || 'staff')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '') || 'staff';
+      const internalEmail = `${cleanUsernameSlug}@apexpos.internal`;
+      const primaryEmail =
+        matchedStaff.email && String(matchedStaff.email).includes('@')
+          ? String(matchedStaff.email).trim().toLowerCase()
+          : internalEmail;
+
+      const fixedSaltBytes = Buffer.from(
+        `fb_auth_v2_${matchedStaff.id || matchedStaff.username}`,
+        'utf8'
+      ).subarray(0, 16);
+      const derivedStrongHex = crypto
+        .pbkdf2Sync(`${matchedStaff.id}:${cleanPassword}`, fixedSaltBytes, 10000, 32, 'sha256')
+        .toString('hex');
+      const strongPassword = `Pos#${derivedStrongHex.slice(0, 24)}!9`;
+      const legacyPassword =
+        cleanPassword.length >= 6 ? cleanPassword : `${cleanPassword}123456`.slice(0, 12);
+
+      let resolvedFirebaseUid = String(matchedStaff.firebaseUid || '');
+
+      // 2. Also check or synchronize with Firebase Authentication via IdentityToolkit REST API
+      if (firebaseWebApiKey) {
+        const candidateEmails = primaryEmail !== internalEmail ? [primaryEmail, internalEmail] : [primaryEmail];
+        const candidatePasswords = Array.from(new Set([strongPassword, legacyPassword, cleanPassword]));
+
+        let fbSignInMatched = false;
+        for (const candEmail of candidateEmails) {
+          if (fbSignInMatched) break;
+          for (const candPass of candidatePasswords) {
+            try {
+              const signInRes = await fetch(
+                `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(firebaseWebApiKey)}`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    email: candEmail,
+                    password: candPass,
+                    returnSecureToken: true,
+                  }),
+                }
+              );
+              if (signInRes.ok) {
+                const signInData = (await signInRes.json().catch(() => ({}))) as any;
+                if (signInData?.localId) {
+                  fbSignInMatched = true;
+                  isPasswordValid = true;
+                  resolvedFirebaseUid = String(signInData.localId);
+                  break;
+                }
+              }
+            } catch {
+              // Ignore transient fetch failure
+            }
+          }
+        }
+
+        // If local PBKDF2/hash matched but the staff account was not yet provisioned in Firebase Auth, provision it now
+        if (isPasswordValid && !fbSignInMatched) {
+          for (const candEmail of candidateEmails) {
+            try {
+              const signUpRes = await fetch(
+                `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(firebaseWebApiKey)}`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    email: candEmail,
+                    password: strongPassword,
+                    displayName: String(matchedStaff.name || matchedStaff.username || matchedStaff.id),
+                    returnSecureToken: true,
+                  }),
+                }
+              );
+              if (signUpRes.ok) {
+                const signUpData = (await signUpRes.json().catch(() => ({}))) as any;
+                if (signUpData?.localId) {
+                  resolvedFirebaseUid = String(signUpData.localId);
+                  break;
+                }
+              }
+            } catch {
+              // Ignore sign-up error if email already exists
+            }
+          }
+        }
       }
 
       if (!isPasswordValid) {
@@ -349,19 +440,28 @@ async function startServer() {
         });
       }
 
-      // Ensure /staffAccess/{firebaseUid} is synced if firebaseUid is known on the staff document
-      if (matchedStaff.firebaseUid && VALID_STAFF_ROLES.has(String(matchedStaff.role || ''))) {
+      // 3. Ensure /staffAccess/{firebaseUid} is provisioned by the Owner server session so Cashier/Manager/Inventory_Staff pass isStaff() in firestore.rules
+      if (resolvedFirebaseUid && VALID_STAFF_ROLES.has(String(matchedStaff.role || ''))) {
+        matchedStaff.firebaseUid = resolvedFirebaseUid;
         try {
           await setDoc(
-            doc(db, 'staffAccess', String(matchedStaff.firebaseUid)),
+            doc(db, 'staffAccess', resolvedFirebaseUid),
             {
-              uid: String(matchedStaff.firebaseUid),
+              uid: resolvedFirebaseUid,
               staffId: String(matchedStaff.id),
               username: String(matchedStaff.username || matchedStaff.id),
               name: String(matchedStaff.name || ''),
               role: String(matchedStaff.role),
-              email: String(matchedStaff.email || ''),
+              email: String(matchedStaff.email || primaryEmail),
               active: matchedStaff.active !== false,
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+          await setDoc(
+            doc(db, 'staffUsers', String(matchedStaff.id)),
+            {
+              firebaseUid: resolvedFirebaseUid,
               updatedAt: new Date().toISOString(),
             },
             { merge: true }
@@ -402,8 +502,6 @@ async function startServer() {
           });
         }
         await ensureAuth();
-        const { doc, setDoc, deleteField } = await import('firebase/firestore');
-        const { db } = await import('./src/lib/firebase');
         const sanitizedStaff = { ...staffUser };
         delete sanitizedStaff.pin;
         delete sanitizedStaff.password;
@@ -517,8 +615,6 @@ async function startServer() {
       // 3. Persist /staffAccess/{uid} on the server using the Owner service account
       try {
         await ensureAuth();
-        const { doc, setDoc } = await import('firebase/firestore');
-        const { db } = await import('./src/lib/firebase');
         await setDoc(
           doc(db, 'staffAccess', provisionedUid),
           {

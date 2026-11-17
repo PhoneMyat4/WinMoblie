@@ -342,15 +342,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           </div>
         </div>
 
-        {/* Clean slate notice if no staff accounts exist */}
+        {/* Cloud staff authentication notice when local browser cache has not synced yet */}
         {activeStaff.length === 0 && (
-          <div className="mb-4 p-3 bg-purple-950/40 border border-purple-800/60 rounded-2xl text-purple-200 text-xs text-left">
-            <p className="font-bold text-purple-100 flex items-center gap-1.5 mb-0.5">
-              <ShieldCheck className="w-4 h-4 text-purple-400 shrink-0" />
-              <span>Clean Slate Mode (0 Staff Accounts)</span>
+          <div className="mb-4 p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-2xl text-emerald-200 text-xs text-left">
+            <p className="font-bold text-emerald-100 flex items-center gap-1.5 mb-0.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{isBurmese ? 'Cloud ဝန်ထမ်းအကောင့်ဖြင့် ဝင်ရောက်ပါ' : 'Cloud Staff Authentication'}</span>
             </p>
-            <p className="text-[11px] text-purple-300/90 leading-relaxed">
-              Sign in with any username (e.g. <span className="font-semibold text-white">owner</span> or your email) and password to initialize your genuine Store Owner account.
+            <p className="text-[11px] text-emerald-300/90 leading-relaxed">
+              {isBurmese
+                ? 'သင့်ဝန်ထမ်း Username (ဥပမာ owner2, spsn သို့မဟုတ် Email) နှင့် Password/PIN ကို ရိုက်ထည့်ပြီး ဆိုင်ဒေတာများကို ချိတ်ဆက်ပါ။'
+                : 'Sign in with your registered staff username (e.g. owner2, spsn, or email) and password/PIN to sync store data.'}
             </p>
           </div>
         )}
