@@ -237,17 +237,47 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
         {/* Modal Header (Hidden in Print) */}
         <div data-print-hidden="true" className="print:hidden flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shadow-xs">
-              <CheckCircle className="w-5 h-5" />
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-xs ${
+              sale.syncState === 'conflict'
+                ? 'bg-rose-100 text-rose-700'
+                : sale.syncState === 'pending'
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-emerald-100 text-emerald-700'
+            }`}>
+              {sale.syncState === 'conflict' || sale.syncState === 'pending' ? (
+                <AlertTriangle className="w-5 h-5" />
+              ) : (
+                <CheckCircle className="w-5 h-5" />
+              )}
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-slate-900">Sale Slip Generated</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-bold text-slate-900">
+                  {sale.syncState === 'pending'
+                    ? 'Sale Queued Offline (Pending Cloud Sync)'
+                    : sale.syncState === 'conflict'
+                      ? 'Sale Sync Conflict Detected'
+                      : 'Sale Slip Generated'}
+                </h2>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
                   {formatSalePaymentBreakdown(sale, settings.currencySymbol)}
                 </span>
+                {sale.syncState === 'pending' && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                    Pending Cloud Commit
+                  </span>
+                )}
+                {sale.syncState === 'conflict' && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                    Conflict Queue
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-slate-500 font-mono">Invoice #{sale.invoiceNumber}</p>
+              <p className="text-xs text-slate-500 font-mono">
+                Invoice #{sale.invoiceNumber}
+                {sale.syncState === 'pending' && ' • Will auto-sync when internet reconnects'}
+                {sale.syncState === 'conflict' && sale.syncError ? ` • ${sale.syncError}` : ''}
+              </p>
             </div>
           </div>
 

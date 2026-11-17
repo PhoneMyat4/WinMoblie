@@ -55,9 +55,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   // Filter active staff accounts
   const activeStaff = staffUsers.filter(u => u.active !== false);
 
-  // Proactively synchronize registered staff users from Firestore whenever the login screen mounts
+  // Proactively synchronize registered staff users from Firestore when a Firebase session is already active
   useEffect(() => {
-    FirestoreSyncService.getInstance().fetchStaffUsersFromFirestore().catch(() => {});
+    if (FirebaseAuthService.hasFirebaseSession()) {
+      FirestoreSyncService.getInstance().fetchStaffUsersFromFirestore().catch(() => {});
+    }
   }, []);
 
   const triggerShake = () => {
@@ -120,41 +122,33 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       );
     });
 
-    // 2. If user is not yet in local cache, query Firestore directly for the live account
+    // 2. If user is not yet in local cache, query Firestore directly (if already authenticated) or resolve via server
+    let serverVerified = false;
     if (!matchedUser) {
-      try {
-        const remoteUser = await FirestoreSyncService.getInstance().findStaffUserInFirestore(cleanUsername);
-        if (remoteUser) {
-          matchedUser = remoteUser;
-          // Cache locally for offline resilience and fast subsequent loads
-          StorageService.saveStaffUser(remoteUser, false);
+      if (FirebaseAuthService.hasFirebaseSession()) {
+        try {
+          const remoteUser = await FirestoreSyncService.getInstance().findStaffUserInFirestore(cleanUsername);
+          if (remoteUser) {
+            matchedUser = remoteUser;
+            StorageService.saveStaffUser(remoteUser, false);
+          }
+        } catch (lookupErr) {
+          console.warn('Direct Firestore staff lookup failed:', lookupErr);
         }
-      } catch (lookupErr) {
-        console.warn('Direct Firestore staff lookup failed:', lookupErr);
       }
-    }
 
-    // 3. Fallback: If no accounts exist at all in an empty database, allow bootstrap owner creation
-    if (!matchedUser && activeStaffPool.length === 0) {
-      const isOwnerEmail = cleanUsername === 'phonemyatpaing950@gmail.com' || cleanUsername.includes('@');
-      const ownerUsername = isOwnerEmail ? cleanUsername.split('@')[0] : (cleanUsername || 'owner');
-      const pbkdf2 = await FirebaseAuthService.derivePbkdf2Hash(cleanPassword);
-      const ownerAccount: StaffUser = {
-        id: `owner-${Date.now()}`,
-        username: ownerUsername,
-        name: isOwnerEmail ? `Store Owner (${ownerUsername})` : 'Store Owner',
-        role: 'Owner',
-        email: isOwnerEmail ? cleanUsername : 'owner@apexpos.internal',
-        phone: '09-123456789',
-        pin: '',
-        credentialHash: pbkdf2.credentialHash,
-        credentialSalt: pbkdf2.credentialSalt,
-        credentialIterations: pbkdf2.credentialIterations,
-        active: true,
-        avatarColor: 'bg-purple-600',
-      };
-      StorageService.saveStaffUser(ownerAccount, true);
-      matchedUser = ownerAccount;
+      if (!matchedUser) {
+        try {
+          const resolvedStaff = await FirebaseAuthService.resolveStaffFromServer(cleanUsername, cleanPassword);
+          if (resolvedStaff) {
+            matchedUser = resolvedStaff;
+            serverVerified = true;
+            StorageService.saveStaffUser(resolvedStaff, false);
+          }
+        } catch (resolveErr) {
+          console.warn('Server staff resolution failed:', resolveErr);
+        }
+      }
     }
 
     if (!matchedUser) {
@@ -173,13 +167,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     let effectiveUser = matchedUser;
 
     // 4. Verify credential using salted PBKDF2-SHA256 (R3: no raw plaintext acceptance when hashed)
-    const localVerify = await FirebaseAuthService.verifyStaffCredential(matchedUser, cleanPassword);
+    const localVerify = serverVerified
+      ? { valid: true, needsMigration: false }
+      : await FirebaseAuthService.verifyStaffCredential(matchedUser, cleanPassword);
     let isValidPassword = localVerify.valid;
 
-    // 5. If local check fails, fetch the latest document directly from Firestore
+    // 5. If local check fails, fetch the latest document directly from Firestore or server
     if (!isValidPassword && matchedUser.id) {
       try {
-        const freshUser = await FirestoreSyncService.getInstance().getFreshStaffUser(matchedUser.id);
+        const freshUser = FirebaseAuthService.hasFirebaseSession()
+          ? await FirestoreSyncService.getInstance().getFreshStaffUser(matchedUser.id)
+          : await FirebaseAuthService.resolveStaffFromServer(cleanUsername, cleanPassword);
         if (freshUser) {
           const freshVerify = await FirebaseAuthService.verifyStaffCredential(freshUser, cleanPassword);
           if (freshVerify.valid) {
@@ -257,10 +255,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     // 8. Authenticate with Firebase Auth and sync user session to Firestore
     try {
       const authRes = await FirebaseAuthService.loginStaffWithFirebase(effectiveUser, cleanPassword);
+      if (!authRes.success && navigator.onLine) {
+        setErrorMsg(authRes.error || 'Cloud authentication failed. Please check your credentials.');
+        triggerShake();
+        setIsSubmitting(false);
+        return;
+      }
       if (authRes.user?.uid) {
         effectiveUser = { ...effectiveUser, firebaseUid: authRes.user.uid };
         StorageService.saveStaffUser(effectiveUser, false);
       }
+      // Refresh full staff directory into localStorage once authenticated
+      await FirestoreSyncService.getInstance().fetchStaffUsersFromFirestore().catch(() => {});
     } catch (fbErr) {
       console.warn('Firebase auth connection notice:', fbErr);
     }

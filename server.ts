@@ -165,11 +165,12 @@ async function startServer() {
   }
 
   app.use('/api', async (req, res, next) => {
-    // Only public health check and Telegram incoming webhook are whitelisted
-    // (Telegram sends its own cryptographic secret in X-Telegram-Bot-Api-Secret-Token)
+    // Only public health check, Telegram incoming webhook, and credential-verified staff login resolution are whitelisted
+    // (Telegram sends its own cryptographic secret in X-Telegram-Bot-Api-Secret-Token; /auth/resolve-staff requires a valid password match before returning any staff data)
     if (
       req.path === '/health' ||
-      req.path === '/webhook/telegram'
+      req.path === '/webhook/telegram' ||
+      req.path === '/auth/resolve-staff'
     ) {
       return next();
     }
@@ -253,6 +254,137 @@ async function startServer() {
       hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
       hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
     });
+  });
+
+  // New-browser staff login resolution endpoint: verifies staff password server-side before returning the staff profile
+  // Keeps /staffUsers protected by isStaff() in firestore.rules while allowing brand-new browsers to log in
+  app.post('/api/auth/resolve-staff', async (req, res) => {
+    try {
+      const cleanIdentifier = String(req.body?.identifier || '').trim().toLowerCase();
+      const cleanPassword = String(req.body?.password || '').trim();
+      if (!cleanIdentifier || !cleanPassword) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username and password are required.',
+        });
+      }
+
+      await ensureAuth();
+      const { collection, getDocs, doc, setDoc } = await import('firebase/firestore');
+      const { db } = await import('./src/lib/firebase');
+      const crypto = await import('crypto');
+
+      const snap = await getDocs(collection(db, 'staffUsers'));
+      let matchedStaff: any = null;
+      const inputDigits = cleanIdentifier.replace(/\D/g, '');
+
+      snap.forEach((docSnap) => {
+        if (matchedStaff) return;
+        const data = docSnap.data();
+        if (!data || data.active === false) return;
+        const uId = String(data.id || docSnap.id || '').trim().toLowerCase();
+        const uName = String(data.username || '').trim().toLowerCase();
+        const fullName = String(data.name || '').trim().toLowerCase();
+        const email = String(data.email || '').trim().toLowerCase();
+        const phoneDigits = String(data.phone || '').replace(/\D/g, '');
+
+        if (
+          uId === cleanIdentifier ||
+          uName === cleanIdentifier ||
+          fullName === cleanIdentifier ||
+          (cleanIdentifier.includes('@') && email === cleanIdentifier) ||
+          (inputDigits.length >= 6 && phoneDigits.endsWith(inputDigits))
+        ) {
+          matchedStaff = { ...data, id: data.id || docSnap.id };
+        }
+      });
+
+      if (!matchedStaff) {
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid username or password.',
+        });
+      }
+
+      // Verify password strictly before returning any staff profile data
+      let isPasswordValid = false;
+      if (
+        typeof matchedStaff.credentialHash === 'string' &&
+        matchedStaff.credentialHash.startsWith('pbkdf2_') &&
+        typeof matchedStaff.credentialSalt === 'string' &&
+        matchedStaff.credentialSalt.length >= 16
+      ) {
+        const iterations = Number(matchedStaff.credentialIterations) || 310000;
+        const saltBuffer = Buffer.from(matchedStaff.credentialSalt, 'hex');
+        const derivedHex = crypto
+          .pbkdf2Sync(cleanPassword, saltBuffer, iterations, 32, 'sha256')
+          .toString('hex');
+        isPasswordValid = `pbkdf2_${derivedHex}` === matchedStaff.credentialHash;
+      } else if (
+        typeof matchedStaff.credentialHash === 'string' &&
+        matchedStaff.credentialHash.startsWith('sha_')
+      ) {
+        const str = `winmobile_pos_v1:${cleanPassword}`;
+        let h1 = 0xdeadbeef ^ str.length;
+        let h2 = 0x41c6ce57 ^ str.length;
+        for (let i = 0, ch; i < str.length; i++) {
+          ch = str.charCodeAt(i);
+          h1 = Math.imul(h1 ^ ch, 2654435761);
+          h2 = Math.imul(h2 ^ ch, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        const legacyHash = `sha_${(h2 >>> 0).toString(16).padStart(8, '0')}${(h1 >>> 0).toString(16).padStart(8, '0')}`;
+        isPasswordValid = legacyHash === matchedStaff.credentialHash;
+      } else if (!matchedStaff.credentialHash) {
+        isPasswordValid =
+          (matchedStaff.password && String(matchedStaff.password) === cleanPassword) ||
+          (matchedStaff.pin && String(matchedStaff.pin) === cleanPassword);
+      }
+
+      if (!isPasswordValid) {
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid username or password.',
+        });
+      }
+
+      // Ensure /staffAccess/{firebaseUid} is synced if firebaseUid is known on the staff document
+      if (matchedStaff.firebaseUid && VALID_STAFF_ROLES.has(String(matchedStaff.role || ''))) {
+        try {
+          await setDoc(
+            doc(db, 'staffAccess', String(matchedStaff.firebaseUid)),
+            {
+              uid: String(matchedStaff.firebaseUid),
+              staffId: String(matchedStaff.id),
+              username: String(matchedStaff.username || matchedStaff.id),
+              name: String(matchedStaff.name || ''),
+              role: String(matchedStaff.role),
+              email: String(matchedStaff.email || ''),
+              active: matchedStaff.active !== false,
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      const sanitizedStaff = { ...matchedStaff };
+      delete sanitizedStaff.pin;
+      delete sanitizedStaff.password;
+
+      return res.json({
+        success: true,
+        staffUser: sanitizedStaff,
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Failed to resolve staff credentials.',
+      });
+    }
   });
 
   // Owner-only staff account creation & role provisioning endpoint (Critical #1, #2, #4)

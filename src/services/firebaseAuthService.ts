@@ -265,6 +265,90 @@ export class FirebaseAuthService {
   }
 
   /**
+   * Resolves a staff user profile on a brand-new browser (where localStorage is empty and auth.currentUser is null)
+   * by verifying credentials via the backend /api/auth/resolve-staff endpoint or direct Firebase Auth sign-in.
+   */
+  public static async resolveStaffFromServer(identifier: string, enteredPassword: string): Promise<StaffUser | null> {
+    const cleanIdentifier = String(identifier || '').trim().toLowerCase();
+    const cleanPassword = String(enteredPassword || '').trim();
+    if (!cleanIdentifier || !cleanPassword) return null;
+
+    // 1. Primary path: Verify credentials via backend /api/auth/resolve-staff (which reads /staffUsers using server auth)
+    try {
+      const response = await fetch('/api/auth/resolve-staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: cleanIdentifier,
+          password: cleanPassword,
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.success && data?.staffUser?.id) {
+          return data.staffUser as StaffUser;
+        }
+      } else if (response.status === 401) {
+        return null;
+      }
+    } catch {
+      // Backend endpoint unreachable (e.g., static hosting environment); fall through to direct Firebase Auth lookup
+    }
+
+    // 2. Fallback path: Attempt direct Firebase Auth sign-in using email/username and read /staffAccess/{uid} + /staffUsers/{staffId}
+    const candidateEmails: string[] = [];
+    if (cleanIdentifier.includes('@')) {
+      candidateEmails.push(cleanIdentifier);
+    } else {
+      const sanitizedUser = cleanIdentifier.replace(/[^a-z0-9]/g, '');
+      if (sanitizedUser) {
+        candidateEmails.push(`${sanitizedUser}@apexpos.internal`);
+      }
+    }
+
+    const legacyPassword = cleanPassword.length >= 6 ? cleanPassword : `${cleanPassword}123456`.slice(0, 12);
+    const candidatePasswords = Array.from(new Set([cleanPassword, legacyPassword]));
+
+    for (const email of candidateEmails) {
+      for (const pass of candidatePasswords) {
+        try {
+          const cred = await signInWithEmailAndPassword(auth, email, pass);
+          this.currentUser = cred.user;
+          // Once signed in, request.auth.uid == uid allows reading /staffAccess/{uid}
+          const accessSnap = await getDoc(doc(db, 'staffAccess', cred.user.uid));
+          if (accessSnap.exists()) {
+            const accessData = accessSnap.data();
+            const staffId = String(accessData?.staffId || '');
+            if (staffId) {
+              const staffSnap = await getDoc(doc(db, 'staffUsers', staffId));
+              if (staffSnap.exists()) {
+                return { ...(staffSnap.data() as StaffUser), id: staffSnap.id };
+              }
+            }
+            if (accessData?.role) {
+              return {
+                id: staffId || `staff-${cred.user.uid.slice(0, 8)}`,
+                username: String(accessData.username || cleanIdentifier),
+                name: String(accessData.name || cleanIdentifier),
+                role: accessData.role,
+                email: String(accessData.email || email),
+                phone: '',
+                pin: '',
+                active: accessData.active !== false,
+                firebaseUid: cred.user.uid,
+              };
+            }
+          }
+        } catch {
+          // Continue trying next candidate
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Signs in the staff user into Firebase Authentication, migrates legacy credentials to PBKDF2 + deleteField(),
    * and binds their UID in /staffAccess/{uid} for role-based Firestore security rules (R1 & R3).
    */

@@ -30,6 +30,7 @@ import { DailySaleReport } from '../reports/DailySaleReport';
 import { DataArchiveCleanup } from '../admin/DataArchiveCleanup';
 import { FocGiftsLedger } from './FocGiftsLedger';
 import { FocDistributionModal } from '../modals/FocDistributionModal';
+import { firestoreSync } from '../../services/firestoreSyncService';
 
 interface SaleHistoryManagerProps {
   sales: Sale[];
@@ -74,10 +75,12 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
   onDeleteSale,
   onDeleteSales,
 }) => {
-  const [viewMode, setViewMode] = useState<'history' | 'daily_report' | 'foc_ledger'>('history');
+  const [viewMode, setViewMode] = useState<'history' | 'daily_report' | 'foc_ledger' | 'conflicts'>('history');
   const [focFilter, setFocFilter] = useState<'all' | 'with_foc' | 'no_foc'>('all');
   const [isFocDistributionModalOpen, setIsFocDistributionModalOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>(() => StorageService.getProducts());
+  const [conflictRefreshTick, setConflictRefreshTick] = useState(0);
+  const [resolvingConflictId, setResolvingConflictId] = useState<string | null>(null);
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
   const [selectedCustomDate, setSelectedCustomDate] = useState<string>(() => {
     return new Date().toISOString().slice(0, 10);
@@ -95,11 +98,76 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
+  React.useEffect(() => {
+    const handleStorageUpdate = () => setConflictRefreshTick(t => t + 1);
+    window.addEventListener('mobileshop_data_updated', handleStorageUpdate);
+    return () => window.removeEventListener('mobileshop_data_updated', handleStorageUpdate);
+  }, []);
+
+  const offlineConflicts = useMemo(() => {
+    return StorageService.getOfflineSaleConflicts();
+  }, [sales, conflictRefreshTick]);
+
+  const isManagerOrOwner =
+    (currentUser?.role || settings.currentStaffRole) === 'Owner' ||
+    (currentUser?.role || settings.currentStaffRole) === 'Manager';
+
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
     setTimeout(() => {
       setToastMessage(null);
     }, 4000);
+  };
+
+  const handleRetryConflict = async (conflictSale: Sale) => {
+    setResolvingConflictId(conflictSale.id);
+    try {
+      const res = await firestoreSync.retryOfflineSaleConflict(conflictSale);
+      if (res.success) {
+        showToast(`Invoice #${conflictSale.invoiceNumber} validated and synced to cloud!`, 'success');
+        setConflictRefreshTick(t => t + 1);
+      } else {
+        showToast(res.error || 'Retry failed. Please check stock or use Accept.', 'error');
+      }
+    } finally {
+      setResolvingConflictId(null);
+    }
+  };
+
+  const handleAcceptConflict = async (conflictSale: Sale) => {
+    setResolvingConflictId(conflictSale.id);
+    try {
+      const resolver = currentUser?.name || settings.currentStaffName || 'Manager';
+      const res = await firestoreSync.forceAcceptOfflineSaleConflict(conflictSale, resolver);
+      if (res.success) {
+        showToast(`Invoice #${conflictSale.invoiceNumber} force-accepted and recorded in cloud sales!`, 'success');
+        setConflictRefreshTick(t => t + 1);
+      } else {
+        showToast(res.error || 'Failed to accept sale conflict.', 'error');
+      }
+    } finally {
+      setResolvingConflictId(null);
+    }
+  };
+
+  const handleVoidConflict = async (conflictSale: Sale) => {
+    setResolvingConflictId(conflictSale.id);
+    try {
+      const resolver = currentUser?.name || settings.currentStaffName || 'Manager';
+      const res = await firestoreSync.voidOfflineSaleConflict(
+        conflictSale,
+        'Voided by Manager from Sale Conflicts Review Queue',
+        resolver
+      );
+      if (res.success) {
+        showToast(`Conflicted offline sale #${conflictSale.invoiceNumber} voided and removed.`, 'success');
+        setConflictRefreshTick(t => t + 1);
+      } else {
+        showToast(res.error || 'Failed to void sale conflict.', 'error');
+      }
+    } finally {
+      setResolvingConflictId(null);
+    }
   };
 
   // Refund Modal State
@@ -344,6 +412,30 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
               <Gift className="w-4 h-4 text-purple-400" />
               <span>🎁 FOC &amp; Gifts Ledger</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setViewMode('conflicts')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'conflicts'
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : offlineConflicts.length > 0
+                    ? 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                    : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <AlertCircle className="w-4 h-4" />
+              <span>Sale Conflicts</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                viewMode === 'conflicts'
+                  ? 'bg-white text-rose-700'
+                  : offlineConflicts.length > 0
+                    ? 'bg-rose-600 text-white'
+                    : 'bg-slate-200 text-slate-600'
+              }`}>
+                {offlineConflicts.length}
+              </span>
+            </button>
           </div>
 
           <button
@@ -359,8 +451,112 @@ export const SaleHistoryManager: React.FC<SaleHistoryManagerProps> = ({
         </div>
       </div>
 
-      {/* Conditionally render FOC Ledger, Daily Sale Report or Full Invoices Ledger */}
-      {viewMode === 'foc_ledger' ? (
+      {/* Conditionally render Sale Conflicts, FOC Ledger, Daily Sale Report or Full Invoices Ledger */}
+      {viewMode === 'conflicts' ? (
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-2xs p-5 sm:p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
+            <div>
+              <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-rose-600" />
+                <span>Offline Sale Conflicts Review Queue ({offlineConflicts.length})</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Review offline sales that encountered stock, IMEI, or price conflicts when reconnecting to Firestore.
+              </p>
+            </div>
+          </div>
+
+          {offlineConflicts.length === 0 ? (
+            <div className="py-12 text-center space-y-2">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto">
+                <CheckCircle className="w-6 h-6" />
+              </div>
+              <p className="text-sm font-bold text-slate-800">No Offline Sale Conflicts</p>
+              <p className="text-xs text-slate-500">All offline and online sales are synchronized with Firestore.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {offlineConflicts.map((conflictSale) => {
+                const isBusy = resolvingConflictId === conflictSale.id;
+                return (
+                  <div
+                    key={conflictSale.id}
+                    className="p-4 rounded-2xl border border-rose-200 bg-rose-50/40 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono font-black text-sm text-slate-900">
+                          #{conflictSale.invoiceNumber}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                          Conflict
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {formatDateTime(conflictSale.date)} • Cashier: <strong>{conflictSale.soldBy}</strong>
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-700">
+                        Customer: <strong>{conflictSale.customerName}</strong> • Total:{' '}
+                        <strong className="text-slate-900">
+                          {formatCurrency(conflictSale.grandTotal, settings.currencySymbol)}
+                        </strong>{' '}
+                        • Items:{' '}
+                        {(conflictSale.items || [])
+                          .map(i => `${i.name} ×${i.quantity}${i.imei ? ` (IMEI: ${i.imei})` : ''}`)
+                          .join(', ')}
+                      </p>
+                      <div className="text-xs font-semibold text-rose-800 bg-white/90 border border-rose-200 rounded-xl px-3 py-1.5">
+                        Reason: {conflictSale.syncError || 'Failed cloud stock/IMEI validation during offline replay.'}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onViewInvoice(conflictSale)}
+                        className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        View Slip
+                      </button>
+                      {isManagerOrOwner && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleRetryConflict(conflictSale)}
+                            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold cursor-pointer shadow-2xs"
+                            title="Re-validate against current cloud stock after fixing inventory"
+                          >
+                            {isBusy ? 'Working...' : 'Fix & Retry'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleAcceptConflict(conflictSale)}
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold cursor-pointer shadow-2xs"
+                            title="Force accept sale into cloud ledger and clamp stock to 0"
+                          >
+                            Accept Sale
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleVoidConflict(conflictSale)}
+                            className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold cursor-pointer shadow-2xs"
+                            title="Void and remove this conflicted offline sale"
+                          >
+                            Void
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : viewMode === 'foc_ledger' ? (
         <FocGiftsLedger
           sales={sales}
           settings={settings}

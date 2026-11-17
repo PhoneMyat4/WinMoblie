@@ -363,10 +363,20 @@ export default function App() {
       firestoreSync.startRealtimeSync();
     }
 
+    const unsubAuth = FirebaseAuthService.onAuthChanged((fbUser) => {
+      const isAuthNow =
+        sessionStorage.getItem('mobileshop_session_auth') === 'true' ||
+        localStorage.getItem('mobileshop_auth_active') === 'true';
+      if (fbUser && isAuthNow) {
+        firestoreSync.startRealtimeSync();
+      }
+    });
+
     window.addEventListener('mobileshop_data_updated', handleStorageUpdate);
     window.addEventListener('storage', handleStorageUpdate);
     window.addEventListener('mobileshop_location_changed', handleLocationChange);
     return () => {
+      unsubAuth();
       window.removeEventListener('mobileshop_data_updated', handleStorageUpdate);
       window.removeEventListener('storage', handleStorageUpdate);
       window.removeEventListener('mobileshop_location_changed', handleLocationChange);

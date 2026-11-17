@@ -128,6 +128,7 @@ export const STORAGE_KEYS = {
   DELETED_PRODUCT_IDS: 'mobileshop_deleted_product_ids_v2',
   FOC_DISTRIBUTIONS: 'mobileshop_foc_distributions_v2',
   PENDING_OFFLINE_REFUNDS: 'mobileshop_pending_offline_refunds_v2',
+  OFFLINE_SALE_CONFLICTS: 'mobileshop_offline_sale_conflicts_v2',
 };
 
 // Cross-tab broadcast channel for instantaneous reactive tab synchronization
@@ -5250,6 +5251,31 @@ export const StorageService = {
     }
 
     return { transfer: updated, damageLogCreated };
+  },
+
+  getOfflineSaleConflicts: (): Sale[] => {
+    const storedConflicts = getItem<Sale[]>(STORAGE_KEYS.OFFLINE_SALE_CONFLICTS, []);
+    const localConflictedSales = getItem<Sale[]>(STORAGE_KEYS.SALES, []).filter(
+      s => s && s.id && s.syncState === 'conflict' && (s as any).status !== 'voided'
+    );
+    const map = new Map<string, Sale>();
+    for (const s of storedConflicts) {
+      if (s && s.id && (s as any).status !== 'voided') {
+        map.set(s.id, { ...s, syncState: 'conflict' });
+      }
+    }
+    for (const s of localConflictedSales) {
+      if (s && s.id && !map.has(s.id)) {
+        map.set(s.id, s);
+      }
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
+    );
+  },
+
+  saveOfflineSaleConflicts: (conflicts: Sale[]): void => {
+    setItem(STORAGE_KEYS.OFFLINE_SALE_CONFLICTS, conflicts || []);
   },
 
   touchLastUpdated: (customTimestamp?: number): void => {

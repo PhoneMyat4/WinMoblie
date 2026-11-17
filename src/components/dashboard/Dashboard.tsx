@@ -97,6 +97,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [transferRefreshCount, setTransferRefreshCount] = React.useState(0);
   const { hideDigits, toggleHideDigits, formatAmount } = useFinancialPrivacy();
 
+  React.useEffect(() => {
+    const handleStorageUpdate = () => setTransferRefreshCount(c => c + 1);
+    window.addEventListener('mobileshop_data_updated', handleStorageUpdate);
+    return () => window.removeEventListener('mobileshop_data_updated', handleStorageUpdate);
+  }, []);
+
+  const offlineSaleConflicts = React.useMemo(() => {
+    return StorageService.getOfflineSaleConflicts();
+  }, [sales, transferRefreshCount]);
+
   // Live Running Business Capital (Stock at cost + Liquid Cash + Receivables)
   const creditSales = React.useMemo(() => StorageService.getCreditSales(), []);
   const currentLiveDrawer = React.useMemo(() => StorageService.getCashDrawer(), [cashDrawer, transferRefreshCount]);
@@ -169,13 +179,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {/* Welcome & Quick Action Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-xl font-black text-slate-900 tracking-tight">
               {isBurmese ? 'ဆိုင်လုပ်ငန်း ပင်မဒက်ရှ်ဘုတ်' : 'Store Dashboard Overview'}
             </h2>
             <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800">
               {isBurmese ? 'တိုက်ရိုက်လည်ပတ်မှု' : 'Live Terminal'}
             </span>
+            {offlineSaleConflicts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onNavigateTab('sales_history')}
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-black rounded-full bg-rose-600 text-white hover:bg-rose-700 shadow-2xs cursor-pointer transition-colors"
+                title="Review Offline Sale Conflicts"
+              >
+                <AlertTriangle className="w-3 h-3" />
+                <span>{isBurmese ? `Offline ဘောင်ချာ ကွဲလွဲမှု (${offlineSaleConflicts.length})` : `Sale Conflicts (${offlineSaleConflicts.length})`}</span>
+              </button>
+            )}
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
             {isBurmese ? 'လော့ဂ်အင်ဝင်ထားသူ' : 'Logged in as'}: <strong className="text-slate-800">{settings.currentStaffName}</strong> ({settings.currentStaffRole}) • {isBurmese ? 'ယနေ့ရက်စွဲ' : 'Today'}: {new Date().toLocaleDateString(isBurmese ? 'my-MM' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
@@ -288,6 +309,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Offline Sale Conflicts Alert Banner */}
+      {offlineSaleConflicts.length > 0 && (
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 rounded-xl bg-rose-600 text-white shrink-0 shadow-xs">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-black text-rose-950">
+                  {isBurmese
+                    ? `Offline အရောင်းဘောင်ချာ ကွဲလွဲမှု (${offlineSaleConflicts.length}) စောင် စစ်ဆေးရန်ရှိပါသည်`
+                    : `${offlineSaleConflicts.length} Offline Sale Conflict(s) Require Manager Review`}
+                </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-200 text-rose-900">
+                  Action Required
+                </span>
+              </div>
+              <p className="text-xs text-rose-800 mt-0.5">
+                {isBurmese
+                  ? 'အင်တာနက်ပြတ်နေချိန် ရောင်းချခဲ့သော ဘောင်ချာအချို့သည် Cloud ပစ္စည်းလက်ကျန်/IMEI နှင့် ကွဲလွဲနေသဖြင့် အတည်ပြုရန် သို့မဟုတ် ပယ်ဖျက်ရန် စောင့်ဆိုင်းနေပါသည်။'
+                  : 'One or more offline sales failed cloud stock/IMEI validation during replay. Open Sale Conflicts to Accept, Retry, or Void.'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigateTab('sales_history')}
+            className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
+          >
+            {isBurmese ? 'စစ်ဆေးဖြေရှင်းမည် →' : 'Review Sale Conflicts →'}
+          </button>
+        </div>
+      )}
 
       {/* Pinned Announcements High Priority Alert Banner */}
       {(() => {

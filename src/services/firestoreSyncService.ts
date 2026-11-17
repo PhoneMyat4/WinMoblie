@@ -738,6 +738,30 @@ export class FirestoreSyncService {
       }, (err) => console.warn('[FirestoreSync] Sales listener:', err.message));
       this.unsubscribers.push(unsubSales);
 
+      // 3b. Offline Sale Conflicts Listener - keeps Manager Review Queue synchronized across terminals
+      const unsubOfflineConflicts = onSnapshot(collection(db, 'offlineSaleConflicts'), (snap) => {
+        this.isProcessingRemoteSnapshot = true;
+        try {
+          const remoteConflicts: Sale[] = [];
+          snap.forEach(d => {
+            const data = d.data() as Sale;
+            if (data && (data as any).status !== 'voided') {
+              remoteConflicts.push({
+                ...data,
+                id: data.id || d.id,
+                syncState: 'conflict',
+              });
+            }
+          });
+          StorageService.saveOfflineSaleConflicts(remoteConflicts);
+        } catch (err: any) {
+          console.warn('[FirestoreSync] OfflineSaleConflicts listener error:', err?.message || err);
+        } finally {
+          this.isProcessingRemoteSnapshot = false;
+        }
+      }, (err) => console.warn('[FirestoreSync] OfflineSaleConflicts listener:', err.message));
+      this.unsubscribers.push(unsubOfflineConflicts);
+
       // 4. Credit Sales Listener - strictly replaces local state and handles 'removed' changes
       const unsubCreditSales = onSnapshot(collection(db, 'creditSales'), (snap) => {
         this.isProcessingRemoteSnapshot = true;
@@ -1694,6 +1718,21 @@ export class FirestoreSyncService {
     if (FirebaseAuthService.isAuthenticated() && typeof navigator !== 'undefined' && navigator.onLine) {
       try {
         await runTransaction(db, async (transaction) => {
+          // Idempotency guard inside transaction: check if this sale ID was already committed by a concurrent retry
+          const saleDocRef = doc(db, 'sales', finalizedSale.id);
+          const existingSaleSnap = await transaction.get(saleDocRef);
+          if (existingSaleSnap.exists()) {
+            const committedData = existingSaleSnap.data() as Sale;
+            finalizedSale = {
+              ...committedData,
+              id: committedData.id || finalizedSale.id,
+              syncState: 'synced',
+              syncError: undefined,
+            };
+            transaction.delete(doc(db, 'offlineSaleConflicts', finalizedSale.id));
+            return;
+          }
+
           // Distinct products involved in this transaction
           const distinctProductIds = Array.from(new Set(cartItems.map(i => i.product.id)));
           const productDocs: { id: string; ref: any; data: Product }[] = [];
@@ -1994,12 +2033,13 @@ export class FirestoreSyncService {
 
           // --- WRITES: Sale Document ---
           finalizedSale.syncState = 'synced';
-          const saleDocRef = doc(db, 'sales', finalizedSale.id);
+          finalizedSale.syncError = undefined;
           transaction.set(saleDocRef, sanitizeForFirestore({
             ...finalizedSale,
             locationId: saleLocId,
             syncedAt: new Date().toISOString(),
           }));
+          transaction.delete(doc(db, 'offlineSaleConflicts', finalizedSale.id));
 
           // --- WRITES: Credit Record ---
           if (finalizedCreditRecord) {
@@ -2960,104 +3000,311 @@ export class FirestoreSyncService {
    * If a pending sale fails any cloud check, it is marked syncState = 'conflict' and placed in the
    * Manager Review Queue (offlineSaleConflicts/{sale.id}) rather than overwriting cloud inventory.
    */
+  private isReplayingPendingSales = false;
+
   public async replayPendingSales(): Promise<void> {
-    if (!FirebaseAuthService.isAuthenticated() || typeof navigator === 'undefined' || !navigator.onLine) {
+    if (
+      this.isReplayingPendingSales ||
+      !FirebaseAuthService.isAuthenticated() ||
+      typeof navigator === 'undefined' ||
+      !navigator.onLine
+    ) {
       return;
     }
     const pendingSales = StorageService.getSales().filter(s => s && s.id && s.syncState === 'pending');
     if (pendingSales.length === 0) return;
 
-    for (const pendingSale of pendingSales) {
-      try {
-        // Check if already committed in Firestore
-        const existingSnap = await getDoc(doc(db, 'sales', pendingSale.id));
-        if (existingSnap.exists()) {
-          const allLocal = StorageService.getSales();
-          const idx = allLocal.findIndex(x => x.id === pendingSale.id);
-          if (idx >= 0) {
-            allLocal[idx] = { ...allLocal[idx], syncState: 'synced', syncError: undefined };
-            StorageService.saveSales(allLocal, false);
+    this.isReplayingPendingSales = true;
+    try {
+      for (const pendingSale of pendingSales) {
+        try {
+          // Reconstruct cartItems for the atomic checkout transaction (idempotency is enforced inside runTransaction)
+          const localProds = StorageService.getProducts();
+          const cartItems = (pendingSale.items || []).map(item => {
+            const foundProd = localProds.find(p => p.id === item.productId) || ({
+              id: item.productId,
+              name: item.name,
+              brand: item.brand || '',
+              model: item.name,
+              category: item.category || 'accessories',
+              condition: 'brand_new',
+              sku: '',
+              barcode: '',
+              costPrice: item.costPrice || 0,
+              sellingPrice: item.unitPrice || 0,
+              stock: item.quantity,
+              minStockAlert: 1,
+            } as Product);
+            return {
+              product: foundProd,
+              quantity: item.quantity,
+              selectedImei: item.imei,
+              selectedImei2: item.imei2,
+            };
+          });
+
+          const linkedCredit = pendingSale.creditSaleId
+            ? StorageService.getCreditSales().find(cs => cs.id === pendingSale.creditSaleId || cs.saleId === pendingSale.id)
+            : undefined;
+          const linkedCustomer = pendingSale.customerId
+            ? StorageService.getCustomers().find(c => c.id === pendingSale.customerId)
+            : undefined;
+
+          const res = await this.executeAtomicSaleTransaction({
+            cartItems,
+            sale: pendingSale,
+            creditRecord: linkedCredit,
+            updatedCustomer: linkedCustomer,
+            preOrderId: pendingSale.preOrderId,
+          });
+
+          if (res.success && res.cloudCommitted && res.finalizedSale) {
+            const allLocal = StorageService.getSales();
+            const idx = allLocal.findIndex(x => x.id === pendingSale.id);
+            if (idx >= 0) {
+              allLocal[idx] = { ...res.finalizedSale, syncState: 'synced', syncError: undefined };
+              StorageService.saveSales(allLocal, false);
+            }
+            const remainingConflicts = StorageService.getOfflineSaleConflicts().filter(c => c.id !== pendingSale.id);
+            StorageService.saveOfflineSaleConflicts(remainingConflicts);
+          } else {
+            const conflictReason = res.error || 'Offline sale failed cloud stock/IMEI/price validation during replay.';
+            await this.queueOfflineSaleForManagerReview(pendingSale, conflictReason);
           }
-          continue;
-        }
-
-        // Reconstruct cartItems for the atomic checkout transaction
-        const localProds = StorageService.getProducts();
-        const cartItems = (pendingSale.items || []).map(item => {
-          const foundProd = localProds.find(p => p.id === item.productId) || ({
-            id: item.productId,
-            name: item.name,
-            brand: item.brand || '',
-            model: item.name,
-            category: item.category || 'accessories',
-            condition: 'brand_new',
-            sku: '',
-            barcode: '',
-            costPrice: item.costPrice || 0,
-            sellingPrice: item.unitPrice || 0,
-            stock: item.quantity,
-            minStockAlert: 1,
-          } as Product);
-          return {
-            product: foundProd,
-            quantity: item.quantity,
-            selectedImei: item.imei,
-            selectedImei2: item.imei2,
-          };
-        });
-
-        const linkedCredit = pendingSale.creditSaleId
-          ? StorageService.getCreditSales().find(cs => cs.id === pendingSale.creditSaleId || cs.saleId === pendingSale.id)
-          : undefined;
-        const linkedCustomer = pendingSale.customerId
-          ? StorageService.getCustomers().find(c => c.id === pendingSale.customerId)
-          : undefined;
-
-        const res = await this.executeAtomicSaleTransaction({
-          cartItems,
-          sale: pendingSale,
-          creditRecord: linkedCredit,
-          updatedCustomer: linkedCustomer,
-          preOrderId: pendingSale.preOrderId,
-        });
-
-        if (res.success && res.cloudCommitted && res.finalizedSale) {
-          const allLocal = StorageService.getSales();
-          const idx = allLocal.findIndex(x => x.id === pendingSale.id);
-          if (idx >= 0) {
-            allLocal[idx] = { ...res.finalizedSale, syncState: 'synced', syncError: undefined };
-            StorageService.saveSales(allLocal, false);
-          }
-        } else {
-          const conflictReason = res.error || 'Offline sale failed cloud stock/IMEI/price validation during replay.';
+        } catch (err: any) {
+          const conflictReason = err?.message || 'Offline sale replay failed validation.';
           await this.queueOfflineSaleForManagerReview(pendingSale, conflictReason);
         }
-      } catch (err: any) {
-        const conflictReason = err?.message || 'Offline sale replay failed validation.';
-        await this.queueOfflineSaleForManagerReview(pendingSale, conflictReason);
       }
+    } finally {
+      this.isReplayingPendingSales = false;
     }
   }
 
   private async queueOfflineSaleForManagerReview(sale: Sale, reason: string): Promise<void> {
+    const conflictedSale: Sale = {
+      ...sale,
+      syncState: 'conflict',
+      syncError: reason,
+    };
     const allLocal = StorageService.getSales();
     const idx = allLocal.findIndex(x => x.id === sale.id);
     if (idx >= 0) {
-      allLocal[idx] = {
-        ...allLocal[idx],
-        syncState: 'conflict',
-        syncError: reason,
-      };
+      allLocal[idx] = conflictedSale;
       StorageService.saveSales(allLocal, false);
     }
+    const existingConflicts = StorageService.getOfflineSaleConflicts().filter(c => c.id !== sale.id);
+    StorageService.saveOfflineSaleConflicts([conflictedSale, ...existingConflicts]);
     try {
       await setDoc(doc(db, 'offlineSaleConflicts', sale.id), sanitizeForFirestore({
-        ...sale,
-        syncState: 'conflict',
-        syncError: reason,
+        ...conflictedSale,
         flaggedAt: new Date().toISOString(),
       }), { merge: true });
     } catch {}
+  }
+
+  /**
+   * Manager action 1 (Fix / Retry): Re-runs the full atomic sale transaction against current cloud stock/IMEI.
+   */
+  public async retryOfflineSaleConflict(sale: Sale): Promise<{ success: boolean; error?: string }> {
+    const localProds = StorageService.getProducts();
+    const cartItems = (sale.items || []).map(item => {
+      const foundProd = localProds.find(p => p.id === item.productId) || ({
+        id: item.productId,
+        name: item.name,
+        brand: item.brand || '',
+        model: item.name,
+        category: item.category || 'accessories',
+        condition: 'brand_new',
+        sku: '',
+        barcode: '',
+        costPrice: item.costPrice || 0,
+        sellingPrice: item.unitPrice || 0,
+        stock: Math.max(item.quantity, 1),
+        minStockAlert: 1,
+      } as Product);
+      return {
+        product: { ...foundProd, stock: Math.max(foundProd.stock || 0, item.quantity) },
+        quantity: item.quantity,
+        selectedImei: item.imei,
+        selectedImei2: item.imei2,
+      };
+    });
+
+    const linkedCredit = sale.creditSaleId
+      ? StorageService.getCreditSales().find(cs => cs.id === sale.creditSaleId || cs.saleId === sale.id)
+      : undefined;
+    const linkedCustomer = sale.customerId
+      ? StorageService.getCustomers().find(c => c.id === sale.customerId)
+      : undefined;
+
+    const res = await this.executeAtomicSaleTransaction({
+      cartItems,
+      sale,
+      creditRecord: linkedCredit,
+      updatedCustomer: linkedCustomer,
+      preOrderId: sale.preOrderId,
+    });
+
+    if (res.success && res.cloudCommitted && res.finalizedSale) {
+      const allLocal = StorageService.getSales();
+      const idx = allLocal.findIndex(x => x.id === sale.id);
+      if (idx >= 0) {
+        allLocal[idx] = { ...res.finalizedSale, syncState: 'synced', syncError: undefined };
+      } else {
+        allLocal.unshift({ ...res.finalizedSale, syncState: 'synced', syncError: undefined });
+      }
+      StorageService.saveSales(allLocal, false);
+      StorageService.saveOfflineSaleConflicts(
+        StorageService.getOfflineSaleConflicts().filter(c => c.id !== sale.id)
+      );
+      try {
+        await deleteDoc(doc(db, 'offlineSaleConflicts', sale.id));
+      } catch {}
+      return { success: true };
+    }
+
+    return {
+      success: false,
+      error: res.error || 'Cloud validation still failed. Check product stock or use Force Accept.',
+    };
+  }
+
+  /**
+   * Manager action 2 (Accept / Force Commit): Approves a conflicted offline sale when the item already physically left the store,
+   * clamps cloud stock at >= 0, commits the sale to sales/{id}, and removes it from offlineSaleConflicts/{id}.
+   */
+  public async forceAcceptOfflineSaleConflict(sale: Sale, resolvedBy: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const nowIso = new Date().toISOString();
+      const saleLocId = sale.locationId || StorageService.getActiveLocationId();
+      const acceptedSale: Sale = {
+        ...sale,
+        syncState: 'synced',
+        syncError: undefined,
+      };
+
+      await runTransaction(db, async (tx) => {
+        const saleDocRef = doc(db, 'sales', sale.id);
+        const existingSaleSnap = await tx.get(saleDocRef);
+
+        const distinctProductIds = Array.from(new Set((sale.items || []).map(i => i.productId)));
+        const prodSnaps = new Map<string, any>();
+        for (const pid of distinctProductIds) {
+          const pRef = doc(db, 'products', pid);
+          prodSnaps.set(pid, await tx.get(pRef));
+        }
+
+        if (!existingSaleSnap.exists()) {
+          for (const pid of distinctProductIds) {
+            const pSnap = prodSnaps.get(pid);
+            if (pSnap && pSnap.exists()) {
+              const liveProd = pSnap.data() as Product;
+              const qtySold = (sale.items || [])
+                .filter(i => i.productId === pid)
+                .reduce((s, i) => s + (Number(i.quantity) || 1), 0);
+              const soldImeis = new Set(
+                (sale.items || [])
+                  .filter(i => i.productId === pid)
+                  .flatMap(i => [i.imei, i.imei2].filter(Boolean) as string[])
+              );
+              const newStock = Math.max(0, Number(liveProd.stock || 0) - qtySold);
+              const nextImeis = Array.isArray(liveProd.imeiList)
+                ? liveProd.imeiList.filter(im => !soldImeis.has(im))
+                : undefined;
+              tx.update(doc(db, 'products', pid), sanitizeForFirestore({
+                stock: newStock,
+                ...(nextImeis !== undefined ? { imeiList: nextImeis } : {}),
+                updatedAt: nowIso,
+              }));
+            }
+          }
+
+          tx.set(saleDocRef, sanitizeForFirestore({
+            ...acceptedSale,
+            locationId: saleLocId,
+            conflictResolvedBy: resolvedBy,
+            conflictResolvedAt: nowIso,
+            syncedAt: nowIso,
+          }));
+        }
+
+        tx.delete(doc(db, 'offlineSaleConflicts', sale.id));
+
+        const auditId = `audit-conflict-accept-${sale.id}-${Date.now()}`;
+        tx.set(doc(db, 'auditLogs', auditId), sanitizeForFirestore({
+          id: auditId,
+          timestamp: nowIso,
+          staffId: resolvedBy,
+          staffName: resolvedBy,
+          staffRole: 'Manager',
+          actionType: 'OFFLINE_SALE_CONFLICT_ACCEPTED',
+          category: 'sales',
+          severity: 'warning',
+          summary: `Accepted offline conflicted sale #${sale.invoiceNumber} (${Math.round(sale.grandTotal).toLocaleString()} Ks)`,
+          details: {
+            targetId: sale.id,
+            invoiceNumber: sale.invoiceNumber,
+            previousConflictReason: sale.syncError || '',
+          },
+        }));
+      });
+
+      const allLocal = StorageService.getSales();
+      const idx = allLocal.findIndex(x => x.id === sale.id);
+      if (idx >= 0) {
+        allLocal[idx] = acceptedSale;
+      } else {
+        allLocal.unshift(acceptedSale);
+      }
+      StorageService.saveSales(allLocal, false);
+      StorageService.saveOfflineSaleConflicts(
+        StorageService.getOfflineSaleConflicts().filter(c => c.id !== sale.id)
+      );
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to accept offline sale conflict.' };
+    }
+  }
+
+  /**
+   * Manager action 3 (Void): Cancels and removes a conflicted offline sale from the queue.
+   */
+  public async voidOfflineSaleConflict(sale: Sale, reason: string, resolvedBy: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const nowIso = new Date().toISOString();
+      try {
+        await deleteDoc(doc(db, 'offlineSaleConflicts', sale.id));
+        const auditId = `audit-conflict-void-${sale.id}-${Date.now()}`;
+        await setDoc(doc(db, 'auditLogs', auditId), sanitizeForFirestore({
+          id: auditId,
+          timestamp: nowIso,
+          staffId: resolvedBy,
+          staffName: resolvedBy,
+          staffRole: 'Manager',
+          actionType: 'OFFLINE_SALE_CONFLICT_VOIDED',
+          category: 'sales',
+          severity: 'warning',
+          summary: `Voided offline conflicted sale #${sale.invoiceNumber}: ${reason}`,
+          details: {
+            targetId: sale.id,
+            invoiceNumber: sale.invoiceNumber,
+            previousConflictReason: sale.syncError || '',
+            voidReason: reason,
+          },
+        }));
+      } catch {}
+
+      const allLocal = StorageService.getSales().filter(x => x.id !== sale.id);
+      StorageService.saveSales(allLocal, false);
+      StorageService.saveOfflineSaleConflicts(
+        StorageService.getOfflineSaleConflicts().filter(c => c.id !== sale.id)
+      );
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to void offline sale conflict.' };
+    }
   }
 
   public async replayPendingOfflineRefunds(): Promise<void> {
